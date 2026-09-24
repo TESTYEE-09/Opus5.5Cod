@@ -1,8 +1,10 @@
+import * as THREE from 'three';
 import { minimapImage, SIZE } from './world.js';
-import { STREAKS } from './game.js';
+import { STREAKS, CALLS } from './game.js';
 
 const $ = (id) => document.getElementById(id);
 const DEG = Math.PI / 180;
+const _pv = new THREE.Vector3();
 const esc = (s) => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
 export class Hud {
@@ -27,6 +29,62 @@ export class Hud {
     this.feedItems = [];
     this.popLines = [];
     this.showScores = false;
+    this.vc = $('vcanvas');
+    this.vctx = this.vc.getContext('2d');
+    this.vKind = null; this.vHitT = 0; this.statT = 0; this.useText = '';
+  }
+
+  vehicleHit() { this.vHitT = 0.25; }
+
+  // vehicle HUD panel, and the overlay canvas used by vehicles and the Stinger seeker
+  drawVehicle(game, dt) {
+    const pl = game.player, v = pl.alive ? pl.vehicle : null, kind = v ? v.kind : null;
+    if (kind !== this.vKind) {
+      this.vKind = kind;
+      $('vhud').classList.toggle('hidden', !v);
+      this.root.classList.toggle('invehicle', !!v);
+      if (v) { $('vname').textContent = v.name.toUpperCase(); $('vhelp').textContent = v.help; }
+    }
+    const c = this.vc, W = innerWidth, H = innerHeight;
+    if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
+    const ctx = this.vctx;
+    ctx.clearRect(0, 0, W, H);
+    const cam = game.camera;
+    const P = (p) => {
+      _pv.copy(p).project(cam);
+      if (_pv.z > 1 || _pv.z < -1) return null;
+      return [(_pv.x + 1) / 2 * W, (1 - _pv.y) / 2 * H];
+    };
+    if (v) {
+      v.drawHud(ctx, W, H, P, game);
+      const hp = Math.max(0, v.health / v.maxHealth);
+      $('vhp').style.width = `${hp * 100}%`;
+      $('vhp').className = hp < 0.3 ? 'low' : '';
+      if ((this.statT -= dt) <= 0) { this.statT = 0.1; $('vstats').innerHTML = v.stats(); }
+      if (this.vHitT > 0) {
+        this.vHitT -= dt;
+        ctx.fillStyle = `rgba(255,60,30,${this.vHitT})`;
+        ctx.fillRect(0, 0, W, H);
+      }
+      const warn = v.missileWarn > 0 && v.kind !== 'jet';
+      $('vwarn').classList.toggle('show', warn);
+      if (warn && (this.warnT = (this.warnT || 0) - dt) <= 0) { this.warnT = 0.18; this.audio.tone(1500, 0.08, 0.1); }
+      return;
+    }
+    $('vwarn').classList.remove('show');
+    const ars = game.arsenal;
+    if (pl.alive && ars.lockTarget) {
+      const s = P(ars.lockTarget.pos);
+      if (s) {
+        const k = ars.locked ? 1 : Math.min(1, ars.lockT / ars.w.def.lock);
+        const r = 46 - 22 * k;
+        ctx.strokeStyle = ars.locked ? 'rgba(255,70,50,1)' : 'rgba(255,220,120,0.95)';
+        ctx.lineWidth = ars.locked ? 3 : 2;
+        ctx.strokeRect(s[0] - r, s[1] - r, r * 2, r * 2);
+        ctx.font = '700 15px Rajdhani, sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = ctx.strokeStyle;
+        ctx.fillText(ars.locked ? 'LOCKED' : 'LOCKING', s[0], s[1] + r + 18);
+      }
+    }
   }
 
   reset() {
@@ -140,7 +198,7 @@ export class Hud {
 
     if (pl.alive) {
       const w = ars.w, d = w.def;
-      $('wname').textContent = d.name + (d.auto || d.action ? '' : d.burst ? ' · BURST' : ' · SEMI');
+      $('wname').textContent = d.name + (d.auto || d.action || d.launcher ? '' : d.burst ? ' · BURST' : ' · SEMI');
       $('mag').textContent = w.mag;
       $('mag').className = w.mag <= Math.ceil(d.mag * 0.25) ? 'low' : '';
       $('reserve').textContent = w.reserve;
@@ -164,10 +222,11 @@ export class Hud {
 
     // crosshair
     const ease = ars.adsEase ? ars.adsEase() : 0;
-    const scoped = pl.alive && ars.w && ars.w.def.scope && ease > 0.92;
-    $('scope').classList.toggle('show', !!scoped);
-    $('breath').textContent = scoped ? (ars.holding ? 'HOLDING BREATH' : 'SHIFT: HOLD BREATH') : '';
-    const showCross = pl.alive && ease < 0.5 && !pl.sprinting && !game.targeting;
+    const ov = pl.alive && !pl.vehicle && ars.w ? (ars.w.def.scope ? 'sniper' : ars.w.def.overlay) : null;
+    const scoped = ov && ease > 0.92;
+    $('scope').className = scoped ? `show ${ov}` : '';
+    $('breath').textContent = scoped && ov === 'sniper' ? (ars.holding ? 'HOLDING BREATH' : 'SHIFT: HOLD BREATH') : '';
+    const showCross = pl.alive && !pl.vehicle && ease < 0.5 && !pl.sprinting && !game.targeting;
     this.cross.style.display = showCross ? '' : 'none';
     if (showCross) {
       const spread = ars.spread(pl) * DEG;
@@ -217,13 +276,21 @@ export class Hud {
     if (this.bannerT > 0 && (this.bannerT -= dt) <= 0) $('banner').className = '';
     if (this.toastT > 0 && (this.toastT -= dt) <= 0) $('toast').classList.remove('show');
 
-    // killstreaks
+    this.drawVehicle(game, dt);
+    const use = game.useNear ? `Press F to use ${game.useNear.name}` : '';
+    if (use !== this.useText) { this.useText = use; $('use').textContent = use; $('use').classList.toggle('show', !!use); }
+
+    // killstreaks and vehicle call-ins
     const next = STREAKS.find(s => s.kills > pl.streak);
     $('streaks').innerHTML = STREAKS.map(s => {
       const have = pl.rewards.filter(r => r === s.id).length;
       const cls = have ? 'ready' : pl.streak >= s.kills ? 'done' : '';
       return `<div class="sk ${cls}"><kbd>${s.key}</kbd><span>${s.name}</span><em>${have ? (have > 1 ? `x${have}` : 'READY') : s.kills}</em></div>`;
-    }).join('') + `<div class="streak-count">Streak ${pl.streak}${next ? ` &middot; ${next.kills - pl.streak} to ${next.name}` : ''}</div>`;
+    }).join('') + `<div class="streak-count">Streak ${pl.streak}${next ? ` &middot; ${next.kills - pl.streak} to ${next.name}` : ''}</div>` +
+      CALLS.map(c => {
+        const cd = pl.vcool?.[c.id] || 0;
+        return `<div class="sk call ${cd > 0 ? '' : 'ready'}"><kbd>${c.key}</kbd><span>${c.name}</span><em>${cd > 0 ? `${Math.ceil(cd)}s` : 'READY'}</em></div>`;
+      }).join('');
 
     if (!pl.alive) $('respawnIn').textContent = `Respawning in ${Math.max(0, game.deadT).toFixed(1)}`;
 
@@ -269,6 +336,7 @@ export class Hud {
       }
     }
     for (const v of game.vehicles) {
+      if (!v.alive || (v.kind === 'drone' && v.team !== pl.team && !uav)) continue;
       g.fillStyle = v.team === pl.team ? '#6fb0ff' : '#ff4a3a';
       g.fillRect(v.pos.x - 1.8, v.pos.z - 1.8, 3.6, 3.6);
     }

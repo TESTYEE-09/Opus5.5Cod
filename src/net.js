@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { Peer } from 'peerjs';
 import { buildSoldier, setRelation, animateSoldier, animateDeath } from './bots.js';
-import { buildChopper, chopperHit } from './streaks.js';
+import { VehicleProxy, PROJ } from './vehicles.js';
 
 const PREFIX = 'frontline-opus55cod-';
 const RATE = 1 / 20;
@@ -27,6 +27,7 @@ export class NetSoldier {
     this.damagers = new Map(); this.rewards = [];
     this.kills = 0; this.deaths = 0; this.assists = 0; this.score = 0; this.streak = 0; this.bestStreak = 0;
     this.firedT = -99; this.walkPhase = 0; this.deathT = 0; this.fallDir = 1; this.respawnT = 0;
+    this.leanOff = 0; this.leanT = 0; this.inVehicle = false;
     this.model = buildSoldier(team, name);
     this.model.root.visible = false;
     game.scene.add(this.model.root);
@@ -46,11 +47,25 @@ export class NetSoldier {
     this.tgt.set(x, y, z); this.tYaw = yaw; this.pitch = pitch; this.tCrouch = crouch;
   }
 
+  get proneAmt() { return Math.max(0, Math.min(1, this.crouchAmt - 1)); }
+
   aimPoint(out, head) {
-    return out.set(this.pos.x, this.pos.y + (head ? 1.62 - 0.5 * this.crouchAmt : 1.2 - 0.35 * this.crouchAmt), this.pos.z);
+    if (this.proneAmt > 0.5) {
+      const fx = -Math.sin(this.yaw), fz = -Math.cos(this.yaw);
+      return head ? out.set(this.pos.x + fx * 0.75, this.pos.y + 0.32, this.pos.z + fz * 0.75) : out.set(this.pos.x, this.pos.y + 0.25, this.pos.z);
+    }
+    const c = Math.min(1, this.crouchAmt), lo = this.leanOff * (head ? 1 : 0.55);
+    return out.set(this.pos.x + Math.cos(this.yaw) * lo, this.pos.y + (head ? 1.62 - 0.5 * c : 1.2 - 0.35 * c), this.pos.z - Math.sin(this.yaw) * lo);
   }
 
-  eye(out) { return out.set(this.pos.x, this.pos.y + 1.6 - 0.5 * this.crouchAmt, this.pos.z); }
+  // riding inside a tank or AA gun: hidden and not hittable
+  setInVehicle(v) {
+    if (v === this.inVehicle) return;
+    this.inVehicle = v;
+    if (this.alive) this.model.root.visible = !v;
+  }
+
+  eye(out) { return out.set(this.pos.x, this.pos.y + 1.6 - 0.5 * Math.min(1, this.crouchAmt) - 0.8 * this.proneAmt, this.pos.z); }
 
   die() {
     this.alive = false; this.deathT = 0;
@@ -70,8 +85,9 @@ export class NetSoldier {
     this.vel.set((this.pos.x - px) / Math.max(dt, 1e-3), 0, (this.pos.z - pz) / Math.max(dt, 1e-3));
     this.yaw = wrap(this.yaw + wrap(this.tYaw - this.yaw) * Math.min(1, dt * 16));
     this.crouchAmt += (this.tCrouch - this.crouchAmt) * Math.min(1, dt * 12);
+    this.leanOff += (this.leanT - this.leanOff) * Math.min(1, dt * 14);
     const sp = Math.hypot(this.vel.x, this.vel.z);
-    if (sp > 1.5 && sp < 12) {
+    if (sp > 1.5 && sp < 12 && !this.inVehicle) {
       this.stepAcc = (this.stepAcc || 0) + sp * dt;
       if (this.stepAcc > 2.2) { this.stepAcc = 0; this.game.audio.step(this.pos, this.crouchAmt > 0.5 ? 0.35 : sp > 5 ? 1.3 : 1); }
     }
@@ -81,30 +97,6 @@ export class NetSoldier {
   }
 
   remove() { this.game.scene.remove(this.model.root); }
-}
-
-// A killstreak helicopter as a client sees it.
-export class NetVehicle {
-  constructor(game, id, team) {
-    Object.assign(this, { game, id, team, isVehicle: true, alive: true, name: 'Attack Chopper' });
-    this.pos = new THREE.Vector3(); this.tgt = new THREE.Vector3(); this.heading = 0; this.tHeading = 0; this.fresh = true;
-    this.m = buildChopper(team);
-    game.scene.add(this.m.g);
-    this.sound = game.audio.rotor();
-  }
-  hit(o, d, maxT) { return chopperHit(this.pos, o, d, maxT); }
-  aimPoint(out) { return out.copy(this.pos); }
-  update(dt) {
-    if (this.fresh) { this.pos.copy(this.tgt); this.fresh = false; }
-    this.pos.lerp(this.tgt, 1 - Math.exp(-dt * 10));
-    this.heading = wrap(this.heading + wrap(this.tHeading - this.heading) * Math.min(1, dt * 8));
-    this.m.g.position.copy(this.pos);
-    this.m.g.rotation.set(-0.08, this.heading, 0, 'YXZ');
-    this.m.rotor.rotation.y += dt * 28;
-    this.m.tail.rotation.x += dt * 35;
-    this.sound.set(this.pos);
-  }
-  remove() { this.alive = false; this.game.scene.remove(this.m.g); this.sound.stop(); }
 }
 
 export class Net {
@@ -258,9 +250,49 @@ export class Net {
       case 'st':
         if (s.alive) {
           const p = vec(d.p);
-          if (p) s.setState(p.x, p.y, p.z, num(d.y), num(d.pi), Math.max(0, Math.min(1, num(d.c))));
+          if (p) s.setState(p.x, p.y, p.z, num(d.y), num(d.pi), Math.max(0, Math.min(2, num(d.c))));
+          s.leanT = Math.max(-0.5, Math.min(0.5, num(d.l)));
+          s.setInVehicle(!!d.iv);
         }
         break;
+      case 'vs': {
+        // a vehicle this client drives: keep a copy here that takes the hits
+        const r = d.r;
+        if (!Array.isArray(r) || r.length < 15) break;
+        const vid = num(r[0], -1), kind = String(r[1]);
+        if (!['tank', 'jet', 'drone'].includes(kind) || Math.floor((vid - 10000) / 100) !== id || g.deadVehicles.has(vid)) break;
+        let v = g.vehicles.find(x => x.id === vid);
+        if (!v) { v = new VehicleProxy(g, vid, kind, s.team); v.owner = s; g.vehicles.push(v); }
+        if (!v.isProxy || v.owner !== s) break;
+        v.driver = num(r[13], -1) === s.id ? s : null;
+        v.apply(r, false);
+        break;
+      }
+      case 'vx': {
+        const v = g.vehicles.find(x => x.id === d.id && x.isProxy && x.owner === s);
+        if (v) { g.deadVehicles.add(v.id); v.remove(); }
+        break;
+      }
+      case 'rocket': {
+        const kind = String(d.k), p = vec(d.p), v = vec(d.v);
+        if (!PROJ[kind] || !p || !v) break;
+        v.clampLength(0, 320);
+        const target = g.vehicles.find(x => x.id === d.g && x.alive) || null;
+        const src = g.vehicles.find(x => x.isProxy && x.owner === s && x.alive) || null;
+        g.projectiles.spawn(kind, s, p, v, target, src, false);
+        g.warnTarget(target);
+        g.emit({ k: 'proj', pk: kind, o: s.id, tm: s.team, p: [r2(p.x), r2(p.y), r2(p.z)], v: [r2(v.x), r2(v.y), r2(v.z)], g: target ? target.id : -1 });
+        break;
+      }
+      case 'blast': {
+        const p = vec(d.p);
+        if (!p) break;
+        const w = d.w === 'Jet' ? 'Jet' : 'FPV Drone';
+        const e = g.vehicles.find(x => x.id === d.e && x.alive);
+        if (e && w === 'FPV Drone') g.damage(e, 850, s, w, false, p, { streak: true });
+        g.explode(p, s, w === 'Jet' ? 8 : 5.5, w === 'Jet' ? 180 : 220, w, { streak: true });
+        break;
+      }
       case 'hit': {
         if (!s.alive) break;
         const v = g.byId.get(d.id) || g.vehicles.find(x => x.id === d.id);
@@ -295,9 +327,9 @@ export class Net {
     const g = this.game;
     return {
       t: 'snap', tl: r2(g.timeLeft), sc: g.teamScore, uav: g.uav.map(r2),
-      s: g.soldiers.map(s => [s.id, r2(s.pos.x), r2(s.pos.y), r2(s.pos.z), r2(s.yaw), r2(s.pitch || 0), r2(s.crouchAmt),
-        s.alive ? 1 : 0, Math.max(0, Math.round(s.health)), s.kills, s.deaths, s.assists, s.score, s.streak]),
-      v: g.vehicles.filter(v => v.alive).map(v => [v.id, v.team, r2(v.pos.x), r2(v.pos.y), r2(v.pos.z), r2(v.heading)]),
+      s: g.soldiers.map(s => [s.id, r2(s.pos.x), r2(s.pos.y), r2(s.pos.z), r2(s.yaw), r2(s.pitch || 0), r2(s.crouchAmt + (s.isPlayer ? s.proneAmt : 0)),
+        s.alive ? 1 : 0, Math.max(0, Math.round(s.health)), s.kills, s.deaths, s.assists, s.score, s.streak, r2(s.leanOff || 0), s.inVehicle ? 1 : 0]),
+      v: g.vehicles.filter(v => v.alive || v.persistent).map(v => (v.isProxy ? proxyRow(v) : v.netRow())),
       n: g.grenades.map(n => [r2(n.pos.x), r2(n.pos.y), r2(n.pos.z)]),
       ev: g.events.splice(0),
     };
@@ -324,9 +356,17 @@ export class Net {
     if (this.sendT < RATE) return;
     this.sendT = 0;
     if (this.isHost) { if (this.clients.size) this.broadcast(this.snapshot()); else this.game.events.length = 0; return; }
-    const pl = this.game.player;
-    this.send({ t: 'st', p: [r2(pl.pos.x), r2(pl.pos.y), r2(pl.pos.z)], y: r2(pl.yaw), pi: r2(pl.pitch), c: r2(pl.crouchAmt) });
+    const g = this.game, pl = g.player;
+    this.send({ t: 'st', p: [r2(pl.pos.x), r2(pl.pos.y), r2(pl.pos.z)], y: r2(pl.yaw), pi: r2(pl.pitch), c: r2(pl.crouchAmt + pl.proneAmt), l: r2(pl.leanOff), iv: pl.inVehicle ? 1 : 0 });
+    for (const v of g.vehicles) if (v.local && v.alive) this.send({ t: 'vs', r: v.netRow() });
   }
+}
+
+// a client's vehicle, as the host passes it on to everyone else
+function proxyRow(v) {
+  const p = v.pos, q = v.quat, r3 = (x) => Math.round(x * 1000) / 1000;
+  return [v.id, v.kind, v.team, r2(p.x), r2(p.y), r2(p.z), r3(q.x), r3(q.y), r3(q.z), r3(q.w), r2(v.a), r2(v.b),
+    v.alive ? 1 : 0, v.driver ? v.driver.id : -1, Math.max(0, Math.round(v.health))];
 }
 
 function describe(e) {

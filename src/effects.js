@@ -414,6 +414,36 @@ export class Effects {
     ring.t = 0; ring.big = big; ring.mesh.position.set(p.x, Math.max(0.05, p.y + 0.05), p.z); ring.mesh.visible = true;
   }
 
+  // tank gun: a blast of smoke along the barrel and a hard flash
+  cannonBlast(p, d) {
+    const r = () => Math.random() - 0.5;
+    this.glow.emit(p.x, p.y, p.z, 0, 0, 0, 0.08, 2.5, 3.5, 4, 3, 2, 1);
+    for (let i = 0; i < 18; i++) {
+      const s = 2 + Math.random() * 7;
+      this.smoke.emit(p.x, p.y, p.z, d.x * s + r() * 2, d.y * s + Math.random(), d.z * s + r() * 2,
+        1.5 + Math.random() * 1.5, 0.4, 2.8, 0.62, 0.6, 0.57, 0.5, -0.2, 1.6);
+    }
+    for (let i = 0; i < 12; i++) this.glow.emit(p.x, p.y, p.z, d.x * 20 + r() * 8, d.y * 20 + r() * 8, d.z * 20 + r() * 8, 0.2 + Math.random() * 0.2, 0.08, 0.02, 3, 1.8, 0.7, 1, 6, 0.6);
+  }
+
+  // flak and other air bursts: a flash and a hanging black puff
+  airBurst(p, s = 1) {
+    const r = () => Math.random() - 0.5;
+    this.glow.emit(p.x, p.y, p.z, 0, 0, 0, 0.08, 1.6 * s, 2.6 * s, 4, 2.6, 1.4, 1);
+    for (let i = 0; i < 8; i++) {
+      this.smoke.emit(p.x + r() * s, p.y + r() * s, p.z + r() * s, r() * 2, r() * 2, r() * 2,
+        2 + Math.random() * 1.5, 0.8 * s, 2.6 * s, 0.12, 0.11, 0.1, 0.85, -0.1, 1.2);
+    }
+    for (let i = 0; i < 14; i++) this.glow.emit(p.x, p.y, p.z, r() * 18, r() * 18, r() * 18, 0.3 + Math.random() * 0.4, 0.06, 0.02, 3, 1.8, 0.8, 1, 8, 0.8);
+  }
+
+  // rocket and missile exhaust
+  trail(p, d) {
+    const r = () => (Math.random() - 0.5) * 0.4;
+    this.smoke.emit(p.x, p.y, p.z, r() - d.x * 2, r() + 0.2 - d.y * 2, r() - d.z * 2, 1.2 + Math.random(), 0.18, 1.1, 0.78, 0.76, 0.74, 0.5, -0.15, 1.5);
+    this.glow.emit(p.x, p.y, p.z, 0, 0, 0, 0.05, 0.5, 0.2, 4, 2.4, 1, 1);
+  }
+
   scorch(p, n) {
     const m = this.scorches[this.scorchIdx];
     this.scorchIdx = (this.scorchIdx + 1) % this.scorches.length;

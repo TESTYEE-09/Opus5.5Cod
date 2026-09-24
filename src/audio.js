@@ -20,6 +20,7 @@ const db = (v) => Math.pow(10, v / 20);
 export const GUN_SOUND = {
   ar: ['ar', 1], smg: ['smg', 1], lmg: ['lmg', 1], sniper: ['sniper', 1], shotgun: ['shotgun', 1], pistol: ['pistol', 1],
   burst: ['ar', 1.12], dmr: ['sniper', 1.3], revolver: ['sniper', 1.55], heli: ['lmg', 0.75],
+  jetgun: ['lmg', 1.45], flak: ['sniper', 0.8], rpg: ['shotgun', 0.6], stinger: ['shotgun', 0.6],
 };
 
 // Mix in dB after loudness normalisation. Guns and explosions lead; feedback sits under them.
@@ -29,7 +30,7 @@ const MIX = {
   heartbeat: -17, jet: -3, heli: -6, stepSelf: -24, stepOther: -13, land: -16, hurt: -12,
   hit: -15, head: -16, kill: -12, impact: -21, scrape: -17, ui: -18, pickup: -15, streak: -12, friendly: -13, alarm: -12,
 };
-const CAP = { impact: 6, step: 10, casings: 4, flyby: 3, bounce: 4 };
+const CAP = { impact: 6, step: 10, casings: 4, flyby: 3, bounce: 4, flak: 6 };
 
 export class Sfx {
   constructor() {
@@ -294,6 +295,110 @@ export class Sfx {
   alarm() { this.play('alarm', { mix: 'alarm', ui: true }); }
   ui() { this.play('ui', { mix: 'ui', ui: true }); }
   pickup() { this.play('pickup', { mix: 'pickup', ui: true }); }
+
+  noiseBuffer() {
+    if (this.noiseBuf) return this.noiseBuf;
+    const ctx = this.ctx, b = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate), d = b.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    return (this.noiseBuf = b);
+  }
+
+  // band-passed noise swell: rocket motors, flares
+  whoosh(pos, { dur = 0.6, f0 = 1200, f1 = 300, q = 0.7, gain = 0.5, attack = 0.01 } = {}) {
+    if (!this.ctx) return;
+    const ctx = this.ctx, t = ctx.currentTime, s = this.at(pos);
+    const src = ctx.createBufferSource(); src.buffer = this.noiseBuffer();
+    const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.Q.value = q;
+    f.frequency.setValueAtTime(f0, t); f.frequency.exponentialRampToValueAtTime(Math.max(40, f1), t + dur);
+    const g = ctx.createGain(), fall = pos ? Math.pow(6 / Math.max(6, s.dist), 0.8) : 1;
+    g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(gain * fall, t + attack); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    const p = ctx.createStereoPanner(); p.pan.value = s.pan * 0.8;
+    src.connect(f).connect(g).connect(p).connect(this.world);
+    src.start(t, Math.random()); src.stop(t + dur + 0.05);
+  }
+
+  launch(pos) {
+    this.whoosh(pos, { dur: 0.9, f0: 900, f1: 180, gain: 0.9, q: 0.5 });
+    this.play('explosion_far', { mix: 'explosionFar', gain: pos ? 0.35 : 0.6, rate: 1.7, ...this.at(pos), send: 0.4 });
+  }
+
+  cannon(pos) {
+    const s = this.at(pos), fall = pos ? Math.pow(8 / Math.max(8, s.dist), 0.7) : 1;
+    this.play('explosion', { mix: 'explosion', gain: 0.75 * fall, rate: 1.35, pan: s.pan, dist: s.dist * 0.4, back: s.back, when: s.dist / 340, send: 0.7 });
+    this.play('sniper_near1', { mix: 'gunNear', gain: 0.9 * fall, rate: 0.55, pan: s.pan, dist: s.dist, back: s.back, send: 0.5 });
+  }
+
+  flak(pos) {
+    const s = this.spatial(pos);
+    if (s.dist > 250) return;
+    const fall = Math.pow(10 / Math.max(10, s.dist), 0.7);
+    this.play('explosion_far', { mix: 'explosionFar', cap: 'flak', gain: 0.4 * fall, rate: 1.6 + Math.random() * 0.3, pan: s.pan, back: s.back, when: s.dist / 340, send: 0.5 });
+  }
+
+  flares(pos) { this.whoosh(pos, { dur: 0.5, f0: 3000, f1: 1500, gain: 0.35, q: 1.2 }); }
+
+  // lock-on and warning beeps
+  tone(freq, dur = 0.07, gain = 0.08) {
+    if (!this.ctx) return;
+    const ctx = this.ctx, t = ctx.currentTime, o = ctx.createOscillator(), g = ctx.createGain(), f = ctx.createBiquadFilter();
+    o.type = 'square'; o.frequency.value = freq;
+    f.type = 'lowpass'; f.frequency.value = 3000;
+    g.gain.setValueAtTime(gain, t); g.gain.setTargetAtTime(0, t + dur * 0.7, 0.01);
+    o.connect(f).connect(g).connect(this.uiBus);
+    o.start(t); o.stop(t + dur + 0.1);
+  }
+
+  // Synthesised engine loop: tank diesel, jet roar, drone motor whine.
+  // set(pos, rpm 0..1): pos null for the vehicle you are driving.
+  engine(kind) {
+    const nop = { set() {}, stop() {} };
+    if (!this.ctx) return nop;
+    const ctx = this.ctx, out = ctx.createGain(), pan = ctx.createStereoPanner(), lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass'; out.gain.value = 0;
+    lp.connect(out).connect(pan).connect(this.world);
+    const srcs = [], oscs = [];
+    const osc = (type, f, g) => {
+      const o = ctx.createOscillator(); o.type = type; o.frequency.value = f;
+      const gg = ctx.createGain(); gg.gain.value = g;
+      o.connect(gg).connect(lp); o.start(); srcs.push(o); oscs.push([o, f]);
+    };
+    const hiss = (type, f, q, g) => {
+      const n = ctx.createBufferSource(); n.buffer = this.noiseBuffer(); n.loop = true;
+      const bf = ctx.createBiquadFilter(); bf.type = type; bf.frequency.value = f; bf.Q.value = q;
+      const gg = ctx.createGain(); gg.gain.value = g;
+      n.connect(bf).connect(gg).connect(lp); n.start(0, Math.random()); srcs.push(n);
+    };
+    let level, lpBase, ref;
+    if (kind === 'tank') { osc('sawtooth', 36, 0.5); osc('square', 72, 0.18); hiss('lowpass', 220, 0.7, 1.4); lpBase = 700; level = db(-13); ref = 10; }
+    else if (kind === 'jet') { hiss('bandpass', 1300, 0.6, 2.2); hiss('lowpass', 300, 0.5, 1.5); osc('sine', 2600, 0.04); lpBase = 6000; level = db(-11); ref = 25; }
+    else { osc('sawtooth', 210, 0.35); osc('sawtooth', 216, 0.3); osc('square', 420, 0.06); hiss('bandpass', 2000, 1, 0.3); lpBase = 3200; level = db(-19); ref = 4; }
+    lp.frequency.value = lpBase;
+    let stopped = false;
+    return {
+      set: (pos, rpm = 0.5) => {
+        if (stopped) return;
+        const t = ctx.currentTime;
+        for (const [o, f] of oscs) o.frequency.setTargetAtTime(f * (0.6 + rpm * 0.9), t, 0.08);
+        let g = level * (0.5 + rpm * 0.6), pn = 0, lpf = lpBase * (0.6 + rpm * 0.6);
+        if (pos) {
+          const s = this.spatial(pos), d3 = Math.hypot(s.dist, pos.y - (this.listener.y || 0));
+          g *= Math.pow(ref / Math.max(ref, d3), kind === 'jet' ? 0.8 : 1);
+          pn = s.pan * 0.8;
+          lpf *= (1 - s.back * 0.4) / (1 + d3 * 0.01);
+        }
+        out.gain.setTargetAtTime(g, t, 0.1);
+        pan.pan.setTargetAtTime(pn, t, 0.1);
+        lp.frequency.setTargetAtTime(Math.max(200, lpf), t, 0.1);
+      },
+      stop: () => {
+        if (stopped) return;
+        stopped = true;
+        const t = ctx.currentTime;
+        out.gain.setTargetAtTime(0, t, 0.2);
+        for (const s of srcs) s.stop(t + 1);
+      },
+    };
+  }
 
   // Looping rotor for a helicopter. Returns an updater and a stopper.
   rotor() {

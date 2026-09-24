@@ -58,6 +58,7 @@ export class Graphics {
     r.autoClear = false;
     setAnisotropy(Math.min(8, r.capabilities.getMaxAnisotropy()));
     this.q = null;
+    this.override = null;
     this.composer = null;
     this.grade = null;
   }
@@ -134,6 +135,12 @@ export class Graphics {
       const u = this.grade.uniforms;
       u.time.value += dt; u.hurt.value = hurt; u.flash.value = flash;
       if (this.look) this.applyLook(this.look);
+      // vehicle cameras and scopes restyle the grade: thermal, FPV feed, clean glass
+      const o = this.override;
+      u.vignette.value = o?.vignette ?? 0.35; u.grain.value = o?.grain ?? 0.035; u.fringe.value = o?.fringe ?? 0.0015;
+      if (o?.sat !== undefined) u.sat.value = o.sat;
+      if (o?.contrast !== undefined) u.contrast.value = o.contrast;
+      if (o?.tint) u.tint.value.set(...o.tint);
       this.composer.render(dt);
       return;
     }

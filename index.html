@@ -12,6 +12,7 @@
 <canvas id="game"></canvas>
 
 <div id="hud" class="hidden">
+  <canvas id="vcanvas"></canvas>
   <canvas id="minimap" width="220" height="220"></canvas>
   <div id="uavTag"></div>
   <div id="scorebar">
@@ -39,7 +40,29 @@
   <div id="health"><i id="hpbar"></i></div>
   <div id="streaks"></div>
   <div id="vignette"></div>
-  <div id="scope"><div class="lens"></div><div id="breath"></div></div>
+  <div id="scope">
+    <div class="lens"></div>
+    <svg class="ret sniper-ret" viewBox="-100 -100 200 200" aria-hidden="true">
+      <g stroke="#000" fill="none">
+        <path d="M-100 0H100M0 -100V100" stroke-width="0.22"/>
+        <path d="M-100 0H-36M36 0H100M0 36V100M0 -100V-36" stroke-width="1.5"/>
+        <g stroke-width="0.35"><path d="M-30 -1.2V1.2M-20 -1.2V1.2M-10 -1.2V1.2M10 -1.2V1.2M20 -1.2V1.2M30 -1.2V1.2M-1.2 10H1.2M-1.2 20H1.2M-1.2 30H1.2M-1.2 -10H1.2M-1.2 -20H1.2M-1.2 -30H1.2"/></g>
+      </g>
+      <circle r="0.45" fill="#ff3b2a"/>
+    </svg>
+    <svg class="ret acog-ret" viewBox="-100 -100 200 200" aria-hidden="true">
+      <g stroke="#111" fill="none" stroke-width="0.5">
+        <path d="M-100 0H-40M40 0H100M0 60V100"/>
+        <path d="M-3 12H3M-2.4 20H2.4M-1.8 27H1.8M-1.2 33H1.2"/>
+      </g>
+      <path d="M-5 4.5L0 -1L5 4.5" stroke="#ff3b2a" stroke-width="1.1" fill="none"/>
+      <circle r="0.5" fill="#ff3b2a"/>
+    </svg>
+    <div id="breath"></div>
+  </div>
+  <div id="vhud" class="hidden"><div id="vname"></div><div class="vbar"><i id="vhp"></i></div><div id="vstats"></div><div id="vhelp"></div></div>
+  <div id="vwarn">MISSILE INCOMING</div>
+  <div id="use"></div>
 </div>
 
 <div id="scoreboard" class="hidden"></div>
@@ -86,8 +109,10 @@
     <div class="controls">
       <span><kbd>WASD</kbd> move</span><span><kbd>Shift</kbd> sprint</span><span><kbd>C</kbd> crouch / slide</span>
       <span><kbd>Space</kbd> jump</span><span><kbd>LMB</kbd> fire</span><span><kbd>RMB</kbd> aim</span>
-      <span><kbd>R</kbd> reload</span><span><kbd>1</kbd><kbd>2</kbd> / wheel swap</span><span><kbd>G</kbd> hold to cook frag</span>
-      <span><kbd>V</kbd> knife</span><span><kbd>3</kbd><kbd>4</kbd><kbd>5</kbd> killstreaks</span><span><kbd>Tab</kbd> scores</span>
+      <span><kbd>R</kbd> reload</span><span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> / wheel swap</span><span><kbd>G</kbd> hold to cook frag</span>
+      <span><kbd>Q</kbd><kbd>E</kbd> lean</span><span><kbd>Ctrl</kbd>/<kbd>Z</kbd> prone</span><span><kbd>V</kbd> knife</span>
+      <span><kbd>F</kbd> enter / exit vehicle</span><span><kbd>4</kbd><kbd>5</kbd><kbd>6</kbd> killstreaks</span>
+      <span><kbd>7</kbd> FPV drone <kbd>8</kbd> tank <kbd>9</kbd> jet</span><span><kbd>Tab</kbd> scores</span>
     </div>
     <p class="note">First team to 100 kills or the most kills after 10 minutes wins. Bots fill empty slots in multiplayer.</p>
   </div>

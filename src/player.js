@@ -1,8 +1,9 @@
 import * as THREE from 'three';
-import { moveBody, overlaps, STEP } from './world.js';
+import { moveBody, overlaps, raycastWorld, STEP } from './world.js';
 
 const DEG = Math.PI / 180;
-const STAND_H = 1.75, CROUCH_H = 1.15, STAND_EYE = 1.62, CROUCH_EYE = 1.02;
+const STAND_H = 1.75, CROUCH_H = 1.15, PRONE_H = 0.7, STAND_EYE = 1.62, CROUCH_EYE = 1.02, PRONE_EYE = 0.4;
+const _e = new THREE.Vector3(), _r = new THREE.Vector3();
 
 export class Player {
   constructor(game) {
@@ -15,6 +16,9 @@ export class Player {
     this.body = { pos: this.pos, vel: this.vel, r: 0.35, h: STAND_H, onGround: false };
     this.yaw = 0; this.pitch = 0;
     this.alive = false;
+    this.vehicle = null; this.inVehicle = false;
+    this.lean = 0; this.leanOff = 0; this.prone = false; this.proneAmt = 0;
+    this.vcool = { drone: 0, tank: 0, jet: 0 };
     this.damagers = new Map();
     this.resetStats();
   }
@@ -32,6 +36,8 @@ export class Player {
     this.health = 100; this.alive = true;
     this.lastHurt = -99;
     this.crouched = false; this.crouchAmt = 0;
+    this.prone = false; this.proneAmt = 0; this.lean = 0; this.leanOff = 0;
+    this.vehicle = null; this.inVehicle = false;
     this.slideT = 0; this.sprinting = false; this.sprintOut = 0;
     this.recoilDebt = 0; this.lastShot = -99; this.punch = 0;
     this.bobPhase = 0; this.stepDist = 0; this.landDip = 0; this.hSpeed = 0;
@@ -44,10 +50,27 @@ export class Player {
     this.game.arsenal.equip(cls);
   }
 
-  get eyeHeight() { return STAND_EYE + (CROUCH_EYE - STAND_EYE) * this.crouchAmt; }
+  get eyeHeight() {
+    const e = STAND_EYE + (CROUCH_EYE - STAND_EYE) * this.crouchAmt;
+    return e + (PRONE_EYE - e) * this.proneAmt;
+  }
 
   aimPoint(out, head) {
-    return out.set(this.pos.x, this.pos.y + (head ? this.eyeHeight : 1.25 - 0.4 * this.crouchAmt), this.pos.z);
+    if (this.proneAmt > 0.5) {
+      const fx = -Math.sin(this.yaw), fz = -Math.cos(this.yaw);
+      return head ? out.set(this.pos.x + fx * 0.75, this.pos.y + 0.32, this.pos.z + fz * 0.75) : out.set(this.pos.x, this.pos.y + 0.25, this.pos.z);
+    }
+    const lo = this.leanOff * (head ? 1 : 0.55);
+    return out.set(this.pos.x + Math.cos(this.yaw) * lo, this.pos.y + (head ? this.eyeHeight : 1.25 - 0.4 * this.crouchAmt), this.pos.z - Math.sin(this.yaw) * lo);
+  }
+
+  // riding or flying a vehicle: only health and spawn protection tick
+  idle(dt) {
+    const g = this.game;
+    if (this.protect > 0) this.protect -= dt;
+    this.vel.set(0, 0, 0);
+    this.sprinting = false; this.lean = 0; this.leanOff = 0;
+    if (g.time - this.lastHurt > 4 && this.health < 100) this.health = Math.min(100, this.health + 40 * dt);
   }
 
   addRecoil(v, h) {
@@ -60,7 +83,7 @@ export class Player {
 
   breakSprint() { this.sprinting = false; this.sprintOut = 0.12; }
 
-  canStand() { return !overlaps(this.pos.x, this.pos.z, this.body.r, this.pos.y + STEP, this.pos.y + STAND_H); }
+  canStand(h = STAND_H) { return !overlaps(this.pos.x, this.pos.z, this.body.r, this.pos.y + STEP, this.pos.y + h); }
 
   update(dt, inp) {
     const g = this.game, ars = g.arsenal;
@@ -79,8 +102,23 @@ export class Player {
     }
     this.punch *= Math.exp(-dt * 12);
 
-    // crouch / slide
+    // prone: Ctrl or Z. Crouch or jump gets back up
     if (this.sprintOut > 0) this.sprintOut -= dt;
+    if (inp.pronePressed) {
+      if (this.prone) { if (this.canStand(CROUCH_H)) { this.prone = false; this.crouched = true; } }
+      else if (this.body.onGround) {
+        if (this.sprinting && this.hSpeed > 5) { this.vel.x *= 1.25; this.vel.z *= 1.25; this.vel.y = 2.5; this.body.onGround = false; g.audio.land(); }
+        this.prone = true; this.slideT = 0; this.crouched = false;
+      }
+      inp.crouchPressed = false;
+    }
+    if (this.prone && (inp.crouchPressed || inp.jumpPressed)) {
+      const h = inp.jumpPressed ? STAND_H : CROUCH_H;
+      if (this.canStand(h)) { this.prone = false; this.crouched = !inp.jumpPressed; }
+      inp.crouchPressed = inp.jumpPressed = false;
+    }
+    this.proneAmt += ((this.prone ? 1 : 0) - this.proneAmt) * Math.min(1, dt * 6);
+    // crouch / slide
     if (inp.crouchPressed) {
       if (this.sprinting && this.body.onGround && this.hSpeed > 5) {
         this.slideT = 0.8; this.crouched = true;
@@ -96,7 +134,8 @@ export class Player {
       else if (this.body.onGround) { this.vel.y = 5.6; this.body.onGround = false; }
     }
     this.crouchAmt += ((this.crouched ? 1 : 0) - this.crouchAmt) * Math.min(1, dt * 12);
-    this.body.h = STAND_H + (CROUCH_H - STAND_H) * this.crouchAmt;
+    const hc = STAND_H + (CROUCH_H - STAND_H) * this.crouchAmt;
+    this.body.h = hc + (PRONE_H - hc) * this.proneAmt;
 
     // move
     const f = inp.forward - inp.back, s = inp.right - inp.left;
@@ -105,9 +144,23 @@ export class Player {
     const wl = Math.hypot(wx, wz);
     if (wl > 0) { wx /= wl; wz /= wl; }
     const def = ars.w.def;
-    this.sprinting = inp.sprint && f > 0 && !this.crouched && ars.ads < 0.3 && !ars.cook && this.sprintOut <= 0 && !(ars.w.def.scope && ars.ads > 0);
-    let speed = this.sprinting ? 7.2 : this.crouched ? 2.6 : 4.8;
+    this.sprinting = inp.sprint && f > 0 && !this.crouched && !this.prone && ars.ads < 0.3 && !ars.cook && this.sprintOut <= 0 && !(ars.w.def.scope && ars.ads > 0);
+    let speed = this.sprinting ? 7.2 : this.prone ? 1.15 : this.crouched ? 2.6 : 4.8;
     speed *= def.speed * (1 - 0.45 * ars.adsEase());
+
+    // lean around corners with Q / E; the head stops short of walls
+    const leanWant = this.sprinting || this.proneAmt > 0.3 ? 0 : (inp.leanR ? 1 : 0) - (inp.leanL ? 1 : 0);
+    this.lean += (leanWant - this.lean) * Math.min(1, dt * 9);
+    let off = this.lean * 0.5;
+    if (Math.abs(off) > 0.01) {
+      const sgn = Math.sign(off);
+      _e.set(this.pos.x, this.pos.y + this.eyeHeight, this.pos.z);
+      _r.set(Math.cos(this.yaw) * sgn, 0, -Math.sin(this.yaw) * sgn);
+      const h = raycastWorld(_e, _r, Math.abs(off) + 0.25);
+      if (h) off = sgn * Math.max(0, h.t - 0.25);
+      speed *= 1 - 0.3 * Math.abs(this.lean);
+    }
+    this.leanOff = off;
 
     if (this.slideT > 0) {
       this.slideT -= dt;
@@ -132,7 +185,7 @@ export class Player {
       this.stepDist += this.hSpeed * dt;
       this.bobPhase += this.hSpeed * dt * (this.sprinting ? 2.4 : 2.8);
       const stride = this.sprinting ? 2.6 : 2.1;
-      if (this.stepDist > stride) { this.stepDist = 0; g.audio.step(null, this.crouched ? 0.08 : 0.18); }
+      if (this.stepDist > stride) { this.stepDist = 0; g.audio.step(null, this.prone ? 0.05 : this.crouched ? 0.08 : 0.18); }
     }
 
     // health regen
@@ -140,8 +193,9 @@ export class Player {
   }
 
   updateCamera(cam, shake) {
-    const tilt = this.slideT > 0 ? 0.06 : 0;
-    cam.position.set(this.pos.x, this.pos.y + this.eyeHeight - this.landDip * 0.5, this.pos.z);
+    const tilt = (this.slideT > 0 ? 0.06 : 0) - this.lean * 0.2;
+    const lo = this.leanOff;
+    cam.position.set(this.pos.x + Math.cos(this.yaw) * lo, this.pos.y + this.eyeHeight - this.landDip * 0.5 - Math.abs(lo) * 0.08, this.pos.z - Math.sin(this.yaw) * lo);
     cam.rotation.set(
       this.pitch + this.punch + this.scopeSwayY + (Math.random() - 0.5) * shake,
       this.yaw + this.scopeSwayX + (Math.random() - 0.5) * shake,

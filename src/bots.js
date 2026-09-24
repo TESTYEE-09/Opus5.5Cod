@@ -143,23 +143,31 @@ export function setRelation(m, ally) {
   m.tag.visible = ally;
 }
 
+// crouchAmt runs 0..1 for crouching and on to 2 for prone
 export function animateSoldier(m, s, dt) {
+  const p = Math.max(0, Math.min(1, s.crouchAmt - 1)), c = Math.min(1, s.crouchAmt) * (1 - p);
+  m.root.rotation.order = 'YXZ';
   m.root.position.copy(s.pos);
-  m.root.rotation.set(0, s.yaw, 0);
+  if (p > 0) {
+    m.root.position.x += Math.sin(s.yaw) * 0.95 * p;
+    m.root.position.z += Math.cos(s.yaw) * 0.95 * p;
+    m.root.position.y += 0.18 * p;
+  }
+  m.root.rotation.set(-p * Math.PI / 2, s.yaw, 0);
   const sp = Math.hypot(s.vel.x, s.vel.z);
-  s.walkPhase += sp * dt * 2.6;
-  const amp = Math.min(1, sp / 4) * (1 - s.crouchAmt * 0.6);
-  const c = s.crouchAmt;
+  s.walkPhase += sp * dt * (p > 0.5 ? 5 : 2.6);
+  const amp = Math.min(1, sp / 4) * (1 - c * 0.6) * (1 - p * 0.6);
   m.hips.position.y = 0.95 - 0.38 * c;
+  m.torso.rotation.z = -(s.leanOff || 0) * 0.7;
   for (let i = 0; i < 2; i++) {
     const w = Math.sin(s.walkPhase + i * Math.PI);
     const crouchLeg = i === 0 ? [1.2, -1.7] : [0.3, -1.9];
     m.legs[i].leg.rotation.x = w * 0.7 * amp + crouchLeg[0] * c;
     m.legs[i].shin.rotation.x = -Math.max(0, -Math.cos(s.walkPhase + i * Math.PI)) * 0.9 * amp + crouchLeg[1] * c;
   }
-  m.torso.rotation.x = s.pitch * 0.8 + 0.08 * c;
+  m.torso.rotation.x = (s.pitch * 0.8 + 0.08 * c) * (1 - p) + p * 0.45;
   m.hips.position.y += Math.abs(Math.sin(s.walkPhase)) * 0.04 * amp;
-  m.tag.position.y = 2.2 - 0.5 * c;
+  m.tag.position.y = 2.2 - 0.5 * c - 1.2 * p;
 }
 
 export function animateDeath(m, s, dt) {
@@ -209,6 +217,10 @@ export class Bot {
     this.senseT = Math.random() * 0.2;
     this.stuckT = 0; this.stuckPos = new THREE.Vector3().copy(this.pos);
     this.grenades = 1; this.nadeCool = 3;
+    // about a third of bots carry a launcher for vehicles
+    const lr = Math.random();
+    this.launcher = lr < 0.17 ? 'rpg' : lr < 0.3 ? 'stinger' : null;
+    this.rockets = this.launcher ? 2 : 0; this.rocketCd = 2;
     this.walkPhase = 0; this.flashT = 0;
     this.deathT = 0;
     this.damagers.clear();
@@ -226,7 +238,8 @@ export class Bot {
   eye(out) { return out.set(this.pos.x, this.pos.y + 1.6 - 0.5 * this.crouchAmt, this.pos.z); }
 
   hurtBy(attacker) {
-    if (!attacker || attacker === this || !attacker.alive || attacker.isVehicle) return;
+    if (attacker?.vehicle?.alive) attacker = attacker.vehicle;
+    if (!attacker || attacker === this || !attacker.alive || (attacker.isVehicle && (attacker.air || (attacker.kind === 'aa' && !attacker.driver)))) return;
     if (!this.visible || this.target !== attacker) {
       this.target = attacker;
       this.lastKnown.copy(attacker.pos);
@@ -260,7 +273,7 @@ export class Bot {
       const p = e.aimPoint(_b, false);
       const dx = p.x - eye.x, dz = p.z - eye.z;
       const dist = Math.hypot(dx, dz, p.y - eye.y);
-      if (dist > (e.isVehicle ? 70 : 85)) continue;
+      if (dist > (e.isVehicle ? (e.air && this.launcher === 'stinger' && this.rockets > 0 ? 220 : 70) : 85)) continue;
       const hd = Math.hypot(dx, dz) || 1;
       const dot = (dx * fx + dz * fz) / hd;
       if (e !== this.target && dot < 0.2 && dist > 6) continue;
@@ -300,6 +313,7 @@ export class Bot {
     if ((this.senseT -= dt) <= 0) { this.senseT = 0.1 + Math.random() * 0.08; this.sense(); }
     if (this.reloadT > 0 && (this.reloadT -= dt) <= 0) this.mag = this.def.mag;
     if (this.nadeCool > 0) this.nadeCool -= dt;
+    if (this.rocketCd > 0) this.rocketCd -= dt;
 
     this.wish = this.wish || new THREE.Vector3();
     this.wish.set(0, 0, 0);
@@ -379,6 +393,13 @@ export class Bot {
     this.err = Math.max(D.min, this.err * Math.exp(-D.learn * dt));
     this.reactT -= dt;
 
+    // launchers against vehicles: RPG at anything slow, Stinger at aircraft
+    if (t.isVehicle && this.rockets > 0 && this.rocketCd <= 0 && this.reactT <= 0 && facing < 0.2 &&
+        ((this.launcher === 'stinger' && t.air) || (this.launcher === 'rpg' && (t.kind === 'tank' || t.kind === 'aa' || t.kind === 'heli' || t.kind === 'drone') && dist < 90))) {
+      this.rockets--; this.rocketCd = 5;
+      g.botLaunch(this, t, this.launcher);
+      return false;
+    }
     if (this.mag <= 0 && this.reloadT <= 0) this.reloadT = this.def.reload * 1.15;
     if (this.reloadT <= 0 && this.reactT <= 0 && facing < 0.25) {
       this.fireT -= dt;

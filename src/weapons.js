@@ -44,7 +44,17 @@ export const WEAPONS = {
   dmr: {
     name: 'SVX-10', model: 'dmr', auto: false, rpm: 320, dmg: [58, 48], range: [35, 75], head: 1.8,
     mag: 10, reserve: 60, reload: 2.1, reloadEmpty: 2.5, hip: 5, ads: 0.03, move: 3.5, bloom: 0.6, bloomMax: 2,
-    adsTime: 0.3, fov: 32, recoil: { v: 1.5, h: 0.35 }, kick: 0.07, speed: 0.92, pref: 38, reloadKind: 'mag',
+    adsTime: 0.3, fov: 32, recoil: { v: 1.5, h: 0.35 }, kick: 0.07, speed: 0.92, pref: 38, reloadKind: 'mag', overlay: 'acog',
+  },
+  rpg: {
+    name: 'RPG-7', model: 'rpg', launcher: 'rpg', auto: false, rpm: 30, dmg: [200, 200], range: [1, 2], head: 1,
+    mag: 1, reserve: 3, reload: 2.3, reloadEmpty: 2.3, hip: 2.5, ads: 0.3, move: 2, bloom: 0, bloomMax: 0,
+    adsTime: 0.3, fov: 55, recoil: { v: 3.5, h: 0.8 }, kick: 0.2, speed: 0.92, pref: 30, reloadKind: 'rocket',
+  },
+  stinger: {
+    name: 'Stinger', model: 'stinger', launcher: 'stinger', auto: false, rpm: 30, dmg: [200, 200], range: [1, 2], head: 1,
+    mag: 1, reserve: 2, reload: 2.6, reloadEmpty: 2.6, hip: 3, ads: 0.4, move: 2, bloom: 0, bloomMax: 0, lock: 1.0,
+    adsTime: 0.35, fov: 45, recoil: { v: 2.5, h: 0.5 }, kick: 0.16, speed: 0.9, pref: 30, reloadKind: 'rocket',
   },
   revolver: {
     name: 'R-44', model: 'revolver', auto: false, rpm: 140, dmg: [62, 38], range: [14, 32], head: 1.7,
@@ -61,6 +71,8 @@ export const CLASSES = {
   breacher: { name: 'Breacher', desc: 'M-87 pump shotgun and 3 frags.', primary: 'shotgun', secondary: 'pistol', frags: 3 },
   tactician: { name: 'Tactician', desc: 'BR-3 three-round burst. Kills in one burst up close.', primary: 'burst', secondary: 'pistol', frags: 2 },
   recon: { name: 'Recon', desc: 'SVX-10 marksman rifle, 4x scope, and an R-44 Magnum.', primary: 'dmr', secondary: 'revolver', frags: 1 },
+  antitank: { name: 'Anti-Tank', desc: 'VX-9 SMG plus an RPG-7 (key 3) for tanks and helicopters.', primary: 'smg', secondary: 'pistol', launcher: 'rpg', frags: 1 },
+  antiair: { name: 'Anti-Air', desc: 'AR-4 plus a Stinger (key 3). Aim at aircraft until it locks.', primary: 'ar', secondary: 'pistol', launcher: 'stinger', frags: 1 },
 };
 
 export function falloff(def, dist) {
@@ -86,8 +98,9 @@ const M = {
   sleeve: std({ color: 0x5c6048, roughness: 0.95, map: null, ...nrm(fabric, 0.9) }),
   cuff: std({ color: 0x3d4030, roughness: 0.95, ...nrm(fabric, 0.9) }),
   glove: std({ color: 0x2d2a27, roughness: 0.78, ...nrm(fabric, 0.4) }),
-  glass: new THREE.MeshStandardMaterial({ color: 0x86b8d8, roughness: 0.05, metalness: 0.5, transparent: true, opacity: 0.16, depthWrite: false }),
-  dot: new THREE.MeshBasicMaterial({ color: new THREE.Color(4, 0.4, 0.2) }),
+  glass: new THREE.MeshBasicMaterial({ color: 0xbfe0ff, transparent: true, opacity: 0.045, depthWrite: false }),
+  dot: new THREE.MeshBasicMaterial({ color: new THREE.Color(6, 0.5, 0.25) }),
+  tri: new THREE.MeshBasicMaterial({ color: new THREE.Color(0.6, 4, 0.8) }),
   lens: std({ color: 0x0c1a28, roughness: 0.08, metalness: 0.6 }),
   blade: std({ color: 0xc8ccd0, roughness: 0.2, metalness: 1 }),
   nade: std({ color: 0x3d4a2e, roughness: 0.7, ...nrm(fine, 0.6) }),
@@ -131,24 +144,28 @@ function rail(g, y, z0, z1, w = 0.024) {
   for (let z = z0 + 0.006; z < z1; z += 0.012) part(g, sb(w + 0.004, 0.006, 0.005), M.metal, 0, y + 0.006, z);
 }
 
+// open reflex sight: a thin hood around a big, nearly clear window
 function reflex(g, y, z, s) {
-  part(g, bx(0.032, 0.02, 0.06), M.metal, 0, y - s / 2 - 0.006, z);
-  const t = 0.008;
-  part(g, bx(s + t * 2, t, 0.04), M.metal, 0, y + s / 2, z);
-  part(g, bx(t, s, 0.04), M.metal, -s / 2 - t / 2, y, z);
-  part(g, bx(t, s, 0.04), M.metal, s / 2 + t / 2, y, z);
-  part(g, new THREE.PlaneGeometry(s, s), M.glass, 0, y, z - 0.012);
-  part(g, new THREE.CircleGeometry(0.0022, 12), M.dot, 0, y, z - 0.011);
+  part(g, bx(0.032, 0.014, 0.06), M.metal, 0, y - s / 2 - 0.009, z);
+  const t = 0.0035;
+  part(g, sb(s + t * 2, t, 0.03), M.metal, 0, y + s / 2 + 0.004, z);
+  part(g, sb(t, s, 0.03), M.metal, -s / 2 - t / 2 - 0.004, y, z);
+  part(g, sb(t, s, 0.03), M.metal, s / 2 + t / 2 + 0.004, y, z);
+  part(g, new THREE.PlaneGeometry(s + 0.006, s + 0.006), M.glass, 0, y, z - 0.012);
+  part(g, new THREE.CircleGeometry(0.0026, 14), M.dot, 0, y, z - 0.011);
 }
 
 function holo(g, y, z) {
-  part(g, bx(0.042, 0.018, 0.09), M.metal, 0, y - 0.03, z);
-  part(g, bx(0.046, 0.006, 0.06), M.metal, 0, y + 0.024, z - 0.01);
-  for (const x of [-0.022, 0.022]) part(g, bx(0.006, 0.05, 0.06), M.metal, x, y, z - 0.01);
-  part(g, new THREE.PlaneGeometry(0.038, 0.04), M.glass, 0, y, z - 0.035);
-  part(g, new THREE.RingGeometry(0.004, 0.0048, 20), M.dot, 0, y, z - 0.034);
-  part(g, new THREE.CircleGeometry(0.0012, 8), M.dot, 0, y, z - 0.034);
+  part(g, bx(0.042, 0.014, 0.09), M.metal, 0, y - 0.033, z);
+  part(g, sb(0.05, 0.0035, 0.05), M.metal, 0, y + 0.027, z - 0.01);
+  for (const x of [-0.025, 0.025]) part(g, sb(0.0035, 0.056, 0.05), M.metal, x, y, z - 0.01);
+  part(g, new THREE.PlaneGeometry(0.048, 0.05), M.glass, 0, y, z - 0.035);
+  part(g, new THREE.RingGeometry(0.0045, 0.0053, 24), M.dot, 0, y, z - 0.034);
+  part(g, new THREE.CircleGeometry(0.0013, 10), M.dot, 0, y, z - 0.034);
 }
+
+// glowing dots on iron sights so the front post is easy to find
+function tritium(g, x, y, z, r = 0.0022) { part(g, new THREE.CircleGeometry(r, 10), M.tri, x, y, z); }
 
 // scope body along z, rear lens at zRear, radius r
 function scope(g, y, zRear, len, r, reticle = false) {
@@ -370,6 +387,7 @@ const BUILD = {
     part(g, bx(0.052, 0.11, 0.02), M.poly, 0, -0.055, 0.46, 0.1);
     part(g, sb(0.01, 0.008, 0.07), M.metal, 0, -0.05, 0.05);
     part(g, new THREE.SphereGeometry(0.005, 8, 6), M.steel, 0, 0.042, -0.66);
+    tritium(g, 0, 0.046, -0.654, 0.003);
     const mag = group(g, 0, -0.04, 0.02);
     part(mag, sb(0.02, 0.01, 0.05), M.metal, 0, 0, 0);
     const shell = group(g, 0, 0, 0);
@@ -390,6 +408,9 @@ const BUILD = {
     part(slide, bx(0.006, 0.012, 0.008), M.metal, 0, 0.024, -0.09);
     part(slide, bx(0.008, 0.012, 0.008), M.metal, 0.01, 0.024, 0.09);
     part(slide, bx(0.008, 0.012, 0.008), M.metal, -0.01, 0.024, 0.09);
+    tritium(slide, 0, 0.025, -0.0855, 0.0018);
+    tritium(slide, 0.01, 0.024, 0.0945, 0.0014);
+    tritium(slide, -0.01, 0.024, 0.0945, 0.0014);
     part(g, cy(0.007, 0.02), M.steel, 0, 0.034, -0.135);
     part(g, bx(0.034, 0.11, 0.05), M.poly, 0, -0.065, 0.04, -0.2);
     part(g, sb(0.008, 0.006, 0.04), M.poly, 0, -0.028, -0.01);
@@ -411,6 +432,7 @@ const BUILD = {
     part(g, bx(0.012, 0.012, 0.2), M.steel, 0, 0.044, -0.17);
     part(g, bx(0.02, 0.018, 0.2), M.steel, 0, 0.012, -0.17);
     part(g, bx(0.004, 0.012, 0.006), M.metal, 0, 0.056, -0.26);
+    tritium(g, 0, 0.058, -0.2565, 0.0018);
     part(g, bx(0.012, 0.018, 0.02), M.metal, 0, 0.05, 0.045, -0.4);
     const cyl = group(g, 0, 0.022, -0.035);
     part(cyl, cy(0.024, 0.055, 12), M.steel, 0, 0, 0);
@@ -428,6 +450,42 @@ const BUILD = {
     part(off, bx(0.05, 0.08, 0.08), M.glove, 0, 0, 0);
     part(off, bx(0.085, 0.085, 0.42), M.sleeve, -0.07, -0.09, 0.21, 0.5, -0.35, 0);
     return finish(g, { mag, off, cyl, loader: true, muzzleZ: -0.275, muzzleY: 0.03, sightY: 0.058, sightZ: 0, adsDist: 0.38, hip: new THREE.Vector3(0.11, -0.14, -0.42), flashSize: 0.16, eject: new THREE.Vector3(0, 0.02, -0.035) });
+  },
+  rpg() {
+    const g = new THREE.Group();
+    part(g, cy(0.042, 1.0), M.od, 0, 0.02, -0.15);
+    part(g, tb(0.06, 0.14), M.tube, 0, 0.02, 0.4);
+    part(g, cy(0.05, 0.24), M.wood, 0, 0.02, -0.02);
+    part(g, bx(0.034, 0.1, 0.045), M.wood, 0, -0.06, 0.1, -0.35);
+    part(g, bx(0.03, 0.09, 0.04), M.wood, 0, -0.06, -0.14, -0.2);
+    part(g, bx(0.01, 0.03, 0.01), M.metal, 0, 0.087, -0.52);
+    for (const x of [-0.012, 0.012]) part(g, bx(0.008, 0.03, 0.01), M.metal, x, 0.087, 0.05);
+    part(g, bx(0.012, 0.03, 0.02), M.metal, 0, 0.06, 0.05);
+    tritium(g, 0, 0.1, -0.514, 0.0028);
+    const mag = group(g, 0, 0.02, -0.65);
+    part(mag, cy(0.03, 0.12), M.od, 0, 0, 0.02);
+    part(mag, cy(0.075, 0.14), M.od, 0, 0, -0.12);
+    part(mag, new THREE.ConeGeometry(0.075, 0.22, 16).rotateX(-Math.PI / 2), M.od, 0, 0, -0.3);
+    part(mag, new THREE.ConeGeometry(0.075, 0.08, 16).rotateX(Math.PI / 2), M.od, 0, 0, -0.01);
+    const off = arms(g, [0, -0.09, 0.12], [0, -0.04, -0.14]);
+    return finish(g, { mag, off, warhead: true, muzzleZ: -0.72, muzzleY: 0.02, sightY: 0.1, sightZ: 0.05, adsDist: 0.26, hip: new THREE.Vector3(0.12, -0.14, -0.42), flashSize: 0.32, eject: new THREE.Vector3(0, 0, 0.4) });
+  },
+  stinger() {
+    const g = new THREE.Group();
+    part(g, cy(0.05, 1.3), M.od, 0, 0.03, -0.2);
+    part(g, cy(0.058, 0.06), M.poly, 0, 0.03, -0.85);
+    part(g, cy(0.058, 0.06), M.poly, 0, 0.03, 0.45);
+    part(g, bx(0.05, 0.14, 0.14), M.poly, 0, -0.07, 0.05);
+    part(g, bx(0.034, 0.1, 0.045), M.poly, 0, -0.14, 0.1, -0.3);
+    part(g, bx(0.2, 0.01, 0.012), M.metal, -0.1, 0.1, -0.35);
+    part(g, bx(0.006, 0.05, 0.006), M.metal, 0, 0.1, -0.15);
+    part(g, new THREE.RingGeometry(0.03, 0.0335, 32), M.tri, 0, 0.13, -0.15);
+    tritium(g, 0, 0.13, -0.149, 0.0015);
+    const mag = group(g, 0, -0.08, -0.2);
+    part(mag, cy(0.022, 0.12), M.poly, 0, -0.02, 0);
+    part(mag, bx(0.03, 0.05, 0.05), M.metal, 0, 0.02, 0);
+    const off = arms(g, [0, -0.13, 0.12], [0, -0.03, -0.3]);
+    return finish(g, { mag, off, muzzleZ: -0.9, muzzleY: 0.03, sightY: 0.13, sightZ: -0.15, adsDist: 0.3, hip: new THREE.Vector3(0.13, -0.15, -0.45), flashSize: 0.3, eject: new THREE.Vector3(0, 0, 0.45) });
   },
 };
 
@@ -516,7 +574,7 @@ export class Arsenal {
 
   equip(cls) {
     for (const s of this.slots) this.holder.remove(s.model.root);
-    this.slots = [cls.primary, cls.secondary].map(id => {
+    this.slots = [cls.primary, cls.secondary, cls.launcher].filter(Boolean).map(id => {
       const def = WEAPONS[id], model = BUILD[def.model]();
       model.root.visible = false;
       this.holder.add(model.root);
@@ -530,11 +588,12 @@ export class Arsenal {
     this.action = 0; this.actionSnd = 0; this.ads = 0; this.bloom = 0; this.kick = 0; this.flashT = 0;
     this.slideBack = 0; this.sprintBlend = 0; this.swayX = 0; this.swayY = 0; this.autoReload = 0;
     this.breath = 4; this.holding = false; this.burstLeft = 0; this.ejectAt = -1; this.roll = 0;
+    this.lockTarget = null; this.lockT = 0; this.locked = false; this.toneT = 0;
     this.casings.clear();
   }
 
   refill() {
-    for (const s of this.slots) s.reserve = Math.min(s.def.reserve, s.reserve + s.def.mag * 2);
+    for (const s of this.slots) s.reserve = Math.min(s.def.reserve, s.reserve + (s.def.launcher ? 1 : s.def.mag * 2));
   }
 
   spread(pl) {
@@ -543,13 +602,14 @@ export class Arsenal {
     s += d.move * Math.min(1, pl.hSpeed / 5) * (1 - e * 0.85);
     if (!pl.body.onGround) s += 3 * (1 - e * 0.5);
     if (pl.crouched && pl.body.onGround) s *= 0.8;
+    s *= 1 - 0.4 * pl.proneAmt;
     s += this.bloom * (1 - e * 0.6);
     if (d.scope && e < 0.95) s = Math.max(s, d.hip);
     return s;
   }
 
   adsEase() { return smooth(this.ads); }
-  get busy() { return !!(this.sw || this.melee > 0 || this.cook || this.throwT > 0); }
+  get busy() { return !!(this.sw || this.melee > 0 || this.cook || this.throwT > 0 || this.transit); }
 
   startReload() {
     const w = this.w, d = w.def;
@@ -561,6 +621,8 @@ export class Arsenal {
   update(dt, inp, pl) {
     const g = this.game, audio = g.audio;
     let w = this.w, d = w.def;
+    // going prone or getting up: hands are busy for a moment
+    this.transit = Math.abs(pl.proneAmt - (pl.prone ? 1 : 0)) > 0.3;
     this.cool = Math.max(0, this.cool - dt);
     this.bloom = Math.max(0, this.bloom - dt * 4);
     this.flashT -= dt;
@@ -661,6 +723,18 @@ export class Arsenal {
       }
     }
 
+    // Stinger seeker: hold an aircraft near the centre while aimed until it locks
+    if (d.launcher === 'stinger' && smooth(this.ads) > 0.8 && w.mag > 0 && !this.reload) {
+      const cand = g.lockCandidate();
+      if (cand && cand === this.lockTarget) this.lockT += dt;
+      else { this.lockTarget = cand; this.lockT = 0; }
+      this.locked = !!cand && this.lockT >= d.lock;
+      if (cand && (this.toneT -= dt) <= 0) {
+        this.toneT = this.locked ? 0.09 : 0.3;
+        audio.tone(this.locked ? 1250 : 800, this.locked ? 0.07 : 0.1);
+      }
+    } else { this.lockTarget = null; this.lockT = 0; this.locked = false; }
+
     // sniper hold breath (sprint key while scoped)
     const e = smooth(this.ads);
     this.holding = d.scope && e > 0.9 && inp.sprint && this.breath > 0;
@@ -681,18 +755,19 @@ export class Arsenal {
     } else this.cool = 60 / d.rpm;
     const spread = this.spread(pl);
     const muzzle = this.muzzleWorld();
-    g.playerShoot(d, spread, muzzle);
-    const e = smooth(this.ads);
-    pl.addRecoil(d.recoil.v * (1 - 0.3 * e) * (0.85 + Math.random() * 0.3), (Math.random() * 2 - 1) * d.recoil.h);
+    if (d.launcher) { g.playerLaunch(d, spread, this.locked ? this.lockTarget : null); this.lockT = 0; this.locked = false; }
+    else g.playerShoot(d, spread, muzzle);
+    const e = smooth(this.ads), steady = 1 - 0.35 * pl.proneAmt;
+    pl.addRecoil(d.recoil.v * (1 - 0.3 * e) * (0.85 + Math.random() * 0.3) * steady, (Math.random() * 2 - 1) * d.recoil.h * steady);
     this.kick = Math.min(this.kick + d.kick, 0.2);
     this.roll += (Math.random() - 0.5) * d.kick * 2;
     this.bloom = Math.min(this.bloom + d.bloom, d.bloomMax);
     this.flashT = 0.05;
     if (d.action && w.mag > 0) { this.action = 60 / d.rpm; this.actionSnd = 0.22; this.ejectAt = 0.45; }
-    else if (!d.action && d.reloadKind !== 'cyl') this.casings.spawn(this.ejectPoint());
+    else if (!d.action && d.reloadKind !== 'cyl' && !d.launcher) this.casings.spawn(this.ejectPoint());
     if (w.model.slide) this.slideBack = 1;
-    if (w.mag === 0 && w.reserve > 0) this.autoReload = 60 / d.rpm + 0.2;
-    g.effects.muzzleSmoke(muzzle, g.camera.getWorldDirection(_q));
+    if (w.mag === 0 && w.reserve > 0) this.autoReload = d.launcher ? 0.6 : 60 / d.rpm + 0.2;
+    if (!d.launcher) g.effects.muzzleSmoke(muzzle, g.camera.getWorldDirection(_q));
   }
 
   ejectPoint() {
@@ -724,6 +799,20 @@ export class Arsenal {
     const kind = d.reloadKind;
     const off = m.off.position.copy(m.offBase);
     m.off.rotation.copy(m.offRot);
+    if (kind === 'rocket') {
+      // muzzle up, a fresh round slides in from the front and seats
+      const tilt = P(p, 0, 0.15) * (1 - P(p, 0.85, 1));
+      _r.x += 0.35 * tilt; _r.z += 0.25 * tilt; _p.y -= 0.06 * tilt; _p.z += 0.05 * tilt;
+      const inn = P(p, 0.3, 0.7), seat = P(p, 0.7, 0.78);
+      m.mag.visible = p > 0.25;
+      m.mag.position.copy(m.magBase);
+      m.mag.position.z -= 0.35 * (1 - inn) + 0.03 * (1 - seat);
+      m.mag.position.y -= 0.25 * (1 - inn);
+      if (p < 0.25) off.lerp(_h.set(m.magBase.x, m.magBase.y - 0.3, m.magBase.z - 0.35), P(p, 0.05, 0.25));
+      else if (p < 0.8) off.copy(m.mag.position).add(_q.set(0, -0.05, 0.03));
+      else off.lerpVectors(_h.copy(m.magBase).add(_q.set(0, -0.05, 0.03)), m.offBase, P(p, 0.8, 0.95));
+      return;
+    }
     if (kind === 'cyl') {
       const open = P(p, 0.05, 0.15) * (1 - P(p, 0.8, 0.9));
       const up = P(p, 0.15, 0.24) * (1 - P(p, 0.3, 0.4));
@@ -823,7 +912,7 @@ export class Arsenal {
     m.mag.position.copy(m.magBase); m.mag.rotation.x = m.magRot;
     m.off.position.copy(m.offBase); m.off.rotation.copy(m.offRot);
     if (m.loader) m.mag.visible = false;
-    else m.mag.visible = true;
+    else m.mag.visible = !m.warhead || this.w.mag > 0;
     if (m.charge) m.charge.position.z = m.chargeBase;
     if (m.bolt) { m.bolt.position.z = m.boltBase; m.bolt.rotation.z = m.boltRot; }
     if (m.lid) m.lid.rotation.x = m.lidRot;
@@ -904,14 +993,17 @@ export class Arsenal {
       _p.y -= 0.15 * (1 - th);
     }
 
-    _p.y -= pl.landDip * 0.5;
+    // lying down: gun sits lower and rolls a little while crawling
+    _p.y -= pl.landDip * 0.5 + 0.02 * pl.proneAmt * (1 - e);
+    _r.z += Math.sin(pl.bobPhase * 0.5) * 0.05 * pl.proneAmt * mv;
     m.root.position.copy(_p);
     m.root.rotation.set(_r.x, _r.y, _r.z);
     m.root.updateMatrix();
     m.flash.visible = this.flashT > 0;
-    if (m.flash.visible) { m.flash.rotation.z = Math.random() * 6.28; m.flash.scale.setScalar(0.8 + Math.random() * 0.5); }
+    // a smaller, dimmer flash when aimed so it does not white out the sight picture
+    if (m.flash.visible) { m.flash.rotation.z = Math.random() * 6.28; m.flash.scale.setScalar((0.8 + Math.random() * 0.5) * (1 - 0.6 * e)); }
     this.light.intensity = this.flashT > 0 ? 3 : 0;
     if (this.flashT > 0) this.light.position.copy(m.muzzle.position).applyMatrix4(m.root.matrix);
-    m.root.visible = !(d.scope && e > 0.92);
+    m.root.visible = !((d.scope || d.overlay) && e > 0.92);
   }
 }

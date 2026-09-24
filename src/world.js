@@ -141,7 +141,24 @@ export function moveBody(b, dt) {
 
 const _n = new THREE.Vector3();
 // Ray against the grid and the ground plane. d must be normalised.
+const _o2 = new THREE.Vector3();
 export function raycastWorld(o, d, maxT) {
+  // start outside the grid (aircraft): jump to where the ray enters it
+  if (o.x < 0 || o.z < 0 || o.x >= SIZE || o.z >= SIZE) {
+    const groundT = d.y < 0 ? -o.y / d.y : Infinity;
+    let t0 = 0, t1 = maxT;
+    for (const [p, v] of [[o.x, d.x], [o.z, d.z]]) {
+      if (Math.abs(v) < 1e-9) { if (p < 0 || p >= SIZE) { t0 = Infinity; break; } continue; }
+      let a = (0 - p) / v, b = (SIZE - 1e-3 - p) / v;
+      if (a > b) [a, b] = [b, a];
+      t0 = Math.max(t0, a); t1 = Math.min(t1, b);
+    }
+    if (t0 === Infinity || t0 > t1 || groundT < t0) return groundT <= maxT ? { t: groundT, normal: new THREE.Vector3(0, 1, 0) } : null;
+    const e = t0 + 1e-3;
+    const h = raycastWorld(_o2.copy(o).addScaledVector(d, e), d, maxT - e);
+    if (h) h.t += e;
+    return h;
+  }
   let ix = Math.floor(o.x / CELL), iz = Math.floor(o.z / CELL);
   const sx = d.x > 0 ? 1 : -1, sz = d.z > 0 ? 1 : -1;
   const tdx = d.x !== 0 ? Math.abs(CELL / d.x) : Infinity;
@@ -152,7 +169,7 @@ export function raycastWorld(o, d, maxT) {
   const limit = Math.min(maxT, groundT);
   let tEnter = 0, axis = -1;
   while (tEnter <= limit) {
-    if (ix < 0 || iz < 0 || ix >= N || iz >= N) return null;
+    if (ix < 0 || iz < 0 || ix >= N || iz >= N) break;
     const tExit = Math.min(tmx, tmz, limit);
     const sp = cells[iz * N + ix];
     if (sp) {

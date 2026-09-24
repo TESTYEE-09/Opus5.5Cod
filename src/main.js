@@ -289,7 +289,8 @@ document.addEventListener('pointerlockchange', () => {
 // ---------- input ----------
 const keys = new Set(), pressed = new Set(), mouse = new Set(), mousePressed = new Set();
 let mdx = 0, mdy = 0, wheel = 0;
-const GAME_KEYS = new Set(['Tab', 'Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyC', 'KeyG', 'KeyV', 'KeyR']);
+const GAME_KEYS = new Set(['Tab', 'Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyC', 'KeyG', 'KeyV', 'KeyR', 'KeyQ', 'KeyE', 'KeyF', 'KeyZ',
+  'ControlLeft', 'ControlRight', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9']);
 
 addEventListener('keydown', (e) => {
   if (!locked) return;
@@ -308,18 +309,23 @@ addEventListener('blur', () => { keys.clear(); mouse.clear(); });
 function readInput() {
   const k = (c) => keys.has(c) ? 1 : 0;
   let switchTo = null;
+  const ars = game.arsenal, n = ars.slots.length;
   if (pressed.has('Digit1')) switchTo = 0;
   if (pressed.has('Digit2')) switchTo = 1;
-  if (wheel !== 0 && game.arsenal.slots.length) switchTo = 1 - game.arsenal.cur;
-  const streak = pressed.has('Digit3') ? 'uav' : pressed.has('Digit4') ? 'airstrike' : pressed.has('Digit5') ? 'chopper' : null;
+  if (pressed.has('Digit3') && n > 2) switchTo = 2;
+  if (wheel !== 0 && n) switchTo = (ars.cur + (wheel > 0 ? 1 : n - 1)) % n;
+  const streak = pressed.has('Digit4') ? 'uav' : pressed.has('Digit5') ? 'airstrike' : pressed.has('Digit6') ? 'chopper' : null;
+  const call = pressed.has('Digit7') ? 'drone' : pressed.has('Digit8') ? 'tank' : pressed.has('Digit9') ? 'jet' : null;
   const inp = {
     forward: k('KeyW'), back: k('KeyS'), left: k('KeyA'), right: k('KeyD'),
     sprint: keys.has('ShiftLeft') || keys.has('ShiftRight'),
     fire: mouse.has(0), firePressed: mousePressed.has(0),
     ads: mouse.has(2), adsPressed: mousePressed.has(2),
-    reload: pressed.has('KeyR'), jumpPressed: pressed.has('Space'), crouchPressed: pressed.has('KeyC'),
-    melee: pressed.has('KeyV') || pressed.has('KeyF'), nade: keys.has('KeyG'), nadePressed: pressed.has('KeyG'),
-    switchTo, streak, dx: mdx, dy: mdy,
+    reload: pressed.has('KeyR'), jumpPressed: pressed.has('Space'), jump: keys.has('Space'), crouchPressed: pressed.has('KeyC'),
+    pronePressed: pressed.has('ControlLeft') || pressed.has('ControlRight') || pressed.has('KeyZ'),
+    leanL: keys.has('KeyQ'), leanR: keys.has('KeyE'), usePressed: pressed.has('KeyF'),
+    melee: pressed.has('KeyV'), nade: keys.has('KeyG'), nadePressed: pressed.has('KeyG'),
+    switchTo, streak, call, dx: mdx, dy: mdy,
   };
   pressed.clear(); mousePressed.clear();
   mdx = mdy = 0; wheel = 0;
@@ -361,8 +367,12 @@ function frame(ts) {
   atmo.update(dt, camera, px);
   updateWorld(dt);
   const pl = game.player, playing = game.state === 'playing';
+  const veh = playing && pl.alive ? pl.vehicle : null;
   const hurt = playing ? (pl.alive ? Math.max(0, (45 - pl.health) / 45) * 0.8 : 0.7) : 0;
-  gfx.render(playing && pl.alive, dt, hurt, Math.min(0.8, game.flashT * 2.2));
+  const d = game.arsenal.w?.def;
+  const scoped = playing && pl.alive && !veh && d && (d.scope || d.overlay) && game.arsenal.adsEase() > 0.92;
+  gfx.override = veh ? veh.grade() : scoped ? { vignette: 0.1, fringe: 0, grain: 0.02 } : null;
+  gfx.render(playing && pl.alive && !veh, dt, veh ? hurt * 0.3 : hurt, Math.min(0.8, game.flashT * 2.2));
 }
 requestAnimationFrame(frame);
 
