@@ -1,0 +1,895 @@
+import * as THREE from 'three';
+import { raycastWorld, lineOfSight, pointSolid, groundAt, spawns, SIZE, GRAVITY } from './world.js';
+import { Effects } from './effects.js';
+import { Arsenal, CLASSES, falloff, FUSE } from './weapons.js';
+import { Player } from './player.js';
+import { Bot, DIFFICULTY } from './bots.js';
+import { Chopper, Jet } from './streaks.js';
+import { NetSoldier, NetVehicle } from './net.js';
+
+const DEG = Math.PI / 180;
+const NAMES = ['Viper', 'Ghost', 'Havoc', 'Reaper', 'Nomad', 'Sarge', 'Hawk', 'Wolf', 'Rook', 'Blitz', 'Frost', 'Onyx',
+  'Mako', 'Diesel', 'Kestrel', 'Tank', 'Ranger', 'Cobra', 'Spike', 'Jackal', 'Raven', 'Brick', 'Ace', 'Echo', 'Bishop', 'Dozer'];
+export const STREAKS = [
+  { kills: 3, id: 'uav', name: 'UAV', key: '3' },
+  { kills: 5, id: 'airstrike', name: 'Airstrike', key: '4' },
+  { kills: 7, id: 'chopper', name: 'Attack Chopper', key: '5' },
+];
+
+const _o = new THREE.Vector3(), _d = new THREE.Vector3(), _c = new THREE.Vector3(), _e = new THREE.Vector3();
+const _fwd = new THREE.Vector3(), _right = new THREE.Vector3(), _up = new THREE.Vector3();
+
+function raySphere(o, d, c, r, maxT) {
+  const ox = o.x - c.x, oy = o.y - c.y, oz = o.z - c.z;
+  const b = ox * d.x + oy * d.y + oz * d.z;
+  const cc = ox * ox + oy * oy + oz * oz - r * r;
+  const disc = b * b - cc;
+  if (disc < 0) return Infinity;
+  const t = -b - Math.sqrt(disc);
+  return t > 0 && t < maxT ? t : Infinity;
+}
+
+function rayBox(o, d, x0, y0, z0, x1, y1, z1, maxT) {
+  let tmin = 0, tmax = maxT;
+  const lo = [x0, y0, z0], hi = [x1, y1, z1], oo = [o.x, o.y, o.z], dd = [d.x, d.y, d.z];
+  for (let a = 0; a < 3; a++) {
+    if (Math.abs(dd[a]) < 1e-9) { if (oo[a] < lo[a] || oo[a] > hi[a]) return Infinity; continue; }
+    let t1 = (lo[a] - oo[a]) / dd[a], t2 = (hi[a] - oo[a]) / dd[a];
+    if (t1 > t2) [t1, t2] = [t2, t1];
+    tmin = Math.max(tmin, t1); tmax = Math.min(tmax, t2);
+    if (tmin > tmax) return Infinity;
+  }
+  return tmin;
+}
+
+function hitSoldier(e, o, d, maxT) {
+  const p = e.pos, c = e.crouchAmt;
+  const head = e.aimPoint(_c, true);
+  let t = raySphere(o, d, head, 0.16, maxT), zone = 'head';
+  const tt = rayBox(o, d, p.x - 0.25, p.y + 0.85 - 0.3 * c, p.z - 0.25, p.x + 0.25, p.y + 1.5 - 0.5 * c, p.z + 0.25, Math.min(t, maxT));
+  if (tt < t) { t = tt; zone = 'torso'; }
+  const tl = rayBox(o, d, p.x - 0.2, p.y, p.z - 0.2, p.x + 0.2, p.y + 0.85 - 0.3 * c, p.z + 0.2, Math.min(t, maxT));
+  if (tl < t) { t = tl; zone = 'legs'; }
+  return t < maxT ? { t, zone } : null;
+}
+
+function cone(fwd, angle, out) {
+  const r = angle * Math.sqrt(Math.random()), th = Math.random() * Math.PI * 2;
+  _right.crossVectors(fwd, Math.abs(fwd.y) > 0.99 ? _e.set(1, 0, 0) : _e.set(0, 1, 0)).normalize();
+  _up.crossVectors(_right, fwd);
+  const tr = Math.tan(r);
+  return out.copy(fwd).addScaledVector(_right, tr * Math.cos(th)).addScaledVector(_up, tr * Math.sin(th)).normalize();
+}
+
+const zoneMul = (def, zone) => zone === 'head' ? def.head : zone === 'legs' ? 0.85 : 1;
+const TEAM_SIZE = 6;
+const r2 = (v) => Math.round(v * 100) / 100;
+const arr = (v) => [r2(v.x), r2(v.y), r2(v.z)];
+const v3 = (a) => new THREE.Vector3(a[0], a[1], a[2]);
+
+// Game runs in one of three roles: 'solo', 'host' (authoritative, also sends snapshots)
+// or 'client' (moves its own soldier, draws the rest from the host's snapshots).
+export class Game {
+  constructor({ renderer, scene, camera, wscene, audio, hud }) {
+    Object.assign(this, { renderer, scene, camera, wscene, audio, hud });
+    this.effects = new Effects(scene);
+    this.arsenal = new Arsenal(this, wscene);
+    this.player = new Player(this);
+    this.player.id = 0;
+    this.jet = new Jet(scene);
+    this.bots = []; this.nets = []; this.soldiers = [this.player]; this.byId = new Map();
+    this.grenades = []; this.pickups = []; this.vehicles = []; this.jobs = []; this.events = [];
+    this.netNades = [];
+    this.net = null;
+    this.role = 'solo';
+    this.state = 'menu';
+    this.time = 0; this.shake = 0;
+    this.settings = { sens: 1, fov: 80, difficulty: 'regular', cls: 'assault', scoreLimit: 100, timeLimit: 600 };
+    this.diff = DIFFICULTY.regular;
+    this.nadeGeo = new THREE.SphereGeometry(0.06, 10, 8);
+    this.nadeMat = new THREE.MeshStandardMaterial({ color: 0x3d4a2e, roughness: 0.7 });
+    this.pickGeo = new THREE.BoxGeometry(0.45, 0.25, 0.3);
+    this.pickMat = new THREE.MeshStandardMaterial({ color: 0x4f5a3a, emissive: 0x2a3a10, roughness: 0.8 });
+  }
+
+  get authority() { return this.role !== 'client'; }
+  emit(ev) { if (this.role === 'host') this.events.push(ev); }
+
+  // ---------- match flow ----------
+  clear() {
+    for (const s of [...this.bots, ...this.nets]) s.remove();
+    for (const g of this.grenades) if (g.mesh) this.scene.remove(g.mesh);
+    for (const m of this.netNades) this.scene.remove(m);
+    for (const p of this.pickups) this.scene.remove(p.mesh);
+    for (const v of this.vehicles) v.remove();
+    this.bots = []; this.nets = []; this.grenades = []; this.netNades = []; this.pickups = []; this.vehicles = [];
+    this.jobs = []; this.events = [];
+    this.effects.clear();
+  }
+
+  // roster: humans [{id, name, team, me}] on solo/host; every soldier on a client.
+  startMatch(settings, roster = null) {
+    this.settings = settings;
+    this.diff = DIFFICULTY[settings.difficulty] || DIFFICULTY.regular;
+    this.role = this.net?.active ? (this.net.isHost ? 'host' : 'client') : 'solo';
+    this.clear();
+    roster ||= [{ id: 0, name: settings.name || 'You', team: 0, me: true }];
+
+    const pl = this.player, me = roster.find(r => r.me);
+    pl.id = me.id; pl.team = me.team; pl.name = me.name;
+    pl.resetStats();
+    for (const r of roster) {
+      if (r.me) continue;
+      if (this.role === 'client') this.nets.push(new NetSoldier(this, r.id, r.team, r.name, r.human, false));
+      else this.nets.push(new NetSoldier(this, r.id, r.team, r.name, true, true));
+    }
+    if (this.authority) {
+      const names = NAMES.slice().sort(() => Math.random() - 0.5);
+      let id = 100;
+      for (const team of [0, 1]) {
+        const humans = roster.filter(r => r.team === team).length;
+        for (let i = humans; i < TEAM_SIZE; i++) { const b = new Bot(this, team, names.pop()); b.id = id++; this.bots.push(b); }
+      }
+    }
+    this.rebuild();
+
+    this.teamScore = settings.score ? settings.score.slice() : [0, 0];
+    this.timeLeft = settings.timeLeft ?? settings.timeLimit;
+    this.time = 0;
+    this.uav = [0, 0];
+    this.intel = [[], []];
+    this.firstBlood = false;
+    this.targeting = false;
+    this.pickupId = 0;
+    this.pendingCls = settings.cls;
+    this.state = 'playing';
+    this.hud.reset(this);
+
+    if (this.role === 'client') {
+      pl.spawn(me, me.yaw, CLASSES[settings.cls]);
+      for (const n of this.nets) { const r = roster.find(x => x.id === n.id); n.pos.set(r.x, 0, r.z); n.tgt.copy(n.pos); }
+      return;
+    }
+    const sp = this.pickSpawn(pl.team);
+    pl.spawn(sp, sp.yaw, CLASSES[settings.cls]);
+    for (const n of this.nets) { const s = this.pickSpawn(n.team); n.place(s.x, 0, s.z, s.yaw); }
+    for (const b of this.bots) { const s = this.pickSpawn(b.team); b.spawn(s, s.yaw); }
+  }
+
+  // client: the host's start message
+  startClient(msg, myId) {
+    const roster = (msg.roster || []).map(r => ({ ...r, me: r.id === myId }));
+    if (!roster.some(r => r.me)) return;
+    const rules = msg.rules || {};
+    this.startMatch({ ...this.settings, scoreLimit: rules.scoreLimit, timeLimit: rules.timeLimit, timeLeft: rules.timeLeft, score: msg.score }, roster);
+  }
+
+  rebuild() {
+    this.soldiers = [this.player, ...this.nets, ...this.bots];
+    this.byId = new Map(this.soldiers.map(s => [s.id, s]));
+  }
+
+  rosterList() {
+    return this.soldiers.map(s => ({ id: s.id, name: s.name, team: s.team, human: !!(s.isPlayer || s.human), x: r2(s.pos.x), z: r2(s.pos.z), yaw: r2(s.yaw) }));
+  }
+
+  // host: a player joined or left mid-match
+  addRemote(id, name, team) {
+    const n = new NetSoldier(this, id, team, name, true, true);
+    this.nets.push(n);
+    const bot = this.bots.find(b => b.team === team);
+    if (bot && this.soldiers.filter(s => s.team === team).length >= TEAM_SIZE) { bot.remove(); this.bots.splice(this.bots.indexOf(bot), 1); }
+    this.rebuild();
+    const s = this.pickSpawn(team);
+    n.place(s.x, 0, s.z, s.yaw);
+    this.emit({ k: 'roster', r: this.rosterList() });
+    this.hud.toast(`${name} joined`);
+  }
+
+  removeRemote(id) {
+    const n = this.nets.find(x => x.id === id);
+    if (!n) return;
+    n.remove();
+    this.nets.splice(this.nets.indexOf(n), 1);
+    if (this.soldiers.filter(s => s.team === n.team).length - 1 < TEAM_SIZE) {
+      const b = new Bot(this, n.team, NAMES[Math.floor(Math.random() * NAMES.length)]);
+      b.id = 100 + Math.max(0, ...this.bots.map(x => x.id - 99));
+      this.bots.push(b);
+      this.rebuild();
+      const s = this.pickSpawn(b.team);
+      b.spawn(s, s.yaw);
+    } else this.rebuild();
+    this.emit({ k: 'roster', r: this.rosterList() });
+    this.hud.toast(`${n.name} left`);
+  }
+
+  respawnRemote(n) {
+    const s = this.pickSpawn(n.team);
+    n.place(s.x, 0, s.z, s.yaw);
+    this.emit({ k: 'spawn', to: n.id, x: s.x, z: s.z, yaw: s.yaw });
+  }
+
+  end() {
+    if (this.state === 'ended') return;
+    this.state = 'ended';
+    for (const v of this.vehicles) v.remove();
+    this.vehicles = [];
+    this.emit({ k: 'end', sc: this.teamScore });
+    this.net?.flush();
+    this.hud.showEnd(this);
+    if (document.pointerLockElement) document.exitPointerLock();
+  }
+
+  pickSpawn(team) {
+    let best = null, bestScore = -Infinity;
+    for (const sp of spawns[team]) {
+      let minEnemy = 60, crowd = 0;
+      for (const s of this.soldiers) {
+        if (!s.alive) continue;
+        const d = Math.hypot(s.pos.x - sp.x, s.pos.z - sp.z);
+        if (s.team !== team) minEnemy = Math.min(minEnemy, d);
+        else if (d < 1.5) crowd++;
+      }
+      const score = minEnemy + Math.random() * 8 - crowd * 50;
+      if (score > bestScore) { bestScore = score; best = sp; }
+    }
+    return best;
+  }
+
+  respawn(bot) {
+    const s = this.pickSpawn(bot.team);
+    bot.spawn(s, s.yaw);
+  }
+
+  // ---------- queries ----------
+  targetsFor(team) {
+    const out = [];
+    for (const s of this.soldiers) if (s.alive && s.team !== team) out.push(s);
+    for (const v of this.vehicles) if (v.alive && v.team !== team && v.t > 5) out.push(v);
+    return out;
+  }
+
+  nearestEnemy(bot) {
+    let best = null, bd = Infinity;
+    for (const s of this.soldiers) {
+      if (!s.alive || s.team === bot.team) continue;
+      const d = s.pos.distanceToSquared(bot.pos);
+      if (d < bd) { bd = d; best = s; }
+    }
+    return best;
+  }
+
+  dangerNear(bot, r) {
+    for (const g of this.grenades) {
+      if (g.fuse > 2.6 || (g.team === bot.team && g.owner !== bot)) continue;
+      if (g.pos.distanceTo(bot.pos) < r) return g;
+    }
+    return null;
+  }
+
+  reportIntel(team, pos) {
+    const list = this.intel[team];
+    for (const i of list) if (Math.abs(i.x - pos.x) + Math.abs(i.z - pos.z) < 4) { i.t = this.time; i.x = pos.x; i.z = pos.z; return; }
+    list.push({ x: pos.x, z: pos.z, t: this.time });
+  }
+
+  noise(source, pos, radius) {
+    for (const b of this.bots) {
+      if (b.team === source.team || !b.alive) continue;
+      if (b.pos.distanceTo(pos) < radius) b.hear(source, pos);
+    }
+  }
+
+  traceShot(o, d, maxT, shooter) {
+    const wh = raycastWorld(o, d, maxT);
+    let t = wh ? wh.t : maxT, entity = null, zone = null;
+    for (const s of this.soldiers) {
+      if (!s.alive || s === shooter || s.team === shooter.team) continue;
+      const h = hitSoldier(s, o, d, t);
+      if (h) { t = h.t; entity = s; zone = h.zone; }
+    }
+    for (const v of this.vehicles) {
+      if (!v.alive || v === shooter || v.team === shooter.team) continue;
+      const h = v.hit(o, d, t);
+      if (h) { t = h.t; entity = v; zone = 'body'; }
+    }
+    return { t, entity, zone, world: !entity && wh ? wh : null };
+  }
+
+  // ---------- combat (authority only) ----------
+  damage(victim, amount, attacker, weapon, headshot, fromPos, extra = {}) {
+    if (!this.authority || !victim.alive || this.state !== 'playing') return null;
+    if (attacker && attacker !== victim && attacker.team === victim.team) return null;
+    if (victim.isVehicle) {
+      victim.applyDamage(amount, attacker);
+      this.hitFeedback(attacker, !victim.alive, false);
+      return victim.alive ? 'hit' : 'kill';
+    }
+    if (victim.protect > 0) return null;
+    if (victim.human && attacker && !attacker.human && !attacker.isPlayer) amount *= this.diff.dmg;
+    if (victim.isPlayer && attacker && !attacker.isPlayer && !attacker.human) amount *= this.diff.dmg;
+    victim.health -= amount;
+    if (attacker && attacker !== victim) victim.damagers.set(attacker, (victim.damagers.get(attacker) || 0) + amount);
+    if (victim.isPlayer) {
+      victim.lastHurt = this.time;
+      this.audio.hurt();
+      if (fromPos) this.hud.damageFrom(fromPos, this.player);
+    } else if (victim.isRemote) {
+      victim.lastHurt = this.time;
+      if (fromPos) this.emit({ k: 'hurt', to: victim.id, x: r2(fromPos.x), z: r2(fromPos.z) });
+    } else if (attacker && victim.hurtBy) victim.hurtBy(attacker);
+    const killed = victim.health <= 0;
+    if (victim !== attacker && !extra.streak) this.hitFeedback(attacker, killed, headshot);
+    if (killed) { victim.health = 0; this.kill(attacker, victim, weapon, headshot, extra); }
+    return killed ? 'kill' : 'hit';
+  }
+
+  hitFeedback(attacker, kill, head) {
+    if (attacker === this.player) { this.hud.hitmarker(kill, head); this.audio.hit(kill ? 'kill' : head ? 'head' : 'hit'); }
+    else if (attacker?.isRemote) this.emit({ k: 'hm', to: attacker.id, kill, head });
+  }
+
+  kill(killer, victim, weapon, headshot, extra) {
+    victim.alive = false;
+    victim.deaths++;
+    victim.streak = 0;
+    if (victim.isPlayer) this.localDeath(killer, weapon);
+    else { victim.die(); this.dropPickup(victim.pos); }
+    const valid = killer && killer !== victim && killer.team !== victim.team && !killer.isVehicle;
+    if (valid) {
+      killer.kills++;
+      killer.score += 100;
+      this.teamScore[killer.team]++;
+      if (!extra.streak) {
+        killer.streak++;
+        killer.bestStreak = Math.max(killer.bestStreak, killer.streak);
+        this.checkStreak(killer);
+      }
+      if (killer.isPlayer || killer.isRemote) this.medals(killer, victim, weapon, headshot);
+      else this.firstBlood = true;
+    }
+    victim.nemesis = valid ? killer : null;
+    for (const [a, dmg] of victim.damagers) {
+      if (a === killer || a.team === victim.team || dmg < 20) continue;
+      a.assists++; a.score += 25;
+      this.popupFor(a, [['Assist', 25]]);
+    }
+    victim.damagers.clear();
+    this.hud.feed(killer, victim, weapon, headshot, this.player);
+    this.emit({ k: 'kill', a: killer ? killer.id : -1, v: victim.id, w: weapon, h: !!headshot });
+    if (valid && this.teamScore[killer.team] >= this.settings.scoreLimit) this.end();
+  }
+
+  localDeath(killer, weapon) {
+    const pl = this.player;
+    pl.alive = false;
+    this.deadT = 4;
+    this.killer = killer && killer !== pl ? killer : null;
+    this.deathYaw = pl.yaw;
+    this.targeting = false;
+    this.hud.hint('');
+    this.hud.showDeath(this.killer, weapon, pl);
+  }
+
+  medals(killer, victim, weapon, headshot) {
+    const lines = [['Enemy killed', 100]];
+    if (!this.firstBlood) { this.firstBlood = true; lines.push(['First blood', 100]); }
+    if (headshot) lines.push(['Headshot', 50]);
+    killer.multi = this.time - (killer.lastKillT ?? -99) < 4 ? (killer.multi || 1) + 1 : 1;
+    killer.lastKillT = this.time;
+    if (killer.multi === 2) lines.push(['Double kill', 50]);
+    else if (killer.multi === 3) lines.push(['Triple kill', 75]);
+    else if (killer.multi >= 4) lines.push(['Multi kill', 100]);
+    if (killer.pos.distanceTo(victim.pos) > 40 && weapon !== 'Frag' && weapon !== 'Airstrike') lines.push(['Longshot', 50]);
+    if (killer.nemesis === victim) { lines.push(['Revenge', 50]); killer.nemesis = null; }
+    if (weapon === 'Knife') lines.push(['Knifed', 50]);
+    for (const [, s] of lines.slice(1)) killer.score += s;
+    this.popupFor(killer, lines);
+  }
+
+  popupFor(s, lines) {
+    if (s.isPlayer) this.hud.popup(lines);
+    else if (s.isRemote) this.emit({ k: 'pop', to: s.id, l: lines });
+  }
+
+  // host: tell clients about a shot so they can draw and hear it
+  emitShot(shooter, muzzle, end, kind, normal, key, color) {
+    if (this.role !== 'host') return;
+    this.emit({ k: 'shot', id: shooter.id, m: arr(muzzle), e: arr(end), i: kind, n: normal ? arr(normal) : null, key, c: color });
+  }
+
+  // draw and play a shot described by the network (a client's or the host's)
+  renderShot(ev) {
+    if (!Array.isArray(ev.m) || !Array.isArray(ev.e)) return;
+    const m = v3(ev.m), end = v3(ev.e);
+    const shooter = this.byId.get(ev.id);
+    if (shooter) shooter.firedT = this.time;
+    this.effects.tracer(m, end, ev.c || 0xffe0a0);
+    if (ev.i === 1 && Array.isArray(ev.n)) { this.effects.impact(end, v3(ev.n)); this.audio.impact(end); }
+    else if (ev.i === 2) this.effects.blood(end, end.clone().sub(m).normalize());
+    if (!shooter?.isVehicle && ev.key !== 'heli') this.effects.flash(m, 0.5);
+    this.audio.shot(ev.key === 'heli' ? 'lmg' : ev.key, m, ev.key === 'heli' ? 0.75 : 1);
+    const dir = end.clone().sub(m);
+    const len = dir.length();
+    if (len > 0.01) this.whizz(m, dir.divideScalar(len), { t: len, entity: null });
+  }
+
+  // host: a client fired; show it here and pass it on
+  remoteShot(s, d) {
+    const shots = Array.isArray(d.e) ? d.e.slice(0, 3) : [];
+    for (const e of shots) {
+      if (!Array.isArray(e) || e.length < 4) continue;
+      const ev = { k: 'shot', id: s.id, m: d.m, e: e.slice(0, 3), i: e[3], n: e.length >= 7 ? e.slice(4, 7) : null, key: String(d.key || 'ar'), c: 0xffe0a0 };
+      this.renderShot(ev);
+      this.emit(ev);
+    }
+  }
+
+  playerShoot(def, spreadDeg, muzzle) {
+    const pl = this.player;
+    this.camera.getWorldDirection(_fwd);
+    _o.copy(this.camera.position);
+    const hits = new Map(), sent = [];
+    const pellets = def.pellets || 1;
+    for (let i = 0; i < pellets; i++) {
+      cone(_fwd, spreadDeg * DEG, _d);
+      const h = this.traceShot(_o, _d, 300, pl);
+      const end = _o.clone().addScaledVector(_d, h.t);
+      let kind = 0, normal = null;
+      if (h.entity) {
+        const dmg = h.entity.isVehicle ? def.dmg[0] * 0.7 : falloff(def, h.t) * zoneMul(def, h.zone);
+        const cur = hits.get(h.entity) || { dmg: 0, head: false };
+        cur.dmg += dmg; cur.head ||= h.zone === 'head';
+        hits.set(h.entity, cur);
+        if (h.entity.isVehicle) this.effects.impact(end, _d.clone().negate());
+        else { this.effects.blood(end, _d); kind = 2; }
+      } else if (h.world) { this.effects.impact(end, h.world.normal); this.audio.impact(end); kind = 1; normal = h.world.normal; }
+      if (i === 0 || i % 3 === 0) {
+        this.effects.tracer(muzzle, end);
+        sent.push([...arr(end), kind, ...(normal ? arr(normal) : [])]);
+        if (this.role === 'host') this.emitShot(pl, muzzle, end, kind, normal, def.model);
+      }
+    }
+    if (this.role === 'client') {
+      for (const [e, r] of hits) this.net.send({ t: 'hit', id: e.id, d: Math.round(r.dmg * 10) / 10, h: r.head, w: def.name });
+      this.net.send({ t: 'fire', m: arr(muzzle), e: sent, key: def.model });
+    } else for (const [e, r] of hits) this.damage(e, r.dmg, pl, def.name, r.head, pl.pos);
+    const fx = this.effects;
+    fx.muzzleLight.position.copy(muzzle); fx.muzzleLight.intensity = 5; fx.muzzleT = 0.05;
+    this.audio.shot(def.model);
+    pl.firedT = this.time;
+    if (this.authority) this.noise(pl, pl.pos, 45);
+  }
+
+  botShot(bot, o, dir, muzzle, tracer) {
+    const def = bot.def;
+    const h = this.traceShot(o, dir, 200, bot);
+    const end = o.clone().addScaledVector(dir, h.t);
+    let kind = 0, normal = null;
+    if (h.entity) {
+      const dmg = h.entity.isVehicle ? 20 : falloff(def, h.t) * zoneMul(def, h.zone);
+      this.damage(h.entity, dmg, bot, def.name, h.zone === 'head', bot.pos);
+      if (!h.entity.isVehicle && !h.entity.isPlayer) { this.effects.blood(end, dir); kind = 2; }
+    } else if (h.world && Math.random() < 0.6) { this.effects.impact(end, h.world.normal); this.audio.impact(end); kind = 1; normal = h.world.normal; }
+    const color = bot.team ? 0xffa070 : 0xffe0a0;
+    if (tracer) { this.effects.tracer(muzzle, end, color); this.emitShot(bot, muzzle, end, kind, normal, def.model, color); }
+    this.whizz(o, dir, h);
+  }
+
+  vehicleShot(v, o, dir) {
+    const h = this.traceShot(o, dir, 200, v);
+    const end = o.clone().addScaledVector(dir, h.t);
+    let kind = 0, normal = null;
+    if (h.entity) {
+      this.damage(h.entity, h.entity.isVehicle ? 40 : 34, v.owner, 'Chopper', false, v.pos, { streak: true });
+      if (!h.entity.isVehicle) { this.effects.blood(end, dir); kind = 2; }
+    } else if (h.world) { this.effects.impact(end, h.world.normal); kind = 1; normal = h.world.normal; }
+    this.effects.tracer(o, end, 0xff9050);
+    this.audio.shot('lmg', v.pos, 0.75);
+    this.emitShot(v, o, end, kind, normal, 'heli', 0xff9050);
+    this.whizz(o, dir, h);
+  }
+
+  whizz(o, dir, h) {
+    const pl = this.player;
+    if (!pl.alive || h.entity === pl || this.time - (this.lastWhizz || 0) < 0.08) return;
+    _e.subVectors(this.camera.position, o);
+    const tp = _e.dot(dir);
+    if (tp <= 2 || tp >= h.t) return;
+    const miss = _e.addScaledVector(dir, -tp);
+    if (miss.length() < 1.6) {
+      this.lastWhizz = this.time;
+      this.audio.whizz(this.audio.spatial(o).pan);
+    }
+  }
+
+  playerMelee() {
+    const pl = this.player;
+    this.camera.getWorldDirection(_fwd);
+    let best = null, bd = 2.4;
+    for (const s of this.soldiers) {
+      if (!s.alive || s.team === pl.team) continue;
+      _e.subVectors(s.aimPoint(_c, false), this.camera.position);
+      const d = _e.length();
+      if (d > bd || _e.normalize().dot(_fwd) < 0.55) continue;
+      if (!lineOfSight(this.camera.position, _c)) continue;
+      best = s; bd = d;
+    }
+    if (!best) return;
+    this.audio.stab();
+    this.effects.blood(best.aimPoint(_c, false), _fwd);
+    pl.vel.x += _fwd.x * 4; pl.vel.z += _fwd.z * 4;
+    if (this.role === 'client') this.net.send({ t: 'hit', id: best.id, d: 200, h: false, w: 'Knife' });
+    else this.damage(best, 200, pl, 'Knife', false, pl.pos);
+  }
+
+  // ---------- grenades ----------
+  throwGrenade(pl, cookT) {
+    this.camera.getWorldDirection(_fwd);
+    const pos = this.camera.position.clone().addScaledVector(_fwd, 0.4);
+    const vel = _fwd.clone().multiplyScalar(17).add(new THREE.Vector3(pl.vel.x * 0.5, 2.5, pl.vel.z * 0.5));
+    const fuse = Math.max(0.02, FUSE - cookT);
+    if (this.role === 'client') { this.net.send({ t: 'nade', p: arr(pos), v: arr(vel), f: fuse }); return; }
+    if (fuse <= 0.05) { this.explode(pos, pl, 7, 150, 'Frag'); return; }
+    this.spawnGrenade(pos, vel, fuse, pl);
+  }
+
+  botThrow(bot, target) {
+    const pos = bot.eye(new THREE.Vector3());
+    const dx = target.x - pos.x, dz = target.z - pos.z, dist = Math.hypot(dx, dz);
+    const T = Math.max(0.8, Math.min(1.8, dist / 13));
+    const vel = new THREE.Vector3(dx / T, (0.2 - pos.y + 0.5 * GRAVITY * T * T) / T, dz / T);
+    this.spawnGrenade(pos, vel, FUSE, bot);
+    this.audio.pin();
+  }
+
+  spawnGrenade(pos, vel, fuse, owner) {
+    const mesh = new THREE.Mesh(this.nadeGeo, this.nadeMat);
+    mesh.castShadow = true;
+    mesh.position.copy(pos);
+    this.scene.add(mesh);
+    this.grenades.push({ pos, vel, fuse, owner, team: owner.team, mesh });
+  }
+
+  updateGrenades(dt) {
+    for (let i = this.grenades.length - 1; i >= 0; i--) {
+      const g = this.grenades[i];
+      g.fuse -= dt;
+      if (g.fuse <= 0) {
+        this.scene.remove(g.mesh);
+        this.grenades.splice(i, 1);
+        this.explode(g.pos, g.owner, 7, 150, 'Frag');
+        continue;
+      }
+      const h = dt / 2;
+      for (let s = 0; s < 2; s++) {
+        const p = g.pos, v = g.vel;
+        v.y -= GRAVITY * h;
+        let bounced = false;
+        const nx = p.x + v.x * h;
+        if (pointSolid(nx, p.y, p.z)) { v.x *= -0.4; bounced = true; } else p.x = nx;
+        const nz = p.z + v.z * h;
+        if (pointSolid(p.x, p.y, nz)) { v.z *= -0.4; bounced = true; } else p.z = nz;
+        const ny = p.y + v.y * h;
+        if (pointSolid(p.x, ny, p.z)) {
+          if (v.y < -1.5) bounced = true;
+          v.y = Math.abs(v.y) < 1.5 ? 0 : v.y * -0.3;
+          v.x *= 0.75; v.z *= 0.75;
+        } else p.y = ny;
+        if (bounced && v.length() > 2) this.audio.bounce(p);
+      }
+      g.mesh.position.copy(g.pos);
+      g.mesh.rotation.x += g.vel.length() * dt * 3;
+    }
+  }
+
+  // visual and audio side of an explosion; the host also sends it to clients
+  explodeFx(p, scale = 1) {
+    this.effects.explosion(p, scale);
+    const gy = groundAt(p.x, p.z, 0.1, p.y + 0.5);
+    if (p.y - gy < 1) this.effects.scorch(new THREE.Vector3(p.x, gy, p.z), new THREE.Vector3(0, 1, 0));
+    this.audio.explosion(p);
+    const dp = this.camera.position.distanceTo(p);
+    this.shake = Math.max(this.shake, 0.09 * Math.max(0, 1 - dp / 30));
+    this.emit({ k: 'boom', p: arr(p), s: scale });
+  }
+
+  explode(p, owner, radius, maxDmg, weapon, extra = {}) {
+    this.explodeFx(p, radius / 7);
+    const src = _o.set(p.x, p.y + 0.3, p.z);
+    for (const s of this.soldiers) {
+      if (!s.alive) continue;
+      const c = s.aimPoint(_c, false);
+      const d = c.distanceTo(src);
+      if (d > radius || !lineOfSight(src, c)) continue;
+      this.damage(s, maxDmg * Math.pow(1 - d / radius, 0.7), owner, weapon, false, p, extra);
+    }
+    for (const v of this.vehicles) if (v.alive && v.pos.distanceTo(src) < radius + 2) this.damage(v, maxDmg * 2, owner, weapon, false, p, extra);
+    if (owner) this.noise(owner, p, 30);
+  }
+
+  // ---------- pickups ----------
+  dropPickup(pos, id = this.pickupId++) {
+    if (this.pickups.length > 10) { this.scene.remove(this.pickups[0].mesh); this.pickups.shift(); }
+    const mesh = new THREE.Mesh(this.pickGeo, this.pickMat);
+    mesh.position.set(pos.x, pos.y + 0.2, pos.z);
+    mesh.castShadow = true;
+    this.scene.add(mesh);
+    this.pickups.push({ id, mesh, t: 25 });
+    this.emit({ k: 'drop', id, p: arr(pos) });
+  }
+
+  removePickup(id) {
+    const i = this.pickups.findIndex(p => p.id === id);
+    if (i < 0) return false;
+    this.scene.remove(this.pickups[i].mesh);
+    this.pickups.splice(i, 1);
+    return true;
+  }
+
+  // host: someone (local or remote) took a pickup
+  takePickup(id) {
+    if (this.removePickup(id)) this.emit({ k: 'took', id });
+  }
+
+  updatePickups(dt) {
+    const pl = this.player;
+    for (let i = this.pickups.length - 1; i >= 0; i--) {
+      const p = this.pickups[i];
+      p.t -= dt;
+      p.mesh.rotation.y += dt * 1.5;
+      const near = pl.alive && Math.hypot(pl.pos.x - p.mesh.position.x, pl.pos.z - p.mesh.position.z) < 1.3 && Math.abs(pl.pos.y - p.mesh.position.y) < 1.5;
+      if (near) {
+        this.arsenal.refill();
+        this.audio.pickup();
+        this.hud.toast('Ammo resupplied');
+        if (this.role === 'client') { this.net.send({ t: 'took', id: p.id }); this.removePickup(p.id); }
+        else this.takePickup(p.id);
+      } else if (p.t <= 0) this.removePickup(p.id);
+    }
+  }
+
+  // ---------- killstreaks ----------
+  checkStreak(s) {
+    const r = STREAKS.find(x => x.kills === s.streak);
+    if (!r) return;
+    if (s.isPlayer) this.streakReady(r.id);
+    else if (s.isRemote) { s.rewards.push(r.id); this.emit({ k: 'sr', to: s.id, id: r.id }); }
+    else this.useStreak(s, r.id);
+  }
+
+  streakReady(id) {
+    const r = STREAKS.find(x => x.id === id);
+    if (!r) return;
+    this.player.rewards.push(id);
+    this.hud.banner(`${r.name} ready`, `Press ${r.key}`, 'ally');
+    this.audio.streak();
+  }
+
+  announce(team, allyText, enemyText) {
+    const mine = team === this.player.team;
+    this.hud.banner(mine ? allyText : enemyText, '', mine ? 'ally' : 'enemy');
+    if (mine) this.audio.beep(); else this.audio.alarm();
+    this.emit({ k: 'ann', team, a: allyText, e: enemyText });
+  }
+
+  useStreak(owner, id, point, yaw) {
+    const t = owner.team;
+    if (id === 'uav') {
+      this.uav[t] = 30;
+      this.announce(t, 'Friendly UAV online', 'Enemy UAV spotted');
+    } else if (id === 'chopper') {
+      this.vehicles.push(new Chopper(this, owner, 1000 + (this.vehicleId = (this.vehicleId || 0) + 1)));
+      this.announce(t, 'Friendly Attack Chopper inbound', 'Enemy Attack Chopper inbound');
+    } else if (id === 'airstrike') {
+      if (!point) {
+        const intel = this.intel[t].slice().sort((a, b) => b.t - a.t)[0];
+        const e = intel || this.nearestEnemy(owner)?.pos || { x: SIZE / 2, z: SIZE / 2 };
+        point = new THREE.Vector3(e.x, 0, e.z);
+        yaw = Math.random() * Math.PI * 2;
+      }
+      this.callAirstrike(owner, point, yaw);
+      this.announce(t, 'Airstrike inbound', 'Enemy airstrike inbound!');
+    }
+  }
+
+  callAirstrike(owner, point, yaw) {
+    const dx = -Math.sin(yaw), dz = -Math.cos(yaw);
+    this.later(2.0, () => {
+      this.jet.fly(point, dx, dz);
+      this.audio.jet();
+      this.emit({ k: 'jet', p: arr(point), dx: r2(dx), dz: r2(dz) });
+    });
+    for (let i = 0; i < 7; i++) {
+      this.later(3.0 + i * 0.14, () => {
+        const x = point.x + dx * (i - 3) * 3.5, z = point.z + dz * (i - 3) * 3.5;
+        const y = groundAt(x, z, 0.1, 60);
+        this.explode(new THREE.Vector3(x, y + 0.2, z), owner, 7.5, 170, 'Airstrike', { streak: true });
+      });
+    }
+  }
+
+  later(delay, fn) { this.jobs.push({ t: this.time + delay, fn }); }
+
+  playerStreak(id, point, yaw) {
+    const pl = this.player, i = pl.rewards.indexOf(id);
+    if (i < 0 || !pl.alive) return;
+    if (id === 'airstrike' && !point) { this.targeting = true; this.hud.hint('Aim at the ground and click to mark the airstrike. Right-click cancels.'); return; }
+    pl.rewards.splice(i, 1);
+    if (this.role === 'client') this.net.send({ t: 'streak', id, p: point ? arr(point) : null, yaw });
+    else this.useStreak(pl, id, point, yaw);
+  }
+
+  // ---------- client: apply what the host sends ----------
+  applySnapshot(d) {
+    if (typeof d.tl === 'number') this.timeLeft = d.tl;
+    if (Array.isArray(d.sc)) this.teamScore = d.sc.slice(0, 2);
+    if (Array.isArray(d.uav)) this.uav = d.uav.slice(0, 2);
+    const pl = this.player;
+    for (const row of d.s || []) {
+      const [id, x, y, z, yaw, pitch, c, alive, hp, k, dd, a, sc, st] = row;
+      const s = this.byId.get(id);
+      if (!s) continue;
+      s.kills = k; s.deaths = dd; s.assists = a; s.score = sc; s.streak = st;
+      if (s === pl) { if (pl.alive && alive) pl.health = hp; continue; }
+      if (alive && !s.alive) s.place(x, y, z, yaw);
+      else if (!alive && s.alive) s.die();
+      s.setState(x, y, z, yaw, pitch, c);
+      s.health = hp;
+    }
+    // helicopters
+    const seen = new Set();
+    for (const [id, team, x, y, z, heading] of d.v || []) {
+      seen.add(id);
+      let v = this.vehicles.find(q => q.id === id);
+      if (!v) { v = new NetVehicle(this, id, team); this.vehicles.push(v); }
+      v.tgt.set(x, y, z); v.tHeading = heading;
+    }
+    for (const v of this.vehicles) if (!seen.has(v.id)) v.remove();
+    this.vehicles = this.vehicles.filter(v => v.alive);
+    // grenades
+    const n = d.n || [];
+    while (this.netNades.length < n.length) { const m = new THREE.Mesh(this.nadeGeo, this.nadeMat); this.scene.add(m); this.netNades.push(m); }
+    this.grenades = n.map(([x, y, z], i) => { this.netNades[i].position.set(x, y, z); this.netNades[i].visible = true; return { pos: this.netNades[i].position }; });
+    for (let i = n.length; i < this.netNades.length; i++) this.netNades[i].visible = false;
+    for (const ev of d.ev || []) this.applyEvent(ev);
+  }
+
+  applyEvent(ev) {
+    if (!ev || typeof ev !== 'object') return;
+    const pl = this.player, mine = ev.to === pl.id;
+    switch (ev.k) {
+      case 'shot': if (ev.id !== pl.id) this.renderShot(ev); break;
+      case 'boom': if (Array.isArray(ev.p)) this.explodeFx(v3(ev.p), ev.s || 1); break;
+      case 'jet': if (Array.isArray(ev.p)) { this.jet.fly(v3(ev.p), ev.dx, ev.dz); this.audio.jet(); } break;
+      case 'kill': {
+        const killer = this.byId.get(ev.a) || null, victim = this.byId.get(ev.v);
+        if (!victim) break;
+        if (victim === pl) this.localDeath(killer, ev.w);
+        else if (victim.alive) victim.die();
+        this.hud.feed(killer, victim, ev.w, ev.h, pl);
+        break;
+      }
+      case 'hurt': if (mine) { pl.lastHurt = this.time; this.audio.hurt(); this.hud.damageFrom({ x: ev.x, z: ev.z }, pl); } break;
+      case 'hm': if (mine) { this.hud.hitmarker(ev.kill, ev.head); this.audio.hit(ev.kill ? 'kill' : ev.head ? 'head' : 'hit'); } break;
+      case 'pop': if (mine && Array.isArray(ev.l)) this.hud.popup(ev.l.map(([t, s]) => [String(t), Number(s) || 0])); break;
+      case 'sr': if (mine) this.streakReady(ev.id); break;
+      case 'ann': {
+        const own = ev.team === pl.team;
+        this.hud.banner(own ? ev.a : ev.e, '', own ? 'ally' : 'enemy');
+        if (own) this.audio.beep(); else this.audio.alarm();
+        break;
+      }
+      case 'spawn': if (mine) { pl.spawn({ x: ev.x, z: ev.z }, ev.yaw, CLASSES[this.pendingCls]); this.hud.hideDeath(); } break;
+      case 'drop': if (Array.isArray(ev.p)) this.dropPickup(v3(ev.p), ev.id); break;
+      case 'took': this.removePickup(ev.id); break;
+      case 'roster': this.syncRoster(ev.r || []); break;
+      case 'end': if (Array.isArray(ev.sc)) this.teamScore = ev.sc.slice(0, 2); this.end(); break;
+    }
+  }
+
+  syncRoster(list) {
+    const ids = new Set(list.map(r => r.id));
+    for (const n of this.nets.slice()) if (!ids.has(n.id)) { n.remove(); this.nets.splice(this.nets.indexOf(n), 1); }
+    for (const r of list) {
+      if (r.id === this.player.id || this.byId.has(r.id)) continue;
+      const n = new NetSoldier(this, r.id, r.team, r.name, r.human, false);
+      n.pos.set(r.x, 0, r.z); n.tgt.copy(n.pos);
+      this.nets.push(n);
+    }
+    this.rebuild();
+  }
+
+  // ---------- frame ----------
+  update(dt, inp) {
+    if (this.state !== 'playing') return;
+    const pl = this.player, ars = this.arsenal;
+    this.time += dt;
+    this.timeLeft = Math.max(0, this.timeLeft - dt);
+    if (this.authority && this.timeLeft <= 0) { this.end(); return; }
+    this.pathBudget = 3;
+
+    for (let t = 0; t < 2; t++) {
+      if (this.uav[t] > 0) this.uav[t] -= dt;
+      this.intel[t] = this.intel[t].filter(i => this.time - i.t < 12);
+    }
+
+    if (pl.alive) {
+      if (inp.streak) this.playerStreak(inp.streak);
+      if (this.targeting) {
+        if (inp.firePressed) {
+          this.camera.getWorldDirection(_fwd);
+          const h = raycastWorld(this.camera.position, _fwd, 200);
+          if (h) {
+            this.targeting = false; this.hud.hint('');
+            this.playerStreak('airstrike', this.camera.position.clone().addScaledVector(_fwd, h.t), pl.yaw);
+          }
+        }
+        if (inp.adsPressed) { this.targeting = false; this.hud.hint(''); }
+        inp.fire = inp.firePressed = inp.ads = false;
+      }
+      pl.update(dt, inp);
+      ars.update(dt, inp, pl);
+    } else {
+      this.deadT -= dt;
+      if (this.authority && this.deadT <= 0) {
+        const sp = this.pickSpawn(pl.team);
+        pl.spawn(sp, sp.yaw, CLASSES[this.pendingCls]);
+        this.hud.hideDeath();
+      }
+    }
+
+    if (this.authority) {
+      for (const b of this.bots) b.update(dt);
+      this.updateGrenades(dt);
+      for (let i = this.jobs.length - 1; i >= 0; i--) {
+        if (this.jobs[i].t <= this.time) { const j = this.jobs[i]; this.jobs.splice(i, 1); j.fn(); }
+      }
+    }
+    for (const n of this.nets) n.update(dt);
+    for (const v of this.vehicles) v.update(dt);
+    this.vehicles = this.vehicles.filter(v => v.alive);
+    this.updatePickups(dt);
+    this.jet.update(dt);
+    this.effects.update(dt);
+
+    // camera
+    this.shake *= Math.exp(-dt * 6);
+    if (pl.alive) pl.updateCamera(this.camera, this.shake);
+    else this.deathCam(dt);
+    const fov = pl.alive ? ars.fovFor(this.settings.fov) : this.settings.fov;
+    if (Math.abs(this.camera.fov - fov) > 0.01) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
+    this.effects.setScale(this.renderer.domElement.height / (2 * Math.tan(this.camera.fov * DEG / 2)));
+    this.camera.updateMatrixWorld();
+    const L = this.audio.listener;
+    L.x = this.camera.position.x; L.z = this.camera.position.z; L.yaw = pl.alive ? pl.yaw : this.deathYaw;
+
+    if (pl.alive) ars.animate(dt, pl, inp.dx, inp.dy);
+    ars.holder.visible = pl.alive;
+
+    // enemy under the crosshair
+    let aimed = null;
+    if (pl.alive) {
+      this.camera.getWorldDirection(_fwd);
+      const h = this.traceShot(this.camera.position, _fwd, 90, pl);
+      if (h.entity && !h.entity.isVehicle) aimed = h.entity;
+    }
+    this.hud.update(this, dt, aimed);
+    this.net?.tick(dt);
+  }
+
+  deathCam(dt) {
+    const pl = this.player, cam = this.camera;
+    const k = Math.min(1, Math.max(0, (4 - this.deadT) / 0.6));
+    cam.position.set(pl.pos.x, pl.pos.y + 1.6 - 1.2 * k, pl.pos.z);
+    if (this.killer && this.killer.alive) {
+      _e.subVectors(this.killer.aimPoint(_c, false), cam.position);
+      const want = Math.atan2(-_e.x, -_e.z);
+      let d = want - this.deathYaw;
+      while (d > Math.PI) d -= 2 * Math.PI;
+      while (d < -Math.PI) d += 2 * Math.PI;
+      this.deathYaw += d * Math.min(1, dt * 3);
+      cam.rotation.set(Math.atan2(_e.y, Math.hypot(_e.x, _e.z)) * 0.8, this.deathYaw, 0.35 * k);
+    } else cam.rotation.set(-0.3 * k, this.deathYaw, 0.35 * k);
+  }
+}

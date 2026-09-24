@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Frontline</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud" class="hidden">
+  <canvas id="minimap" width="220" height="220"></canvas>
+  <div id="uavTag"></div>
+  <div id="scorebar">
+    <div class="team ally"><span id="scoreA">0</span><div class="bar"><i id="barA"></i></div></div>
+    <div id="timer">10:00</div>
+    <div class="team enemy"><div class="bar"><i id="barE"></i></div><span id="scoreE">0</span></div>
+  </div>
+  <div id="banner"></div>
+  <div id="killfeed"></div>
+  <div id="crosshair"><i class="t"></i><i class="b"></i><i class="l"></i><i class="r"></i><b></b></div>
+  <div id="hitmarker"><i></i><i></i><i></i><i></i></div>
+  <div id="aimName"></div>
+  <div id="indicators"></div>
+  <div id="popups"></div>
+  <div id="toast"></div>
+  <div id="hint"></div>
+  <div id="cookbar"><i id="cook"></i></div>
+  <div id="target"><i></i><i></i><span>MARK TARGET</span></div>
+  <div id="ammo">
+    <div id="wname"></div>
+    <div class="row"><span id="mag">30</span><span class="sep">/</span><span id="reserve">120</span></div>
+    <div id="nades"></div>
+    <div id="ammoHint"></div>
+  </div>
+  <div id="health"><i id="hpbar"></i></div>
+  <div id="streaks"></div>
+  <div id="vignette"></div>
+  <div id="scope"><div class="lens"></div><div id="breath"></div></div>
+</div>
+
+<div id="scoreboard" class="hidden"></div>
+
+<div id="death" class="hidden">
+  <h2>KILLED IN ACTION</h2>
+  <p id="deathBy"></p>
+  <p id="respawnIn"></p>
+</div>
+
+<div id="menu" class="screen">
+  <div class="panel">
+    <h1>FRONTLINE</h1>
+    <p class="sub">Team Deathmatch &middot; Crossroads &middot; 6 v 6</p>
+    <h3>Class</h3>
+    <div id="classes" class="cards"></div>
+    <div class="cols">
+      <div>
+        <h3>Enemy skill</h3>
+        <div id="diffs" class="seg"></div>
+      </div>
+      <div>
+        <h3>Settings</h3>
+        <label>Sensitivity <input id="sens" type="range" min="0.2" max="3" step="0.05"><output id="sensOut"></output></label>
+        <label>Field of view <input id="fov" type="range" min="65" max="105" step="1"><output id="fovOut"></output></label>
+        <label>Volume <input id="vol" type="range" min="0" max="1" step="0.05"><output id="volOut"></output></label>
+      </div>
+    </div>
+    <div class="cols">
+      <div>
+        <h3>Callsign</h3>
+        <input id="callsign" class="text" maxlength="16" placeholder="Player" autocomplete="off">
+      </div>
+      <div>
+        <h3>Multiplayer</h3>
+        <div class="seg"><button id="hostBtn">HOST</button><input id="joinCode" class="text code-in" maxlength="5" placeholder="CODE" autocomplete="off"><button id="joinBtn">JOIN</button></div>
+        <p id="mpMsg" class="note"></p>
+      </div>
+    </div>
+    <button id="deploy" class="primary">PLAY SOLO</button>
+    <div class="controls">
+      <span><kbd>WASD</kbd> move</span><span><kbd>Shift</kbd> sprint</span><span><kbd>C</kbd> crouch / slide</span>
+      <span><kbd>Space</kbd> jump</span><span><kbd>LMB</kbd> fire</span><span><kbd>RMB</kbd> aim</span>
+      <span><kbd>R</kbd> reload</span><span><kbd>1</kbd><kbd>2</kbd> / wheel swap</span><span><kbd>G</kbd> hold to cook frag</span>
+      <span><kbd>V</kbd> knife</span><span><kbd>3</kbd><kbd>4</kbd><kbd>5</kbd> killstreaks</span><span><kbd>Tab</kbd> scores</span>
+    </div>
+    <p class="note">First team to 100 kills or the most kills after 10 minutes wins. Bots fill empty slots in multiplayer.</p>
+  </div>
+</div>
+
+<div id="lobby" class="screen hidden">
+  <div class="panel small">
+    <h2>LOBBY</h2>
+    <h3>Room code</h3>
+    <div id="roomCode" class="roomcode"></div>
+    <p class="note" id="codeNote">Friends open this page, pick Join and type the code.</p>
+    <h3>Mode</h3>
+    <div id="modes" class="seg"><button data-mode="versus">Versus</button><button data-mode="coop">Co-op vs bots</button></div>
+    <h3>Players</h3>
+    <ul id="members" class="members"></ul>
+    <button id="startMp" class="primary">START MATCH</button>
+    <p id="lobbyMsg" class="note"></p>
+    <button id="leaveLobby" class="wide">LEAVE</button>
+  </div>
+</div>
+
+<div id="pause" class="screen hidden">
+  <div class="panel small">
+    <h2 id="pauseTitle">PAUSED</h2>
+    <p id="pauseNote" class="note"></p>
+    <button id="resume" class="primary">RESUME</button>
+    <h3>Class for next spawn</h3>
+    <div id="pauseClasses" class="seg wrap"></div>
+    <label>Sensitivity <input id="sens2" type="range" min="0.2" max="3" step="0.05"><output id="sens2Out"></output></label>
+    <button id="quit">QUIT TO MENU</button>
+    <p id="lockMsg" class="note"></p>
+  </div>
+</div>
+
+<div id="end" class="screen hidden">
+  <div class="panel">
+    <h1 id="endTitle">VICTORY</h1>
+    <p id="endScore" class="bigscore"></p>
+    <div id="endStats" class="stats"></div>
+    <div id="endBoard" class="board"></div>
+    <div class="row-btns"><button id="again" class="primary">PLAY AGAIN</button><button id="toMenu">MAIN MENU</button></div>
+    <p id="endNote" class="note"></p>
+  </div>
+</div>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
