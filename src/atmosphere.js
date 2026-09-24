@@ -66,6 +66,7 @@ void main() {
 }`;
 
 const lin = (hex) => new THREE.Color(hex);
+const _up = new THREE.Vector3(0, 1, 0), _sx = new THREE.Vector3(), _sy = new THREE.Vector3(), _sc = new THREE.Vector3();
 
 export class Atmosphere {
   constructor(scene, wscene, renderer) {
@@ -74,7 +75,7 @@ export class Atmosphere {
     this.sun = new THREE.DirectionalLight(0xffffff, 3);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
-    Object.assign(this.sun.shadow.camera, { left: -60, right: 60, top: 60, bottom: -60, near: 10, far: 220 });
+    Object.assign(this.sun.shadow.camera, { left: -62, right: 62, top: 62, bottom: -62, near: 10, far: 260 });
     this.sun.shadow.bias = -0.0003;
     this.sun.shadow.normalBias = 0.035;
     scene.add(this.hemi, this.sun, this.sun.target);
@@ -163,6 +164,18 @@ export class Atmosphere {
 
   update(dt, camera, pxScale) {
     this.time += dt;
+    // the shadow map follows the camera, snapped to whole texels so edges don't crawl
+    if (this.sunDir) {
+      const z = this.sunDir, x = _sx.crossVectors(_up, z).normalize(), y = _sy.crossVectors(z, x);
+      const c = camera.position, texel = 124 / this.sun.shadow.mapSize.x;
+      const a = Math.round(c.dot(x) / texel) * texel, b = Math.round(c.dot(y) / texel) * texel, d = c.dot(z);
+      _sc.copy(x).multiplyScalar(a).addScaledVector(y, b).addScaledVector(z, d);
+      this.sun.target.position.copy(_sc);
+      this.sun.position.copy(_sc).addScaledVector(z, 120);
+      // haze thins out with height so pilots can see the country around the battle
+      const k = 1 + Math.min(Math.max(c.y - 8, 0) / 50, 1.6);
+      this.scene.fog.near = this.look.fogNear * k; this.scene.fog.far = this.look.fogFar * k;
+    }
     this.uniforms.time.value = this.time;
     this.sky.position.copy(camera.position);
     if (this.wx.visible) {

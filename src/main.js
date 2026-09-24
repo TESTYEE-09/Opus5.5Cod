@@ -15,7 +15,7 @@ const gfx = new Graphics(canvas);
 const renderer = gfx.renderer;
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(80, innerWidth / innerHeight, 0.05, 900);
+const camera = new THREE.PerspectiveCamera(80, innerWidth / innerHeight, 0.1, 3000);
 camera.rotation.order = 'YXZ';
 
 // the viewmodel renders in its own pass so it never clips into walls
@@ -355,7 +355,7 @@ function frame(ts) {
     else { readInput(); game.effects.update(0); }
   } else if (game.state === 'menu') {
     menuT += dt * 0.05;
-    camera.position.set(SIZE / 2 + Math.cos(menuT) * 46, 20, SIZE / 2 + Math.sin(menuT) * 46);
+    camera.position.set(SIZE / 2 + Math.cos(menuT) * 70, 30, SIZE / 2 + Math.sin(menuT) * 70);
     camera.fov = 60; camera.updateProjectionMatrix();
     camera.lookAt(SIZE / 2, 3, SIZE / 2);
     game.arsenal.holder.visible = false;

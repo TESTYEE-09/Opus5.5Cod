@@ -5,9 +5,9 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { surface, R } from './textures.js';
 
 export const DIFFICULTY = {
-  recruit: { name: 'Recruit', react: 0.8, err: 1.6, min: 0.45, learn: 0.6, turn: 3.5, dmg: 0.6, head: 0.03 },
-  regular: { name: 'Regular', react: 0.5, err: 1.2, min: 0.28, learn: 0.9, turn: 5.5, dmg: 0.8, head: 0.1 },
-  veteran: { name: 'Veteran', react: 0.3, err: 0.9, min: 0.14, learn: 1.4, turn: 8, dmg: 1, head: 0.25 },
+  recruit: { name: 'Recruit', react: 1.0, err: 2.0, min: 0.6, learn: 0.5, turn: 3, dmg: 0.5, head: 0.02 },
+  regular: { name: 'Regular', react: 0.68, err: 1.55, min: 0.4, learn: 0.75, turn: 4.5, dmg: 0.62, head: 0.06 },
+  veteran: { name: 'Veteran', react: 0.42, err: 1.15, min: 0.22, learn: 1.1, turn: 6.5, dmg: 0.85, head: 0.15 },
 };
 
 const KITS = [['ar', 0.34], ['smg', 0.2], ['burst', 0.12], ['lmg', 0.07], ['shotgun', 0.09], ['dmr', 0.09], ['sniper', 0.09]];
@@ -17,9 +17,10 @@ function pickKit() {
   return 'ar';
 }
 
+// US Army in OCP (tan and brown) with coyote kit; Russian Army in EMR green with ratnik kit
 const TEAM_LOOK = [
-  { camo: [0x6b6a4a, 0x8a7d58, 0x4a4a34, 0x3a3326], vest: 0x5a5a40, helmet: 0x5f6042, accent: 0x3d7fe0, gear: 0x4a4a36 },
-  { camo: [0x4e5156, 0x6a6c70, 0x35373b, 0x232427], vest: 0x2c2e31, helmet: 0x2a2c2f, accent: 0xd0342a, gear: 0x26282a },
+  { camo: [0x8a7f5e, 0x6f6a4a, 0xa3946c, 0x4e4632], vest: 0x7a6c4e, helmet: 0x7d7052, accent: 0x3d7fe0, gear: 0x6a5e44 },
+  { camo: [0x55603f, 0x3c4630, 0x6f7552, 0x2a2e22], vest: 0x46503a, helmet: 0x4a5438, accent: 0xd0342a, gear: 0x3a4230 },
 ];
 
 const geoCache = {};
@@ -219,8 +220,8 @@ export class Bot {
     this.grenades = 1; this.nadeCool = 3;
     // about a third of bots carry a launcher for vehicles
     const lr = Math.random();
-    this.launcher = lr < 0.17 ? 'rpg' : lr < 0.3 ? 'stinger' : null;
-    this.rockets = this.launcher ? 2 : 0; this.rocketCd = 2;
+    this.launcher = lr < 0.17 ? 'rpg' : lr < 0.25 ? 'stinger' : null;
+    this.rockets = this.launcher === 'rpg' ? 2 : this.launcher ? 1 : 0; this.rocketCd = 2;
     this.walkPhase = 0; this.flashT = 0;
     this.deathT = 0;
     this.damagers.clear();
@@ -273,7 +274,7 @@ export class Bot {
       const p = e.aimPoint(_b, false);
       const dx = p.x - eye.x, dz = p.z - eye.z;
       const dist = Math.hypot(dx, dz, p.y - eye.y);
-      if (dist > (e.isVehicle ? (e.air && this.launcher === 'stinger' && this.rockets > 0 ? 220 : 70) : 85)) continue;
+      if (dist > (e.isVehicle ? (e.kind === 'drone' ? (e === this.target ? 45 : 28) : e.air && this.launcher === 'stinger' && this.rockets > 0 ? 220 : 70) : 85)) continue;
       const hd = Math.hypot(dx, dz) || 1;
       const dot = (dx * fx + dz * fz) / hd;
       if (e !== this.target && dot < 0.2 && dist > 6) continue;
@@ -288,6 +289,8 @@ export class Bot {
         if (best !== this.target || g.time - this.lastSeenT > 1.5) {
           this.reactT = g.diff.react * (0.7 + Math.random() * 0.6) + (dist > 40 ? 0.25 : 0) + (this.kit === 'sniper' ? 0.3 : 0);
           this.err = g.diff.err * (1 + dist / 45);
+          // a small, fast FPV drone takes a moment to pick out and is hard to track
+          if (best.kind === 'drone') { this.reactT += 0.5 + Math.random() * 0.5; this.err *= 3; }
         }
       }
       this.target = best;
@@ -390,13 +393,13 @@ export class Bot {
     const facing = this.faceToward(aim.x, aim.z, dt, D.turn);
     this.pitch = Math.atan2(aim.y - eye.y, Math.hypot(aim.x - eye.x, aim.z - eye.z));
 
-    this.err = Math.max(D.min, this.err * Math.exp(-D.learn * dt));
+    this.err = Math.max(D.min * (t.kind === 'drone' ? 3.5 : 1), this.err * Math.exp(-D.learn * (t.kind === 'drone' ? 0.35 : 1) * dt));
     this.reactT -= dt;
 
     // launchers against vehicles: RPG at anything slow, Stinger at aircraft
     if (t.isVehicle && this.rockets > 0 && this.rocketCd <= 0 && this.reactT <= 0 && facing < 0.2 &&
-        ((this.launcher === 'stinger' && t.air) || (this.launcher === 'rpg' && (t.kind === 'tank' || t.kind === 'aa' || t.kind === 'heli' || t.kind === 'drone') && dist < 90))) {
-      this.rockets--; this.rocketCd = 5;
+        ((this.launcher === 'stinger' && t.air && t.kind !== 'drone' && Math.random() < 0.5) || (this.launcher === 'rpg' && (t.kind === 'tank' || t.kind === 'aa' || t.kind === 'heli') && dist < 90))) {
+      this.rockets--; this.rocketCd = this.launcher === 'stinger' ? 14 : 5;
       g.botLaunch(this, t, this.launcher);
       return false;
     }
@@ -498,7 +501,7 @@ export class Bot {
     } else if (r < 0.8) {
       this.goal = interest[Math.floor(Math.random() * interest.length)];
     } else {
-      this.goal = this.team === 0 ? randomWalkable(30, SIZE - 4) : randomWalkable(4, 50);
+      this.goal = this.team === 0 ? randomWalkable(SIZE * 0.36, SIZE - 4) : randomWalkable(4, SIZE * 0.64);
     }
     this.path = null;
   }

@@ -269,6 +269,16 @@ export class Sfx {
     this.play(pick('impact', 3), { mix: 'impact', cap: 'impact', gain: 3 / Math.max(3, dist), rate: 1.2 + Math.random() * 0.4, pan, dist, back });
   }
 
+  // something breaking: a low crunch plus a burst of rubble noise
+  crash(pos, heavy = false) {
+    if (!this.ctx) return;
+    const { dist, pan, back } = this.spatial(pos);
+    if (dist > 70) return;
+    const g = Math.min(1.4, 5 / Math.max(3, dist)) * (heavy ? 1.3 : 0.9);
+    for (let i = 0; i < (heavy ? 3 : 2); i++) this.play(pick('impact', 3), { mix: 'impact', gain: g, rate: (heavy ? 0.35 : 0.55) + Math.random() * 0.2, pan, dist, back, when: i * 0.05 });
+    this.whoosh(pos, { dur: heavy ? 0.9 : 0.45, f0: heavy ? 700 : 1600, f1: 120, q: 0.5, gain: 0.45 * g, attack: 0.005 });
+  }
+
   explosion(pos) {
     if (!this.ctx) return;
     const { dist, pan, back } = this.spatial(pos);

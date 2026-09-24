@@ -204,6 +204,19 @@ export const PROPS = {
     }
     k.part(box(1.4, 0.08, 0.08), 'metal', 0x2a2c2a, 0, h - 0.25, 0);
   },
+  // a national flag on a mast: 'us' or 'ru'
+  flag(k, o) {
+    const h = o.h || 9, W = 2.4, H = 1.3, x0 = 0.1;
+    k.part(cyl(0.06, 0.08, h, 8), 'metal', 0xb8bcbe, 0, h / 2, 0);
+    k.part(sph(0.1, 8, 6), 'metal', 0xc8a040, 0, h + 0.05, 0);
+    const y0 = h - 0.2 - H;
+    if (o.nation === 'ru') {
+      [0xf2f2f0, 0x1c3f9a, 0xd0281e].forEach((c, i) => k.part(box(W, H / 3, 0.03), 'fabric', c, x0 + W / 2, y0 + H - (i + 0.5) * H / 3, 0));
+    } else {
+      for (let i = 0; i < 7; i++) k.part(box(W, H / 7, 0.03), 'fabric', i % 2 ? 0xf2f2f0 : 0xb8222a, x0 + W / 2, y0 + H - (i + 0.5) * H / 7, 0);
+      k.part(box(W * 0.42, H * 4 / 7, 0.035), 'fabric', 0x23305e, x0 + W * 0.21, y0 + H - H * 2 / 7, 0);
+    }
+  },
   pole(k, o) {
     const h = o.h || 8;
     k.part(cyl(0.12, 0.16, h, 8), 'rough', 0x5a4632, 0, h / 2, 0);

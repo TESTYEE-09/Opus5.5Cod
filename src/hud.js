@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { minimapImage, SIZE } from './world.js';
-import { STREAKS, CALLS } from './game.js';
+import { STREAKS, CALLS, TEAM_NAMES } from './game.js';
+import { vehicleName } from './vehicles.js';
 
 const $ = (id) => document.getElementById(id);
 const DEG = Math.PI / 180;
@@ -181,7 +182,7 @@ export class Hud {
     const pl = game.player;
     const table = (team) => {
       const rows = game.soldiers.filter(s => s.team === team).sort((x, y) => y.score - x.score);
-      return `<table class="${team === pl.team ? 'ally' : 'enemy'}"><thead><tr><th>${team ? 'OpFor' : 'Rangers'} &middot; ${game.teamScore[team]}</th><th>Score</th><th>K</th><th>D</th><th>A</th></tr></thead><tbody>` +
+      return `<table class="${team === pl.team ? 'ally' : 'enemy'}"><thead><tr><th>${TEAM_NAMES[team]} &middot; ${game.teamScore[team]}</th><th>Score</th><th>K</th><th>D</th><th>A</th></tr></thead><tbody>` +
         rows.map(s => `<tr class="${s === pl ? 'me' : ''}${s.alive ? '' : ' dead'}"><td>${esc(s === pl ? 'You' : s.name)}${s.human || s.isPlayer ? ' &#9679;' : ''}</td><td>${s.score}</td><td>${s.kills}</td><td>${s.deaths}</td><td>${s.assists}</td></tr>`).join('') +
         '</tbody></table>';
     };
@@ -192,6 +193,7 @@ export class Hud {
     const pl = game.player, ars = game.arsenal;
     const a = game.teamScore[pl.team], e = game.teamScore[1 - pl.team], lim = game.settings.scoreLimit;
     $('scoreA').textContent = a; $('scoreE').textContent = e;
+    $('nameA').textContent = TEAM_NAMES[pl.team]; $('nameE').textContent = TEAM_NAMES[1 - pl.team];
     $('barA').style.width = `${a / lim * 100}%`; $('barE').style.width = `${e / lim * 100}%`;
     const tl = Math.ceil(game.timeLeft);
     $('timer').textContent = `${Math.floor(tl / 60)}:${String(tl % 60).padStart(2, '0')}`;
@@ -289,7 +291,7 @@ export class Hud {
     }).join('') + `<div class="streak-count">Streak ${pl.streak}${next ? ` &middot; ${next.kills - pl.streak} to ${next.name}` : ''}</div>` +
       CALLS.map(c => {
         const cd = pl.vcool?.[c.id] || 0;
-        return `<div class="sk call ${cd > 0 ? '' : 'ready'}"><kbd>${c.key}</kbd><span>${c.name}</span><em>${cd > 0 ? `${Math.ceil(cd)}s` : 'READY'}</em></div>`;
+        return `<div class="sk call ${cd > 0 ? '' : 'ready'}"><kbd>${c.key}</kbd><span>${c.id === 'drone' ? c.name : vehicleName(c.id, game.player.team)}</span><em>${cd > 0 ? `${Math.ceil(cd)}s` : 'READY'}</em></div>`;
       }).join('');
 
     if (!pl.alive) $('respawnIn').textContent = `Respawning in ${Math.max(0, game.deadT).toFixed(1)}`;
@@ -309,7 +311,7 @@ export class Hud {
   drawMinimap(game) {
     const c = this.mm, g = this.mmCtx, W = c.width, pl = game.player;
     const yaw = pl.alive ? pl.yaw : game.deathYaw;
-    const s = W / 80;
+    const s = W / (pl.vehicle?.air ? 240 : pl.vehicle ? 120 : 80);
     g.clearRect(0, 0, W, W);
     g.save();
     g.beginPath(); g.arc(W / 2, W / 2, W / 2 - 3, 0, Math.PI * 2); g.clip();

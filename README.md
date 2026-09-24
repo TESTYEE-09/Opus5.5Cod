@@ -1,21 +1,23 @@
 # Frontline
 
-A browser first-person shooter in the style of Call of Duty team deathmatch, built with three.js. Two teams of six fight across three maps. Bots fill every slot that no human takes.
+A browser first-person shooter in the style of Call of Duty team deathmatch, built with three.js. The USA and Russia, eight a side, fight across three large maps. Bots fill every slot that no human takes.
 
 **Play:** https://testyee-09.github.io/Opus5.5Cod/
 
 ## What's in it
 
-- Three maps:
+- Three 160 m maps. Each has a hand-built town in the middle, generated outskirts around it (houses, walled compounds, ruins, groves, wrecks, fences, cover) and a base with flags, tents and AA guns for each side. Past the fence the land keeps going, so the air war has hills, villages, forest and mountains below it:
   - **Crossroads**: a desert town at a road junction in the afternoon.
-  - **Harbor**: container docks at sunset under a gantry crane, with water and a cargo ship.
-  - **Outpost**: a snowed-in mountain base with a bunker, Quonset barracks and a watchtower.
+  - **Harbor**: container docks at sunset under a gantry crane, with warehouses, container stacks, water and cargo ships.
+  - **Outpost**: a snowed-in mountain base in a pine forest, with a bunker, Quonset barracks, cabins and a watchtower.
+- **USA vs Russia**: US soldiers wear OCP camouflage and drive the M1 Abrams and fly the F-16; Russian soldiers wear EMR green and drive the T-80 and fly the Su-27.
+- **Destruction**: explosives blow holes in plaster, brick, plank and sheet-metal walls and knock down sandbags. Bullets break crates and fences. Red fuel barrels explode and set each other off. Cars burn out into wrecks. Tanks drive straight through crates, fences, barrels, sandbags and thin walls.
 - Nine classes: AR-4 rifle, VX-9 SMG, HMG-7 machine gun, RSK-50 bolt-action sniper, M-87 pump shotgun, BR-3 three-round-burst rifle, SVX-10 marksman rifle with a 4x scope, and two launcher classes. **Anti-Tank** carries an RPG-7 and **Anti-Air** a Stinger that locks on to aircraft when you hold them in the sight. Every class carries frag grenades and a knife. Most carry a P-12 pistol; Recon carries an R-44 Magnum revolver instead.
 - Vehicles you drive yourself, each on its own cooldown:
   - **FPV drone** (7): a quadcopter with a warhead strapped under it. It flies on real thrust and gravity: the mouse pitches and yaws, A and D roll, W and S set the throttle, Space is full power and Shift holds a hover. It explodes on impact or when you click. The camera tilts up like a real FPV camera, the battery runs down, and the video breaks up as you fly out of radio range. Your soldier stands still and exposed while you fly.
-  - **Tank** (8): WASD drive and the turret follows the mouse. Left click fires the main gun, Space the coaxial machine gun, and right click opens the gunner's sight. It runs over enemies, shrugs off bullets, and takes about three RPGs to destroy.
+  - **Tank** (8): WASD drive and the turret follows the mouse. Left click fires the main gun, Space the coaxial machine gun, and right click opens the gunner's sight. It runs over enemies, flattens light cover, shrugs off bullets, and takes about three RPGs to destroy.
   - **Jet** (9): the mouse pitches and rolls, A and D work the rudder, W and S set the throttle and Shift is the afterburner. Left click fires the cannon, right click drops a bomb on the impact marker, and Space releases flares against Stingers.
-- **Anti-air**: each team has two AA guns near its spawn. They shoot at enemy aircraft on their own, more accurately with a gunner; walk up and press F to man one. Bullets barely scratch a tank; rockets, grenades and bombs do real damage.
+- **Anti-air**: each team has two AA guns at its base. Unmanned they fire at jets and choppers slowly and loosely and ignore drones; walk up and press F to man one. Jets are tough (about three Stingers) and carry five flares. Bullets barely scratch a tank; rockets, grenades and bombs do real damage.
 - **Chopper Gunner** (7-kill streak): you man the helicopter's chin cannon through a thermal camera while it circles the map.
 - Lean around corners with Q and E, and go prone with Ctrl or Z. Prone halves your spread and recoil and shrinks you to a low target.
 - Sights: open reflex and holographic sights with clear glass and thin frames, glowing dots on the iron sights, and full-screen scope reticles for the sniper and marksman rifles.

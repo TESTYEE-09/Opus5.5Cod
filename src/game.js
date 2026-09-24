@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { raycastWorld, lineOfSight, pointSolid, groundAt, overlaps, spawns, SIZE, GRAVITY, STEP, materialAt } from './world.js';
+import { raycastWorld, lineOfSight, pointSolid, groundAt, overlaps, spawns, SIZE, GRAVITY, STEP, materialAt, objectAt, objectsNear, breakObject } from './world.js';
 import { Effects } from './effects.js';
 import { Arsenal, CLASSES, falloff, FUSE } from './weapons.js';
 import { Player } from './player.js';
@@ -35,7 +35,11 @@ function cone(fwd, angle, out) {
 }
 
 const zoneMul = (def, zone) => zone === 'head' ? def.head : zone === 'legs' ? 0.85 : 1;
-const TEAM_SIZE = 6;
+const TEAM_SIZE = 8;
+export const TEAM_NAMES = ['USA', 'RUSSIA'];
+// chunk colour for each kind of breaking thing
+const DEBRIS = { wood: [0.5, 0.36, 0.22], sand: [0.62, 0.56, 0.42], metal: [0.3, 0.3, 0.3], plaster: [0.78, 0.72, 0.62], plaster2: [0.7, 0.66, 0.58],
+  brick: [0.58, 0.32, 0.24], planks: [0.45, 0.35, 0.25], corrugated: [0.45, 0.48, 0.5], concrete: [0.6, 0.6, 0.58] };
 const r2 = (v) => Math.round(v * 100) / 100;
 const arr = (v) => [r2(v.x), r2(v.y), r2(v.z)];
 const v3 = (a) => new THREE.Vector3(a[0], a[1], a[2]);
@@ -55,7 +59,7 @@ export class Game {
     this.netNades = [];
     this.projectiles = new Projectiles(this);
     this.deadVehicles = new Set();
-    this.predicted = [];
+    this.predicted = []; this.booms = [];
     this.aiCallT = [60, 60];
     this.net = null;
     this.role = 'solo';
@@ -83,7 +87,7 @@ export class Game {
     this.player.vehicle = null; this.player.inVehicle = false;
     this.deadVehicles.clear();
     this.bots = []; this.nets = []; this.grenades = []; this.netNades = []; this.pickups = []; this.vehicles = [];
-    this.jobs = []; this.events = [];
+    this.jobs = []; this.events = []; this.booms = [];
     this.effects.clear();
   }
 
@@ -147,6 +151,7 @@ export class Game {
     if (!roster.some(r => r.me)) return;
     const rules = msg.rules || {};
     this.startMatch({ ...this.settings, map: typeof rules.map === 'string' ? rules.map : 'crossroads', scoreLimit: rules.scoreLimit, timeLimit: rules.timeLimit, timeLeft: rules.timeLeft, score: msg.score }, roster);
+    if (Array.isArray(msg.br)) for (const id of msg.br.slice(0, 5000)) breakObject(Number(id));
   }
 
   rebuild() {
@@ -207,7 +212,7 @@ export class Game {
   }
 
   pickSpawn(team) {
-    let best = null, bestScore = -Infinity;
+    let best = spawns[team].find(s => !s.fwd) || spawns[team][0], bestScore = -Infinity;
     for (const sp of spawns[team]) {
       let minEnemy = 60, crowd = 0;
       for (const s of this.soldiers) {
@@ -216,7 +221,8 @@ export class Game {
         if (s.team !== team) minEnemy = Math.min(minEnemy, d);
         else if (d < 1.5) crowd++;
       }
-      const score = minEnemy + Math.random() * 8 - crowd * 50;
+      if (sp.fwd && minEnemy < 32) continue;
+      const score = minEnemy + Math.random() * 8 - crowd * 50 + (sp.fwd ? 5 : 0);
       if (score > bestScore) { bestScore = score; best = sp; }
     }
     return best;
@@ -287,6 +293,8 @@ export class Game {
     if (!this.authority || !victim.alive || this.state !== 'playing') return null;
     if (attacker && attacker !== victim && attacker.team === victim.team) return null;
     if (victim.isVehicle) {
+      const d = victim.driver;
+      if (d && (d.isPlayer || d.human) && attacker && !attacker.isPlayer && !attacker.human) amount *= this.diff.dmg;
       victim.applyDamage(amount, attacker, weapon);
       this.hitFeedback(attacker, !victim.alive, false);
       return victim.alive ? 'hit' : 'kill';
@@ -416,7 +424,7 @@ export class Game {
     const pl = this.player;
     this.camera.getWorldDirection(_fwd);
     _o.copy(this.camera.position);
-    const hits = new Map(), sent = [];
+    const hits = new Map(), sent = [], objHits = new Map();
     const pellets = def.pellets || 1;
     for (let i = 0; i < pellets; i++) {
       cone(_fwd, spreadDeg * DEG, _d);
@@ -430,13 +438,18 @@ export class Game {
         hits.set(h.entity, cur);
         if (h.entity.isVehicle) this.effects.impact(end, _d.clone().negate(), 'metal');
         else { this.bleed(end, _d); kind = 2; }
-      } else if (h.world) { this.effects.impact(end, h.world.normal, materialAt(end, h.world.normal)); this.audio.impact(end); kind = 1; normal = h.world.normal; }
+      } else if (h.world) {
+        this.effects.impact(end, h.world.normal, materialAt(end, h.world.normal)); this.audio.impact(end); kind = 1; normal = h.world.normal;
+        const ob = objectAt(end, normal);
+        if (ob && !ob.spec.blast) objHits.set(ob, (objHits.get(ob) || 0) + falloff(def, h.t));
+      }
       if (i === 0 || i % 3 === 0) {
         this.effects.tracer(muzzle, end);
         sent.push([...arr(end), kind, ...(normal ? arr(normal) : [])]);
         if (this.role === 'host') this.emitShot(pl, muzzle, end, kind, normal, def.model);
       }
     }
+    for (const [o, dmg] of objHits) this.hitObject(o, dmg, pl, false);
     if (this.role === 'client') {
       for (const [e, r] of hits) this.net.send({ t: 'hit', id: e.id, d: Math.round(r.dmg * 10) / 10, h: r.head, w: def.name });
       this.net.send({ t: 'fire', m: arr(muzzle), e: sent, key: def.model });
@@ -454,10 +467,14 @@ export class Game {
     const end = o.clone().addScaledVector(dir, h.t);
     let kind = 0, normal = null;
     if (h.entity) {
-      const dmg = h.entity.isVehicle ? 20 : falloff(def, h.t) * zoneMul(def, h.zone);
+      const dmg = h.entity.isVehicle ? 13 : falloff(def, h.t) * zoneMul(def, h.zone);
       this.damage(h.entity, dmg, bot, def.name, h.zone === 'head', bot.pos);
       if (!h.entity.isVehicle && !h.entity.isPlayer) { this.bleed(end, dir); kind = 2; }
-    } else if (h.world && Math.random() < 0.6) { this.effects.impact(end, h.world.normal, materialAt(end, h.world.normal)); this.audio.impact(end); kind = 1; normal = h.world.normal; }
+    } else if (h.world) {
+      const ob = objectAt(end, h.world.normal);
+      if (ob && !ob.spec.blast) this.hitObject(ob, falloff(def, h.t) * 0.5, bot, false);
+      if (Math.random() < 0.6) { this.effects.impact(end, h.world.normal, materialAt(end, h.world.normal)); this.audio.impact(end); kind = 1; normal = h.world.normal; }
+    }
     const color = bot.team ? 0xffa070 : 0xffe0a0;
     if (tracer) { this.effects.tracer(muzzle, end, color); this.emitShot(bot, muzzle, end, kind, normal, def.model, color); }
     this.whizz(o, dir, h);
@@ -480,6 +497,8 @@ export class Game {
     } else if (h.world) {
       this.effects.impact(end, h.world.normal, materialAt(end, h.world.normal));
       if (Math.random() < 0.3) this.audio.impact(end);
+      const ob = objectAt(end, h.world.normal);
+      if (ob && !ob.spec.blast && (this.authority || v.local)) this.hitObject(ob, dmg, shooter, false);
       kind = 1; normal = h.world.normal;
     }
     if (tracer) this.effects.tracer(o, end, color, 600);
@@ -631,9 +650,53 @@ export class Game {
     for (const v of this.vehicles) {
       if (!v.alive) continue;
       const d = Math.max(0, v.pos.distanceTo(src) - (v.size || 2));
-      if (d < radius) this.damage(v, maxDmg * 1.5 * (1 - d / radius), owner, weapon, false, p, extra);
+      if (d < radius) this.damage(v, maxDmg * 1.5 * (1 - d / radius) * (v.spec?.splash?.[weapon] ?? 1), owner, weapon, false, p, extra);
     }
+    // walls, crates and barrels: the blast falls off fast, so a rocket punches a hole, not a street
+    for (const { o, d } of objectsNear(p, radius)) this.hitObject(o, maxDmg * 2 * (1 - d / radius) ** 2, owner, true);
     if (owner) this.noise(owner, p, 30);
+  }
+
+  // ---------- breakable objects ----------
+  // Any role may call this: the host applies it, a client forwards it to the host.
+  hitObject(o, amount, attacker, explosive) {
+    if (!o?.alive || this.state !== 'playing' || !(amount > 0)) return;
+    if (o.spec.blast && !explosive) return;
+    if (!this.authority) { this.net?.send({ t: 'ob', i: o.id, d: Math.min(400, Math.round(amount)), x: explosive ? 1 : 0 }); return; }
+    o.hp -= amount;
+    if (o.hp <= 0) this.breakObj(o, attacker);
+  }
+
+  // a tank rolling over something: the driver sees it go at once
+  crushObject(o, by) {
+    if (!o?.alive || !o.spec.crush) return;
+    if (this.authority) { this.breakObj(o, by); return; }
+    this.net?.send({ t: 'ob', i: o.id, d: 9999, x: 1 });
+    if (breakObject(o.id)) this.objectFx(o);
+  }
+
+  breakObj(o, attacker) {
+    if (!breakObject(o.id)) return;
+    this.objectFx(o);
+    this.emit({ k: 'dx', i: o.id });
+    const b = o.spec.boom;
+    if (b) this.booms.push({ t: 0.12 + Math.random() * 0.15, p: new THREE.Vector3((o.x0 + o.x1) / 2, o.y0 + 0.5, (o.z0 + o.z1) / 2), owner: attacker, r: b[0], dmg: b[1], w: o.kind === 'car' ? 'Car' : 'Barrel' });
+  }
+
+  objectFx(o) {
+    const mat = o.boxes.find(b => b.mat !== 'invis' && b.mat !== 'snowcap')?.mat;
+    const col = o.kind === 'barrel' ? [0.55, 0.16, 0.1] : DEBRIS[mat] || DEBRIS[o.spec.debris] || DEBRIS.wood;
+    if (!o.spec.wreck) this.effects.shatter(o, col);
+    this.audio.crash(_c.set((o.x0 + o.x1) / 2, o.y0 + 0.5, (o.z0 + o.z1) / 2), o.kind === 'wall' || o.kind === 'sandbag');
+  }
+
+  updateBooms(dt) {
+    for (let i = this.booms.length - 1; i >= 0; i--) {
+      const b = this.booms[i];
+      if ((b.t -= dt) > 0) continue;
+      this.booms.splice(i, 1);
+      this.explode(b.p, b.owner, b.r, b.dmg, b.w);
+    }
   }
 
   // ---------- pickups ----------
@@ -984,6 +1047,7 @@ export class Game {
     const pl = this.player, mine = ev.to === pl.id;
     switch (ev.k) {
       case 'shot': if (ev.id !== pl.id) this.renderShot(ev); break;
+      case 'dx': { const o = breakObject(Number(ev.i)); if (o) this.objectFx(o); break; }
       case 'boom': if (Array.isArray(ev.p)) { const p = v3(ev.p); if (!this.wasPredicted(p)) this.explodeFx(p, ev.s || 1, !!ev.a); } break;
       case 'proj': {
         if (ev.o === pl.id || !PROJ[ev.pk] || !Array.isArray(ev.p) || !Array.isArray(ev.v)) break;
@@ -1104,6 +1168,7 @@ export class Game {
     for (const v of this.vehicles) v.update(dt);
     this.vehicles = this.vehicles.filter(v => v.alive || v.persistent);
     this.projectiles.update(dt);
+    if (this.authority) this.updateBooms(dt);
     this.tankContacts();
     if (pl.inVehicle && pl.vehicle) pl.pos.copy(pl.vehicle.pos);
     this.updatePickups(dt);

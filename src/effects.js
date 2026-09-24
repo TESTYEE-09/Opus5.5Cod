@@ -414,6 +414,23 @@ export class Effects {
     ring.t = 0; ring.big = big; ring.mesh.position.set(p.x, Math.max(0.05, p.y + 0.05), p.z); ring.mesh.visible = true;
   }
 
+  // a crate, wall panel or barrel breaking apart: chunks, splinters and a dust cloud
+  shatter(o, col) {
+    const cx = (o.x0 + o.x1) / 2, cy = (o.y0 + o.y1) / 2, cz = (o.z0 + o.z1) / 2;
+    const sx = o.x1 - o.x0, sy = o.y1 - o.y0, sz = o.z1 - o.z0, vol = Math.min(40, sx * sy * sz);
+    const n = Math.round(14 + vol * 5), r = () => Math.random() - 0.5;
+    for (let i = 0; i < n; i++) {
+      const k = 0.7 + Math.random() * 0.5;
+      this.debris.emit(cx + r() * sx, cy + r() * sy, cz + r() * sz, r() * 9, 2 + Math.random() * 6, r() * 9,
+        1.5 + Math.random() * 1.5, 0.08 + Math.random() * 0.14, 0.06, col[0] * k, col[1] * k, col[2] * k, 1, 18, 0.2, 0.3);
+    }
+    const d = this.groundDust;
+    for (let i = 0; i < 6 + vol * 1.5; i++) {
+      this.dust.emit(cx + r() * sx, o.y0 + Math.random() * sy, cz + r() * sz, r() * 2.5, 0.3 + Math.random(), r() * 2.5,
+        2 + Math.random() * 2, 0.8, 2.6 + Math.min(2, vol * 0.1), (d[0] + col[0]) / 2, (d[1] + col[1]) / 2, (d[2] + col[2]) / 2, 0.55, 0, 1.5);
+    }
+  }
+
   // tank gun: a blast of smoke along the barrel and a hard flash
   cannonBlast(p, d) {
     const r = () => Math.random() - 0.5;

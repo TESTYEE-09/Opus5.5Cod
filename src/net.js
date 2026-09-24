@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { Peer } from 'peerjs';
 import { buildSoldier, setRelation, animateSoldier, animateDeath } from './bots.js';
 import { VehicleProxy, PROJ } from './vehicles.js';
+import { objects, brokenIds } from './world.js';
 
 const PREFIX = 'frontline-opus55cod-';
 const RATE = 1 / 20;
@@ -236,7 +237,7 @@ export class Net {
   sendStart(id) {
     const g = this.game, c = this.clients.get(id);
     if (!c?.conn.open) return;
-    c.conn.send({ t: 'start', you: id, rules: { map: g.settings.map, scoreLimit: g.settings.scoreLimit, timeLimit: g.settings.timeLimit, timeLeft: g.timeLeft }, roster: g.rosterList(), score: g.teamScore });
+    c.conn.send({ t: 'start', you: id, rules: { map: g.settings.map, scoreLimit: g.settings.scoreLimit, timeLimit: g.settings.timeLimit, timeLeft: g.timeLeft }, roster: g.rosterList(), score: g.teamScore, br: brokenIds() });
   }
 
   broadcast(msg) {
@@ -297,6 +298,15 @@ export class Net {
         if (!s.alive) break;
         const v = g.byId.get(d.id) || g.vehicles.find(x => x.id === d.id);
         if (v) g.damage(v, Math.max(0, Math.min(250, num(d.d))), s, String(d.w ?? '').slice(0, 20), !!d.h, s.pos);
+        break;
+      }
+      case 'ob': {
+        // a client's shot, blast or tank hit a breakable object
+        const o = objects[num(d.i, -1)];
+        if (!o) break;
+        const amt = Math.max(0, Math.min(9999, num(d.d)));
+        if (amt >= 9999) g.crushObject(o, s);
+        else g.hitObject(o, Math.min(400, amt), s, !!d.x);
         break;
       }
       case 'fire':

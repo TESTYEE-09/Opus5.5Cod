@@ -23,6 +23,7 @@ kbd { display: inline-block; min-width: 22px; padding: 1px 6px; margin-right: 3p
 
 #scorebar { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 14px; font-weight: 700; }
 #scorebar .team { display: flex; align-items: center; gap: 8px; font-size: 28px; }
+#scorebar .tname { font-size: 13px; letter-spacing: 2px; opacity: 0.85; }
 #scorebar .bar { width: 150px; height: 8px; background: rgba(0,0,0,0.45); border: 1px solid var(--line); }
 #scorebar .bar i { display: block; height: 100%; width: 0; transition: width 0.3s; }
 #scorebar .ally .bar i { background: var(--ally); }
