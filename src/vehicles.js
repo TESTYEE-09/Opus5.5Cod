@@ -750,7 +750,7 @@ export class Tank extends Vehicle {
       this.goal = h > 40 ? { x: t.pos.x, z: t.pos.z } : null;
     } else {
       this.tYaw = this.yaw; this.tPitch = 0;
-      if (!this.goal && interest.length) this.goal = interest[Math.floor(Math.random() * interest.length)];
+      if (!this.goal) this.goal = this.game.mode.vehicleGoal(this.team) || (interest.length ? interest[Math.floor(Math.random() * interest.length)] : null);
     }
     this.drive(dt);
   }
@@ -775,7 +775,7 @@ export class Tank extends Vehicle {
     if ((this.stuckT += dt) > 3) {
       if (this.pos.distanceTo(this.stuckPos) < 1.2) {
         this.reverseT = 1.6; this.path = null;
-        this.goal = interest.length ? interest[Math.floor(Math.random() * interest.length)] : null;
+        this.goal = this.game.mode.vehicleGoal(this.team) || (interest.length ? interest[Math.floor(Math.random() * interest.length)] : null);
       }
       this.stuckT = 0; this.stuckPos.copy(this.pos);
     }
@@ -876,8 +876,8 @@ export class FighterJet extends Vehicle {
     const dc = Math.hypot(this.pos.x - SIZE / 2, this.pos.z - SIZE / 2);
     if (this.driver) {
       this.fuel -= dt;
-      this.outside = dc > 380;
-      if (dc > 470 || this.pos.y > 300) this.steerTo(_c.set(SIZE / 2, 90, SIZE / 2), dt, 1.2);
+      this.outside = dc > SIZE / 2 + 300;
+      if (dc > SIZE / 2 + 390 || this.pos.y > 300) this.steerTo(_c.set(SIZE / 2, 90, SIZE / 2), dt, 1.2);
       if (this.fuel <= 0) { g.hud.toast('Out of fuel: returning to base'); g.leftVehicle(this.driver, this); }
     } else if (this.ai) this.think(dt);
     else this.leave(dt);
@@ -910,7 +910,7 @@ export class FighterJet extends Vehicle {
     if (this.flares < 5 && (this.flareRe -= dt) <= 0) { this.flares++; this.flareRe = 7; }
     this.pose();
     this.sound?.set(this.controlled ? null : this.pos, 0.35 + this.throttle * 0.5 + (this.ab ? 0.3 : 0));
-    if (!this.driver && this.t > 6 && dc > 520) this.cleanup();
+    if (!this.driver && this.t > 6 && dc > SIZE / 2 + 440) this.cleanup();
   }
 
   pose() {
@@ -978,7 +978,8 @@ export class FighterJet extends Vehicle {
     this.attackCd -= dt; this.stateT -= dt;
     if (this.state === 'cruise') {
       const ang = Math.atan2(this.pos.z - c, this.pos.x - c) + 0.45 * (this.team ? -1 : 1);
-      this.steerTo(_c.set(c + Math.cos(ang) * 160, 90, c + Math.sin(ang) * 160), dt, 0.9);
+      const R = Math.max(160, SIZE * 0.36);
+      this.steerTo(_c.set(c + Math.cos(ang) * R, 90, c + Math.sin(ang) * R), dt, 0.9);
       if (this.attackCd <= 0) {
         const list = g.targetsFor(this.team).filter(e => !e.air);
         if (list.length) { this.target = list[Math.floor(Math.random() * list.length)]; this.state = 'attack'; this.stateT = 12; this.passBomb = false; }
@@ -1381,7 +1382,12 @@ export class Chopper extends Vehicle {
     this.ai = true;
     this.life = owner.isPlayer ? 50 : 45;
     this.angle = this.team === 0 ? -Math.PI / 2 : Math.PI / 2;
-    this.pos.set(SIZE / 2, 35, this.team === 0 ? 10 : SIZE - 10);
+    // orbit the fight: the map's middle on small maps, where the caller stood on the big ones
+    const big = SIZE > 200;
+    this.cx = big ? Math.max(60, Math.min(SIZE - 60, owner.pos.x)) : SIZE / 2;
+    this.cz = big ? Math.max(60, Math.min(SIZE - 60, owner.pos.z + (this.team === 0 ? 40 : -40))) : SIZE / 2;
+    this.orbit = SIZE < 100 ? 0.55 : 1;
+    this.pos.set(this.cx, 35, this.team === 0 ? this.cz - 70 : this.cz + 70);
     this.heading = this.team === 0 ? Math.PI : 0;
     this.fireT = 0; this.burst = 0; this.scanT = 0; this.target = null;
     this.aimYaw = this.heading; this.aimPitch = -0.7; this.fireWant = false; this.zoomWant = false; this.zoom = 0; this.gunT = 0;
@@ -1400,9 +1406,9 @@ export class Chopper extends Vehicle {
     this.t += dt;
     const manned = !!this.driver;
     this.angle += dt * (manned ? 0.2 : 0.28);
-    const r = manned ? 42 : 34, alt = manned ? 34 : 28;
-    _c.set(SIZE / 2 + Math.cos(this.angle) * r, alt + Math.sin(this.t * 0.5) * 1.5, SIZE / 2 + Math.sin(this.angle) * r);
-    if (this.t > this.life) _c.set(this.pos.x + (this.pos.x - SIZE / 2) * 3, 60, this.pos.z + (this.pos.z - SIZE / 2) * 3);
+    const r = (manned ? 42 : 34) * this.orbit, alt = (manned ? 34 : 28) * (0.6 + 0.4 * this.orbit);
+    _c.set(this.cx + Math.cos(this.angle) * r, alt + Math.sin(this.t * 0.5) * 1.5, this.cz + Math.sin(this.angle) * r);
+    if (this.t > this.life) _c.set(this.pos.x + (this.pos.x - this.cx) * 3, 60, this.pos.z + (this.pos.z - this.cz) * 3);
     const k = Math.min(1, dt * (this.t < 3 ? 0.9 : 1.6));
     this.vel.subVectors(_c, this.pos).multiplyScalar(k / Math.max(dt, 1e-4));
     this.pos.lerp(_c, k);
@@ -1551,7 +1557,7 @@ export class Projectiles {
             if (v.pos.distanceTo(p.pos) < P.prox) { this.detonate(p, P.homing ? v : null); done = true; break; }
           }
         }
-        if (!done && (p.t > P.life || p.pos.y < -3 || Math.abs(p.pos.x - SIZE / 2) > 700 || Math.abs(p.pos.z - SIZE / 2) > 700)) {
+        if (!done && (p.t > P.life || p.pos.y < -3 || Math.abs(p.pos.x - SIZE / 2) > SIZE / 2 + 700 || Math.abs(p.pos.z - SIZE / 2) > SIZE / 2 + 700)) {
           if (P.airburst) this.detonate(p, null);
           done = true;
         }
@@ -1667,8 +1673,10 @@ export class VehicleProxy {
 export function placeEmplacements(game) {
   const out = [];
   let id = 900;
+  const bx = (SIZE - 160) / 2;
   for (const team of [0, 1]) {
-    for (const xs of [[40, 44, 36, 48, 52, 30], [120, 116, 124, 112, 108, 130]]) {
+    for (const xs0 of [[40, 44, 36, 48, 52, 30], [120, 116, 124, 112, 108, 130]]) {
+      const xs = xs0.map(x => x + bx);
       let found = null;
       for (const zz of [19, 16, 21, 13, 10]) {
         for (const x of xs) {

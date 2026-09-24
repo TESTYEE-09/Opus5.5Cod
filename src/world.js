@@ -3,21 +3,29 @@
 // described in maps.js and loaded at runtime with loadMap().
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { surface, R, macroNoise, mulberry } from './textures.js';
+import { surface, R, macroNoise, mulberry, logoAtlas } from './textures.js';
+import { PlanarReflection } from './reflect.js';
 import { Kit, kitMaterials, buildProp } from './props.js';
 
-export const SIZE = 160;
+// The map size changes per map (Shipment is tiny, the Ground War maps are huge), so SIZE, N
+// and NAV are live bindings that loadMap() resets.
+export let SIZE = 160;
 export const CELL = 0.5;
-export const N = SIZE / CELL;
+export let N = SIZE / CELL;
 export const GRAVITY = 18;
 export const STEP = 0.45;
 
-const cells = new Array(N * N).fill(null);
+let cells = new Array(N * N).fill(null);
 const boxes = [];
 const OOB = [[-1e9, 1e9]];
 
 export const spawns = [[], []];
 export const interest = [];
+// capture points for Ground War, and named places for the Undercover missions
+export const flags = [];
+export const sites = [];
+// flat text decals (container logos, signs) drawn from one atlas
+const decals = [];
 
 // ---------- destructibles ----------
 // Crates, barrels, fences, sandbags, cars and building wall panels. Their spans sit in the
@@ -31,6 +39,7 @@ export const DKIND = {
   drum: { name: 'Drum', hp: 40, crush: true, debris: 'metal' },
   sandbag: { name: 'Sandbags', hp: 320, blast: true, crush: true, debris: 'sand' },
   car: { name: 'Car', hp: 150, wreck: true, debris: 'metal', boom: [4.5, 110] },
+  sam: { name: 'SAM launcher', hp: 600, blast: true, wreck: true, debris: 'metal', boom: [9, 220] },
 };
 export const objects = [];
 const rawCells = new Map();
@@ -262,7 +271,7 @@ let hillAmp = 0;
 export function terrainY(x, z) {
   if (!hillAmp) return 0;
   const d = Math.hypot(x - SIZE / 2, z - SIZE / 2);
-  let k = (d - SIZE / 2 - 110) / 260;
+  let k = (d - Math.max(SIZE / 2 + 110, SIZE * 0.72)) / 260;
   if (k <= 0) return 0;
   k = k >= 1 ? 1 : k * k * (3 - 2 * k);
   const n = Math.sin(x * 0.011 + 0.7) * Math.cos(z * 0.013) + 0.5 * Math.sin(x * 0.027 + z * 0.019 + 1.3) + 0.25 * Math.sin(z * 0.051 - x * 0.043);
@@ -275,8 +284,8 @@ export function floorAt(x, z, r, maxY) {
   return terrainY(x, z);
 }
 
-export const NAV = SIZE;
-const walk = new Uint8Array(NAV * NAV);
+export let NAV = SIZE;
+let walk = new Uint8Array(NAV * NAV);
 
 function navFree(i, k) {
   for (let dk = 0; dk < 2; dk++) for (let di = 0; di < 2; di++) {
@@ -311,9 +320,18 @@ export function lineWalkable(ax, az, bx, bz) {
   return true;
 }
 
-const gScore = new Float32Array(NAV * NAV), parent = new Int32Array(NAV * NAV);
-const stamp = new Uint32Array(NAV * NAV), closed = new Uint32Array(NAV * NAV);
+let gScore = new Float32Array(NAV * NAV), parent = new Int32Array(NAV * NAV);
+let stamp = new Uint32Array(NAV * NAV), closed = new Uint32Array(NAV * NAV);
 let curStamp = 0;
+
+function setMapSize(size) {
+  if (size === SIZE && cells.length === N * N) return;
+  SIZE = size; N = size / CELL; NAV = size;
+  cells = new Array(N * N).fill(null);
+  const n = NAV * NAV;
+  walk = new Uint8Array(n); gScore = new Float32Array(n); parent = new Int32Array(n);
+  stamp = new Uint32Array(n); closed = new Uint32Array(n); curStamp = 0;
+}
 const heapI = [], heapF = [];
 function hpush(i, f) {
   heapI.push(i); heapF.push(f);
@@ -357,7 +375,7 @@ export function findPath(sx, sz, tx, tz) {
   gScore[s] = 0; stamp[s] = curStamp; parent[s] = -1;
   hpush(s, h(s % NAV, (s / NAV) | 0));
   let found = false, iter = 0;
-  while (heapI.length && iter++ < 26000) {
+  while (heapI.length && iter++ < 60000) {
     const c = hpop();
     if (closed[c] === curStamp) continue;
     closed[c] = curStamp;
@@ -406,26 +424,44 @@ export function randomWalkable(zMin = 1, zMax = SIZE - 1) {
 // ---------- materials ----------
 // World-space variation (breaks up texture tiling) and a darkening band near the ground,
 // injected into the standard material so every surface keeps full PBR lighting.
-export function enhance(mat, { macro = 0.2, groundAO = 0 } = {}) {
+export function enhance(mat, { macro = 0.2, groundAO = 0, wet = null } = {}) {
   const tex = macroNoise();
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uMacro = { value: tex };
+    if (wet) Object.assign(sh.uniforms, wet.uniforms);
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;')
+      .replace('#include <common>', `#include <common>\nvarying vec3 vWPos;${wet ? '\nvarying vec4 vReflPos;\nuniform mat4 uReflMat;' : ''}`)
       .replace('#include <project_vertex>', `#include <project_vertex>
         #ifdef USE_INSTANCING
           vWPos = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;
         #else
           vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
-        #endif`);
-    sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;\nuniform sampler2D uMacro;')
+        #endif
+        ${wet ? 'vReflPos = uReflMat * vec4(vWPos, 1.0);' : ''}`);
+    let fs = sh.fragmentShader
+      .replace('#include <common>', `#include <common>\nvarying vec3 vWPos;\nuniform sampler2D uMacro;${wet ? '\nvarying vec4 vReflPos;\nuniform sampler2D tRefl;\nuniform vec4 uWet;\nuniform float uTime;' : ''}`)
       .replace('#include <map_fragment>', `#include <map_fragment>
         float mN = texture2D(uMacro, vWPos.xz * 0.012 + vec2(vWPos.y * 0.017)).r * 0.6 + texture2D(uMacro, vWPos.zy * 0.047 + vec2(vWPos.x * 0.013)).r * 0.4;
         diffuseColor.rgb *= clamp(1.0 + (mN - 0.5) * ${(macro * 4).toFixed(3)}, 0.0, 2.0);
-        ${groundAO ? `diffuseColor.rgb *= mix(${(1 - groundAO).toFixed(3)}, 1.0, smoothstep(0.0, 1.4, vWPos.y));` : ''}`);
+        ${groundAO ? `diffuseColor.rgb *= mix(${(1 - groundAO).toFixed(3)}, 1.0, smoothstep(0.0, 1.4, vWPos.y));` : ''}
+        ${wet ? `float wetM = clamp(uWet.x + (texture2D(uMacro, vWPos.xz * 0.031).r - 0.5) * uWet.y * 3.0, 0.0, 1.0);
+        diffuseColor.rgb *= 1.0 - 0.4 * wetM;` : ''}`);
+    if (wet) {
+      fs = fs.replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+        roughnessFactor = mix(roughnessFactor, 0.06, wetM);`)
+        .replace('#include <opaque_fragment>', `{
+          // rain-wet ground: a planar reflection, rippled by the rain, fading with the puddles
+          vec2 rip = vec2(texture2D(uMacro, vWPos.xz * 0.23 + vec2(uTime * 0.07, uTime * 0.043)).r, texture2D(uMacro, vWPos.zx * 0.19 - vec2(uTime * 0.05, uTime * 0.061)).r) - 0.5;
+          vec4 rp = vReflPos; rp.xy += rip * 0.045 * uWet.z * rp.w;
+          vec3 refl = texture2DProj(tRefl, rp).rgb;
+          float fres = 0.04 + 0.96 * pow(1.0 - clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0), 5.0);
+          outgoingLight += refl * wetM * mix(0.3, 1.0, fres) * uWet.w;
+        }
+        #include <opaque_fragment>`);
+    }
+    sh.fragmentShader = fs;
   };
-  mat.customProgramCacheKey = () => `enh${macro}_${groundAO}`;
+  mat.customProgramCacheKey = () => `enh${macro}_${groundAO}_${wet ? 'w' : ''}`;
   return mat;
 }
 
@@ -436,11 +472,11 @@ const MAT_DEFS = {
   brick: { recipe: 'brick', ts: 2.2, normal: 2.5 },
   wall: { recipe: 'blocks', ts: 4, normal: 2 },
   crate: { recipe: 'wood', ts: 1.5, normal: 1.5, rough: 0.85 },
-  containerR: { recipe: 'corrugated', args: [0x7b3325], ts: 2.6, normal: 3, rough: 0.55, metal: 0.35 },
-  containerB: { recipe: 'corrugated', args: [0x2d5870], ts: 2.6, normal: 3, rough: 0.55, metal: 0.35 },
-  containerG: { recipe: 'corrugated', args: [0x3b6a3a], ts: 2.6, normal: 3, rough: 0.55, metal: 0.35 },
-  containerY: { recipe: 'corrugated', args: [0xb08a2a], ts: 2.6, normal: 3, rough: 0.55, metal: 0.35 },
-  containerW: { recipe: 'corrugated', args: [0x9a9ea0, 0.3], ts: 2.6, normal: 3, rough: 0.5, metal: 0.4 },
+  containerR: { recipe: 'corrugated', args: [0x7b3325], ts: 2.6, normal: 3, rough: 0.55, metal: 0.35, tint: 0x7b3325 },
+  containerB: { recipe: 'corrugated', args: [0x2d5870], ts: 2.6, normal: 3, rough: 0.55, metal: 0.35, tint: 0x2d5870 },
+  containerG: { recipe: 'corrugated', args: [0x3b6a3a], ts: 2.6, normal: 3, rough: 0.55, metal: 0.35, tint: 0x3b6a3a },
+  containerY: { recipe: 'corrugated', args: [0xb08a2a], ts: 2.6, normal: 3, rough: 0.55, metal: 0.35, tint: 0xb08a2a },
+  containerW: { recipe: 'corrugated', args: [0x9a9ea0, 0.3], ts: 2.6, normal: 3, rough: 0.5, metal: 0.4, tint: 0x9a9ea0 },
   corrugated: { recipe: 'corrugated', args: [0x7e8488, 0.35, 0.05], ts: 3, normal: 3, rough: 0.5, metal: 0.45 },
   sandbag: { recipe: 'sandbag', ts: 1.2, normal: 3 },
   hesco: { recipe: 'hesco', ts: 1.4, normal: 2.5 },
@@ -452,6 +488,17 @@ const MAT_DEFS = {
   deck: { recipe: 'planks', args: [0x7a6a52, false], ts: 2, normal: 2 },
   metal: { recipe: 'diamond', ts: 1.5, normal: 2, rough: 0.45, metal: 0.6 },
   snowcap: { recipe: 'snow', ts: 3, normal: 0.6, rough: 0.75 },
+  containerO: { recipe: 'corrugated', args: [0xa8541e, 0.35], ts: 2.6, normal: 3, rough: 0.5, metal: 0.35, tint: 0xa8541e },
+  containerT: { recipe: 'corrugated', args: [0x2f6a6a, 0.3], ts: 2.6, normal: 3, rough: 0.5, metal: 0.35, tint: 0x2f6a6a },
+  containerN: { recipe: 'corrugated', args: [0x243452, 0.3, 0.05], ts: 2.6, normal: 3, rough: 0.5, metal: 0.4, tint: 0x243452 },
+  hull: { recipe: 'metal', args: [0x2a2e33], ts: 4, normal: 1, rough: 0.5, metal: 0.5 },
+  hullRed: { recipe: 'metal', args: [0x6a2a22], ts: 4, normal: 1, rough: 0.55, metal: 0.4 },
+  steel: { recipe: 'diamond', ts: 1.2, normal: 2, rough: 0.4, metal: 0.7 },
+  superstructure: { recipe: 'facade', args: [0xd8d6cc, 0x2a3036], ts: 5, normal: 1, rough: 0.6 },
+  // every container colour shares this one texture, tinted per box with vertex colours
+  container: { recipe: 'corrugated', args: [0xc4c4c4, 0.3, 0.06], ts: 2.6, normal: 3, rough: 0.52, metal: 0.35, vcol: true },
+  whitecase: { recipe: 'metal', args: [0xc9ccca], ts: 1.2, normal: 1.2, rough: 0.35, metal: 0.55 },
+  bluecrate: { recipe: 'metal', args: [0x1f5f9a], ts: 1, normal: 0.8, rough: 0.5, metal: 0.05 },
 };
 
 function makeMaterial(name, over = {}) {
@@ -459,16 +506,26 @@ function makeMaterial(name, over = {}) {
   const args = d.args || [];
   const tex = surface(`${d.recipe}:${JSON.stringify(args)}`, R[d.recipe](...args), { seed: d.seed || (name.length * 131 + 7), normal: d.normal ?? 1.5 });
   const m = new THREE.MeshStandardMaterial({
-    map: tex.map, normalMap: tex.normalMap, roughness: d.rough ?? 0.9, metalness: d.metal ?? 0,
+    map: tex.map, normalMap: tex.normalMap, roughness: d.rough ?? 0.9, metalness: d.metal ?? 0, vertexColors: !!d.vcol,
   });
   m.userData.ts = d.ts;
   const low = name === 'backdrop' || name === 'snowcap' || name === 'roof';
   return enhance(m, { macro: 0.18, groundAO: low ? 0 : 0.28 });
 }
 
+const _tc = new THREE.Color();
+// which material a box is drawn with (tinted materials share one), and its tint if any
+const drawMat = (m) => MAT_DEFS[m]?.tint !== undefined ? 'container' : m;
 function boxGeo(b, ts) {
   const w = b.x1 - b.x0, h = b.y1 - b.y0, d = b.z1 - b.z0;
   const g = new THREE.BoxGeometry(w, h, d);
+  const tint = MAT_DEFS[b.mat]?.tint;
+  if (tint !== undefined) {
+    _tc.set(tint).multiplyScalar(1.6);
+    const n = g.attributes.position.count, col = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) { col[i * 3] = _tc.r; col[i * 3 + 1] = _tc.g; col[i * 3 + 2] = _tc.b; }
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  }
   const uv = g.attributes.uv;
   const dims = [[d, h, b.z0, b.y0], [d, h, b.z0, b.y0], [w, d, b.x0, b.z0], [w, d, b.x0, b.z0], [w, h, b.x0, b.y0], [w, h, b.x0, b.y0]];
   for (let f = 0; f < 6; f++) for (let v = 0; v < 4; v++) {
@@ -480,6 +537,7 @@ function boxGeo(b, ts) {
 }
 
 // Soft dark strips on the ground around every footprint: cheap contact shadow / ambient occlusion.
+let shadowMat = null;
 function contactShadows(list) {
   const pos = [], al = [];
   const Y = 0.02;
@@ -502,13 +560,13 @@ function contactShadows(list) {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute('alpha', new THREE.Float32BufferAttribute(al, 1));
-  const mat = new THREE.ShaderMaterial({
+  shadowMat ||= new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, side: THREE.DoubleSide,
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
     vertexShader: 'attribute float alpha; varying float vA; void main(){ vA = alpha; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
     fragmentShader: 'varying float vA; void main(){ gl_FragColor = vec4(0.0, 0.0, 0.0, vA * vA * 1.4); }',
   });
-  const mesh = new THREE.Mesh(g, mat);
+  const mesh = new THREE.Mesh(g, shadowMat);
   mesh.renderOrder = 1;
   return mesh;
 }
@@ -526,44 +584,94 @@ const poolTex = (() => {
   };
 })();
 
-let minimapCanvas = null;
+// ---------- minimap ----------
+// One pixel per collision cell. Broken objects repaint only the patch they covered.
+let minimapCanvas = null, mmCtx = null;
 export function minimapImage() { return minimapCanvas; }
 
-let minimapDirty = 0;
-function buildMinimap(def) {
-  const c = minimapCanvas || document.createElement('canvas');
-  c.width = c.height = N;
-  const g = c.getContext('2d');
-  const img = g.createImageData(N, N);
+function paintMinimap(def, i0 = 0, k0 = 0, i1 = N, k1 = N) {
+  i0 = Math.max(0, i0); k0 = Math.max(0, k0); i1 = Math.min(N, i1); k1 = Math.min(N, k1);
+  const w = i1 - i0, h = k1 - k0;
+  if (w <= 0 || h <= 0) return;
   const mm = def.minimap || {};
-  const roadCells = (i, k) => (def.roads || []).some(r => i * CELL >= r.x0 && i * CELL < r.x1 && k * CELL >= r.z0 && k * CELL < r.z1);
-  for (let k = 0; k < N; k++) for (let i = 0; i < N; i++) {
+  const G = mm.ground || [96, 86, 70], RD = mm.road || [70, 70, 68], HI = mm.high || [214, 204, 180], LO = mm.low || [160, 146, 118], OV = mm.over || [70, 62, 52];
+  const roads = (def.roads || []).map(r => [r.x0 / CELL, r.z0 / CELL, r.x1 / CELL, r.z1 / CELL]);
+  const img = mmCtx.createImageData(w, h), d = img.data;
+  for (let k = k0; k < k1; k++) for (let i = i0; i < i1; i++) {
     const sp = cells[k * N + i];
-    let col = roadCells(i, k) ? (mm.road || [70, 70, 68]) : (mm.ground || [96, 86, 70]);
+    let col = G;
     if (sp) {
-      const low = sp.find(s => s[0] < 1.9 && s[1] > 0.05);
-      if (low) col = low[1] > 2 ? (mm.high || [214, 204, 180]) : (mm.low || [160, 146, 118]);
-      else col = mm.over || [70, 62, 52];
-    }
-    const o = (k * N + i) * 4;
-    img.data[o] = col[0]; img.data[o + 1] = col[1]; img.data[o + 2] = col[2]; img.data[o + 3] = 255;
+      const low = sp.find(q => q[0] < 1.9 && q[1] > 0.05);
+      col = low ? (low[1] > 2 ? HI : LO) : OV;
+    } else for (const r of roads) if (i >= r[0] && i < r[2] && k >= r[1] && k < r[3]) { col = RD; break; }
+    const o = ((k - k0) * w + (i - i0)) * 4;
+    d[o] = col[0]; d[o + 1] = col[1]; d[o + 2] = col[2]; d[o + 3] = 255;
   }
-  g.putImageData(img, 0, 0);
-  minimapCanvas = c;
+  mmCtx.putImageData(img, i0, k0);
+}
+
+function buildMinimap(def) {
+  minimapCanvas ||= document.createElement('canvas');
+  minimapCanvas.width = minimapCanvas.height = N;
+  mmCtx = minimapCanvas.getContext('2d');
+  paintMinimap(def);
+}
+
+// ---------- surface lookup ----------
+// Collidable boxes bucketed on an 8 m grid, so a bullet impact looks at a handful of boxes.
+const BUCKET = 8;
+let boxGrid = new Map(), bigBoxes = [];
+function indexBoxes() {
+  boxGrid = new Map(); bigBoxes = [];
+  for (const b of boxes) {
+    if (b.collide === false) continue;
+    const i0 = Math.floor(b.x0 / BUCKET), i1 = Math.floor(b.x1 / BUCKET), k0 = Math.floor(b.z0 / BUCKET), k1 = Math.floor(b.z1 / BUCKET);
+    if ((i1 - i0 + 1) * (k1 - k0 + 1) > 64) { bigBoxes.push(b); continue; }
+    for (let k = k0; k <= k1; k++) for (let i = i0; i <= i1; i++) {
+      const key = k * 8192 + i;
+      let l = boxGrid.get(key);
+      if (!l) boxGrid.set(key, l = []);
+      l.push(b);
+    }
+  }
 }
 
 // Which surface a bullet hit, for impact particles.
 export function materialAt(p, n) {
   const x = p.x - n.x * 0.05, y = p.y - n.y * 0.05, z = p.z - n.z * 0.05;
-  for (const b of boxes) if (b.collide !== false && !b.dead && x >= b.x0 - 0.01 && x <= b.x1 + 0.01 && y >= b.y0 - 0.01 && y <= b.y1 + 0.01 && z >= b.z0 - 0.01 && z <= b.z1 + 0.01) return b.mat;
+  const inside = (b) => !b.dead && x >= b.x0 - 0.01 && x <= b.x1 + 0.01 && y >= b.y0 - 0.01 && y <= b.y1 + 0.01 && z >= b.z0 - 0.01 && z <= b.z1 + 0.01;
+  const list = boxGrid.get(Math.floor(z / BUCKET) * 8192 + Math.floor(x / BUCKET));
+  if (list) for (const b of list) if (inside(b)) return b.mat;
+  for (const b of bigBoxes) if (inside(b)) return b.mat;
   return y < 0.05 ? 'ground' : null;
 }
 
 // ---------- map loading ----------
 export const props = [];
 let group = null, waterMat = null, materials = [], matFor = null, kmats = null;
-const chunks = new Map();
 export let mapDef = null;
+let reflection = null;
+// the rain-wet floor's planar reflection (Shipment), rendered by main before each frame
+export const wetFloor = () => reflection;
+
+// Everything is drawn in 64 m chunks: the camera and the sun's shadow camera cull whole
+// chunks, chunks past the fog are hidden, and a broken object rebuilds only its chunk.
+const CH = 64, FAR_CH = 400;
+const chunks = new Map();
+let chunkList = [];
+function chunkFor(x, z, always = false) {
+  const far = x < -60 || z < -60 || x > SIZE + 60 || z > SIZE + 60;
+  const s = far ? FAR_CH : CH;
+  const cx = Math.floor(x / s), cz = Math.floor(z / s);
+  const key = always ? 'always' : `${far ? 'f' : 'n'}${cx},${cz}`;
+  let ch = chunks.get(key);
+  if (!ch) {
+    ch = { far: far || always, x: (cx + 0.5) * s, z: (cz + 0.5) * s, group: new THREE.Group(), stat: new THREE.Group(), near: new THREE.Group(), dyn: new THREE.Group(), dynNear: new THREE.Group(), objs: [], boxes: [], props: [] };
+    ch.group.add(ch.stat, ch.near, ch.dyn, ch.dynNear);
+    chunks.set(key, ch); chunkList.push(ch); group.add(ch.group);
+  }
+  return ch;
+}
 
 function makeApi() {
   return {
@@ -576,6 +684,9 @@ function makeApi() {
     spawn: (team, x, z, yaw, fwd = false) => spawns[team].push({ x, z, yaw, fwd }),
     interest: (x, z) => interest.push({ x, z }),
     obj: (kind) => newObject(kind),
+    decal: (x, y, z, w, h, ry, idx, o = {}) => decals.push({ x, y, z, w, h, ry, idx, ...o }),
+    flag: (id, x, z) => flags.push({ id, x, z }),
+    site: (kind, x, z, o = {}) => sites.push({ kind, x, z, ...o }),
   };
 }
 
@@ -586,6 +697,9 @@ export function mirrorApi(api) {
     spawn: (team, x, z, yaw, fwd) => api.spawn(1 - team, SIZE - x, SIZE - z, yaw + Math.PI, fwd),
     interest: (x, z) => api.interest(SIZE - x, SIZE - z),
     obj: (kind) => api.obj(kind),
+    decal: (x, y, z, w, h, ry, idx, o) => api.decal(SIZE - x, y, SIZE - z, w, h, ry + Math.PI, idx, o),
+    flag: (id, x, z) => api.flag(id, SIZE - x, SIZE - z),
+    site: (kind, x, z, o) => api.site(kind, SIZE - x, SIZE - z, o),
   };
 }
 
@@ -597,18 +711,86 @@ export function shiftApi(api, dx, dz = dx) {
     spawn: (team, x, z, yaw, fwd) => api.spawn(team, x + dx, z + dz, yaw, fwd),
     interest: (x, z) => api.interest(x + dx, z + dz),
     obj: (kind) => api.obj(kind),
+    decal: (x, y, z, w, h, ry, idx, o) => api.decal(x + dx, y, z + dz, w, h, ry, idx, o),
+    flag: (id, x, z) => api.flag(id, x + dx, z + dz),
+    site: (kind, x, z, o) => api.site(kind, x + dx, z + dz, o),
   };
+}
+
+// ---------- decals: stencilled logos from one texture atlas ----------
+function buildDecals(list) {
+  const pos = [], nor = [], uv = [], col = [];
+  const rows = 16, c = new THREE.Color();
+  for (const d of list) {
+    const rx = Math.cos(d.ry), rz = -Math.sin(d.ry), nx = Math.sin(d.ry), nz = Math.cos(d.ry);
+    const hw = d.w / 2, hh = d.h / 2, v0 = 1 - (d.idx % rows + 1) / rows, v1 = 1 - (d.idx % rows) / rows;
+    const P = (a, b) => [d.x + rx * a + nx * 0.02, d.y + b, d.z + rz * a + nz * 0.02];
+    const q = [P(-hw, -hh), P(hw, -hh), P(hw, hh), P(-hw, hh)], t = [[0, v0], [1, v0], [1, v1], [0, v1]];
+    c.set(d.color ?? 0xe8e6de);
+    for (const i of [0, 1, 2, 0, 2, 3]) { pos.push(...q[i]); nor.push(nx, 0, nz); uv.push(...t[i]); col.push(c.r, c.g, c.b); }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  const m = new THREE.MeshStandardMaterial({ map: logoAtlas(), vertexColors: true, transparent: true, depthWrite: false, roughness: 0.7, metalness: 0.1,
+    polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
+  materials.push(m);
+  const mesh = new THREE.Mesh(g, m);
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
+// ---------- light beams: fake volumetric cones under floodlights ----------
+const BEAM_VERT = `uniform float uLen; varying vec3 vN, vV; varying float vT;
+void main() {
+  vT = clamp(-position.y / uLen, 0.0, 1.0);
+  vN = normalize(normalMatrix * normal);
+  vec4 mv = modelViewMatrix * vec4(position, 1.0);
+  vV = normalize(-mv.xyz);
+  gl_Position = projectionMatrix * mv;
+}`;
+const BEAM_FRAG = `uniform vec3 uColor; uniform float uTime, uInt; varying vec3 vN, vV; varying float vT;
+void main() {
+  float edge = pow(abs(dot(vN, vV)), 2.0);
+  float fall = pow(1.0 - vT, 1.8) * smoothstep(0.0, 0.05, vT);
+  float dust = 0.8 + 0.2 * sin(vT * 23.0 - uTime * 1.3) * sin(vT * 7.0 + uTime * 0.7);
+  gl_FragColor = vec4(uColor * edge * fall * dust * uInt, 1.0);
+}`;
+const beamU = { uTime: { value: 0 } };
+// p.beam: { pitch (down from level), len, angle (half-cone), color, intensity, power, h (mount height) }
+function buildBeam(p) {
+  const b = p.beam, len = b.len || 26, r = Math.tan(b.angle || 0.35) * len;
+  const geo = new THREE.CylinderGeometry(0.25, r, len, 28, 1, true).translate(0, -len / 2, 0);
+  const m = new THREE.ShaderMaterial({
+    uniforms: { uLen: { value: len }, uColor: { value: new THREE.Color(b.color ?? 0xdde6ff) }, uInt: { value: b.intensity ?? 0.22 }, uTime: beamU.uTime },
+    vertexShader: BEAM_VERT, fragmentShader: BEAM_FRAG, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false,
+  });
+  materials.push(m);
+  const mesh = new THREE.Mesh(geo, m);
+  const rot = p.rot || 0, pitch = b.pitch ?? 0.6, fx = -Math.sin(rot), fz = -Math.cos(rot);
+  mesh.position.set(p.x + fx * 0.3, (p.y || 0) + (b.h ?? p.h ?? 14), p.z + fz * 0.3);
+  // the cone hangs along -y; tip it to aim forward and down
+  const dir = new THREE.Vector3(fx * Math.cos(pitch), -Math.sin(pitch), fz * Math.cos(pitch)).normalize();
+  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), dir);
+  mesh.renderOrder = 3;
+  mesh.userData.beam = { dir, len };
+  return mesh;
 }
 
 export function loadMap(scene, def) {
   if (group) {
     scene.remove(group);
-    group.traverse(o => { if (o.geometry) o.geometry.dispose(); });
+    group.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.isLight) o.dispose?.(); });
     for (const m of materials) m.dispose();
   }
-  cells.fill(null); boxes.length = 0; props.length = 0; objects.length = 0;
+  reflection?.dispose(); reflection = null;
+  setMapSize(def.size || 160);
+  cells.fill(null); boxes.length = 0; props.length = 0; objects.length = 0; decals.length = 0; flags.length = 0; sites.length = 0;
   spawns[0].length = 0; spawns[1].length = 0; interest.length = 0;
   mapDef = def;
+  hillAmp = def.hills || 0;
 
   const api = makeApi();
   def.layout(api, mirrorApi(api));
@@ -621,7 +803,6 @@ export function loadMap(scene, def) {
     addBox(0, 1.1, 1, 1, 6, E1, 'invis'); addBox(E1, 1.1, 1, E, 6, E1, 'invis');
   } else { addBox(0, 0, 1, 1, ph, E1, pm); addBox(E1, 0, 1, E, ph, E1, pm); }
   if (ph < 6) { addBox(0, ph, 0, E, 6, 1, 'invis'); addBox(0, ph, E1, E, 6, E, 'invis'); if (!per.quay) { addBox(0, ph, 1, 1, 6, E1, 'invis'); addBox(E1, ph, 1, E, 6, E1, 'invis'); } }
-  hillAmp = def.hills || 0;
   if (def.backdrop) def.backdrop(api, mulberry(def.seed || 7));
 
   // snow settles on every exposed top (and falls with whatever it sits on)
@@ -635,53 +816,41 @@ export function loadMap(scene, def) {
   }
   mergeSpans();
   computeNav();
+  indexBoxes();
   buildMinimap(def);
 
   group = new THREE.Group();
+  chunks.clear(); chunkList = [];
   materials = [];
   const mats = {};
   matFor = (name) => {
     if (!mats[name]) { mats[name] = makeMaterial(name, def.mats?.[name]); materials.push(mats[name]); }
     return mats[name];
   };
-  const byMat = {};
-  for (const b of boxes) {
-    if (b.mat === 'invis' || b.obj >= 0) continue;
-    (byMat[b.mat] ||= []).push(boxGeo(b, matFor(b.mat).userData.ts));
-  }
-  for (const [m, geos] of Object.entries(byMat)) {
-    const mesh = new THREE.Mesh(mergeGeometries(geos), mats[m]);
-    mesh.castShadow = m !== 'backdrop';
-    mesh.receiveShadow = true;
-    group.add(mesh);
-    for (const g of geos) g.dispose();
-  }
-  group.add(contactShadows(boxes.filter(b => b.y0 <= 0.01 && b.collide !== false && b.mat !== 'backdrop' && !(b.obj >= 0) && b.x1 - b.x0 < 60 && b.z1 - b.z0 < 60)));
-
-  // props
-  const kit = new Kit();
   kmats = kitMaterials(enhance);
   materials.push(...Object.values(kmats));
-  props.forEach((p, i) => { p.seed = (def.seed || 7) * 1000 + i; if (!(p.obj >= 0)) buildProp(kit, p.type, p, p.seed); });
-  for (const m of kit.build(kmats)) group.add(m);
 
-  // breakable things are drawn in small chunks so one can be rebuilt without touching the rest
-  chunks.clear();
+  // sort every static box, prop and breakable object into its chunk
+  for (const b of boxes) {
+    if (b.mat === 'invis' || b.obj >= 0) continue;
+    const big = b.x1 - b.x0 > CH * 1.5 || b.z1 - b.z0 > CH * 1.5;
+    chunkFor((b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2, big).boxes.push(b);
+  }
+  props.forEach((p, i) => { p.seed = (def.seed || 7) * 1000 + i; if (!(p.obj >= 0)) chunkFor(p.x, p.z).props.push(p); });
   for (const o of objects) {
     if (o.x0 === Infinity) for (const p of o.props) { o.x0 = Math.min(o.x0, p.x - 0.4); o.x1 = Math.max(o.x1, p.x + 0.4); o.z0 = Math.min(o.z0, p.z - 0.4); o.z1 = Math.max(o.z1, p.z + 0.4); o.y0 = 0; o.y1 = 1; }
-    const key = `${Math.floor((o.x0 + o.x1) / 2 / 32)},${Math.floor((o.z0 + o.z1) / 2 / 32)}`;
-    let ch = chunks.get(key);
-    if (!ch) { ch = { objs: [], group: new THREE.Group() }; chunks.set(key, ch); group.add(ch.group); }
+    const ch = chunkFor((o.x0 + o.x1) / 2, (o.z0 + o.z1) / 2);
     ch.objs.push(o); o.chunk = ch;
   }
-  for (const ch of chunks.values()) buildChunk(ch);
+  for (const ch of chunkList) { buildStatic(ch); buildChunk(ch); }
+  if (decals.length) group.add(buildDecals(decals));
 
   // ground
   const gd = def.ground || { recipe: 'dirt', ts: 8 };
   const gt = surface(`${gd.recipe}:${JSON.stringify(gd.args || [])}`, R[gd.recipe](...(gd.args || [])), { size: 1024, seed: 5, normal: gd.normal ?? 1.5 });
   // one big sheet out to the horizon: flat under the play area, rolling hills beyond it
   const gw = gd.w || 4200, gl = gd.l || 4200;
-  const seg = hillAmp ? 168 : 1;
+  const seg = hillAmp ? 200 : 1;
   const groundGeo = new THREE.PlaneGeometry(gw, gl, gd.w ? 1 : seg, gd.l && !gd.w ? 1 : seg);
   groundGeo.attributes.uv.array.forEach((v, i, a) => { a[i] = v * (i % 2 ? gl : gw) / gd.ts; });
   if (hillAmp) {
@@ -689,13 +858,15 @@ export function loadMap(scene, def) {
     for (let i = 0; i < pa.count; i++) pa.setZ(i, terrainY(SIZE / 2 + pa.getX(i), SIZE / 2 - pa.getY(i)));
     groundGeo.computeVertexNormals();
   }
-  const groundMat = enhance(new THREE.MeshStandardMaterial({ map: gt.map, normalMap: gt.normalMap, roughness: gd.rough ?? 0.97 }), { macro: 0.3 });
+  if (def.wet) reflection = new PlanarReflection(def.wet);
+  const floors = [];
+  const groundMat = enhance(new THREE.MeshStandardMaterial({ map: gt.map, normalMap: gt.normalMap, roughness: gd.rough ?? 0.97, metalness: gd.metal ?? 0 }), { macro: 0.3, wet: reflection });
   materials.push(groundMat);
   const ground = new THREE.Mesh(groundGeo, groundMat);
   ground.rotation.x = -Math.PI / 2;
-  ground.position.set(SIZE / 2, 0, SIZE / 2);
+  ground.position.set(SIZE / 2 + (gd.dx || 0), 0, SIZE / 2 + (gd.dz || 0));
   ground.receiveShadow = true;
-  group.add(ground);
+  group.add(ground); floors.push(ground);
 
   // roads: u across, v along the road
   let ry = 0.008;
@@ -707,18 +878,18 @@ export function loadMap(scene, def) {
     const g = new THREE.PlaneGeometry(w, l);
     const uv = g.attributes.uv;
     for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i), uv.getY(i) * l / w);
-    const m = enhance(new THREE.MeshStandardMaterial({ map: t.map, normalMap: t.normalMap, roughness: 0.92, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }), { macro: 0.25 });
+    const m = enhance(new THREE.MeshStandardMaterial({ map: t.map, normalMap: t.normalMap, roughness: 0.92, transparent: !!r.alpha, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }), { macro: 0.25, wet: reflection });
     materials.push(m);
     const mesh = new THREE.Mesh(g, m);
     mesh.rotation.set(-Math.PI / 2, 0, along ? 0 : Math.PI / 2);
     mesh.position.set((r.x0 + r.x1) / 2, ry, (r.z0 + r.z1) / 2);
     ry += 0.002;
     mesh.receiveShadow = true;
-    group.add(mesh);
+    group.add(mesh); floors.push(mesh);
   }
   for (const r of def.patches || []) {
     const t = surface('asphalt:[]', R.asphalt(), { seed: 9, normal: 1.2 });
-    const m = enhance(new THREE.MeshStandardMaterial({ map: t.map, normalMap: t.normalMap, roughness: 0.92, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }), { macro: 0.25 });
+    const m = enhance(new THREE.MeshStandardMaterial({ map: t.map, normalMap: t.normalMap, roughness: 0.92, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }), { macro: 0.25, wet: reflection });
     materials.push(m);
     const g = new THREE.PlaneGeometry(r.x1 - r.x0, r.z1 - r.z0);
     g.attributes.uv.array.forEach((v, i, a) => { a[i] = v * (i % 2 ? r.z1 - r.z0 : r.x1 - r.x0) / 8; });
@@ -726,7 +897,7 @@ export function loadMap(scene, def) {
     mesh.rotation.x = -Math.PI / 2;
     mesh.position.set((r.x0 + r.x1) / 2, ry + 0.002, (r.z0 + r.z1) / 2);
     mesh.receiveShadow = true;
-    group.add(mesh);
+    group.add(mesh); floors.push(mesh);
   }
 
   // lamp light pools on the ground (only drawn when the map is dark enough to need them)
@@ -737,9 +908,24 @@ export function loadMap(scene, def) {
       if (p.type !== 'lamp' && p.type !== 'flood') continue;
       const off = p.type === 'lamp' ? 1.5 : 3;
       const x = p.x - Math.sin(p.rot || 0) * off, z = p.z - Math.cos(p.rot || 0) * off;
-      const q = new THREE.Mesh(new THREE.PlaneGeometry(9, 9), pm2);
+      if (x < -60 || z < -60 || x > SIZE + 60 || z > SIZE + 60) continue;
+      const q = new THREE.Mesh(new THREE.PlaneGeometry(p.pool || 9, p.pool || 9), pm2);
       q.rotation.x = -Math.PI / 2; q.position.set(x, 0.03, z);
-      group.add(q);
+      chunkFor(x, z).stat.add(q);
+    }
+  }
+
+  // floodlight beams, and a few real spot lights for the brightest ones
+  let spots = def.look?.spots || 0;
+  for (const p of props) {
+    if (!p.beam) continue;
+    const beam = buildBeam(p);
+    group.add(beam);
+    if (spots-- > 0) {
+      const b = p.beam, L = new THREE.SpotLight(b.color ?? 0xdde6ff, b.power ?? 700, 0, Math.min(1.2, (b.angle || 0.35) * 1.5), 0.55, 2);
+      L.position.copy(beam.position);
+      L.target.position.copy(beam.position).addScaledVector(beam.userData.beam.dir, 20);
+      group.add(L, L.target);
     }
   }
 
@@ -748,33 +934,60 @@ export function loadMap(scene, def) {
   if (def.water) {
     const wt = surface('waves:[]', R.waves(), { size: 512, seed: 3, normal: 3 });
     wt.normalMap.repeat.set(80, 80);
-    waterMat = new THREE.MeshStandardMaterial({ color: def.water.color || 0x1a3a44, roughness: 0.08, metalness: 0.1, normalMap: wt.normalMap, normalScale: new THREE.Vector2(0.6, 0.6), envMapIntensity: 1.3 });
+    waterMat = new THREE.MeshStandardMaterial({ color: def.water.color || 0x1a3a44, roughness: def.water.rough ?? 0.08, metalness: 0.1, normalMap: wt.normalMap, normalScale: new THREE.Vector2(0.6, 0.6), envMapIntensity: 1.3 });
     materials.push(waterMat);
-    const w = new THREE.Mesh(new THREE.PlaneGeometry(1400, 1400), waterMat);
+    const w = new THREE.Mesh(new THREE.PlaneGeometry(def.water.size || 1400, def.water.size || 1400), waterMat);
     w.rotation.x = -Math.PI / 2;
     w.position.set(SIZE / 2, def.water.y ?? -1.2, SIZE / 2);
     w.receiveShadow = true;
     group.add(w);
   }
+  if (reflection) reflection.hide = floors;
   scene.add(group);
   return def;
 }
 
+// a chunk's permanent part: its static boxes by material, their contact shadows, and its props
+function buildStatic(ch) {
+  const byMat = {};
+  for (const b of ch.boxes) (byMat[drawMat(b.mat)] ||= []).push(boxGeo(b, matFor(drawMat(b.mat)).userData.ts));
+  for (const [m, geos] of Object.entries(byMat)) {
+    const mesh = new THREE.Mesh(mergeGeometries(geos), matFor(m));
+    mesh.castShadow = m !== 'backdrop';
+    mesh.receiveShadow = true;
+    ch.stat.add(mesh);
+    for (const g of geos) g.dispose();
+  }
+  if (!ch.far) {
+    const cs = ch.boxes.filter(b => b.y0 <= 0.01 && b.collide !== false && b.mat !== 'backdrop' && b.x1 - b.x0 < 60 && b.z1 - b.z0 < 60);
+    if (cs.length) ch.near.add(contactShadows(cs));
+  }
+  // small props (and the contact shadows) are only drawn within a couple of hundred metres
+  if (ch.props.length) {
+    const kit = new Kit();
+    for (const p of ch.props) buildProp(kit, p.type, p, p.seed);
+    for (const m of kit.build(kmats)) (ch.far ? ch.stat : ch.near).add(m);
+  }
+  ch.boxes = []; ch.props = [];
+}
+
+// a chunk's breakable part, rebuilt whenever something in it breaks
 function buildChunk(ch) {
-  for (const m of ch.group.children) m.geometry.dispose();
-  ch.group.clear();
+  for (const m of [...ch.dyn.children, ...ch.dynNear.children]) m.geometry.dispose();
+  ch.dyn.clear(); ch.dynNear.clear();
+  if (!ch.objs.length) return;
   const byMat = {}, kit = new Kit();
   for (const o of ch.objs) {
-    if (!o.gone) for (const b of o.boxes) if (b.mat !== 'invis') (byMat[b.mat] ||= []).push(boxGeo(b, matFor(b.mat).userData.ts));
+    if (!o.gone) for (const b of o.boxes) if (b.mat !== 'invis') (byMat[drawMat(b.mat)] ||= []).push(boxGeo(b, matFor(drawMat(b.mat)).userData.ts));
     if (o.alive || o.spec.wreck) for (const p of o.props) buildProp(kit, p.type, p, p.seed);
   }
   for (const [m, geos] of Object.entries(byMat)) {
     const mesh = new THREE.Mesh(mergeGeometries(geos), matFor(m));
     mesh.castShadow = true; mesh.receiveShadow = true;
-    ch.group.add(mesh);
+    ch.dyn.add(mesh);
     for (const g of geos) g.dispose();
   }
-  for (const m of kit.build(kmats)) ch.group.add(m);
+  for (const m of kit.build(kmats)) ch.dynNear.add(m);
 }
 
 // Breaks an object: frees its cells (a wreck keeps them), updates nav and redraws its chunk.
@@ -791,7 +1004,7 @@ export function breakObject(id) {
     const i0 = Math.max(0, Math.floor(o.x0) - 1), i1 = Math.min(NAV - 1, Math.floor(o.x1) + 1);
     const k0 = Math.max(0, Math.floor(o.z0) - 1), k1 = Math.min(NAV - 1, Math.floor(o.z1) + 1);
     for (let k = k0; k <= k1; k++) for (let i = i0; i <= i1; i++) walk[k * NAV + i] = navFree(i, k);
-    minimapDirty = 1;
+    paintMinimap(mapDef, Math.floor(o.x0 / CELL) - 1, Math.floor(o.z0 / CELL) - 1, Math.ceil(o.x1 / CELL) + 1, Math.ceil(o.z1 / CELL) + 1);
   }
   if (o.chunk) buildChunk(o.chunk);
   return o;
@@ -833,9 +1046,15 @@ export function objectsTouching(x, z, r, lo, hi) {
   return out;
 }
 
-let mmT = 0;
-export function updateWorld(dt) {
-  if (minimapDirty && (mmT -= dt) <= 0) { minimapDirty = 0; mmT = 0.5; buildMinimap(mapDef); }
+// cam: the camera position; far: how far the fog lets you see. Chunks beyond it are hidden.
+export function updateWorld(dt, cam, far = Infinity) {
+  beamU.uTime.value += dt;
+  if (cam) for (const ch of chunkList) {
+    if (ch.far) continue;
+    const d = Math.hypot(ch.x - cam.x, ch.z - cam.z) - CH * 0.72;
+    ch.group.visible = d < far;
+    ch.near.visible = ch.dynNear.visible = d < Math.min(far, 230 + Math.max(0, cam.y - 20) * 2);
+  }
   if (waterMat) {
     const o = waterMat.normalMap.offset;
     o.x = (o.x + dt * 0.004) % 1; o.y = (o.y + dt * 0.0025) % 1;

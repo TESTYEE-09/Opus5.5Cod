@@ -1,6 +1,7 @@
 import * as THREE from 'three';
-import { SIZE, loadMap, updateWorld } from './world.js';
-import { MAPS } from './maps.js';
+import { SIZE, loadMap, updateWorld, wetFloor, sites } from './world.js';
+import { MAPS, MODES } from './maps.js';
+import { profile } from './rank.js';
 import { Graphics, QUALITY } from './graphics.js';
 import { Atmosphere } from './atmosphere.js';
 import { Sfx } from './audio.js';
@@ -34,14 +35,16 @@ const atmo = new Atmosphere(scene, wscene, renderer);
 gfx.setup(scene, camera, wscene, wcamera);
 
 const audio = new Sfx();
+atmo.onThunder = (dist, strength) => audio.thunder(dist, strength);
 const hud = new Hud(audio);
 
 let currentMap = null;
 function loadMapById(id) {
   const key = MAPS[id] ? id : 'crossroads';
-  if (currentMap === key) return;
+  if (currentMap === key) return MAPS[key];
   currentMap = key;
   const def = loadMap(scene, MAPS[key]);
+  wetFloor()?.setScale(QUALITY[settings.quality]?.reflect ?? 0);
   const look = def.look;
   atmo.apply(look);
   gfx.applyLook(look);
@@ -54,18 +57,21 @@ function loadMapById(id) {
   whemi.color.set(look.hemiSky); whemi.groundColor.set(look.hemiGround); whemi.intensity = look.hemiIntensity * 1.8;
   wrim.color.set(look.sunGlow);
   $('mapName').textContent = def.name;
+  return def;
 }
 
 const game = new Game({ renderer, scene, camera, wscene, audio, hud, loadMap: loadMapById });
 
 // ---------- settings ----------
-const defaults = { sens: 1, fov: 80, vol: 0.7, difficulty: 'regular', cls: 'assault', name: '', map: 'crossroads', quality: 'high' };
-const MATCH = { scoreLimit: 100, timeLimit: 600 };
+const defaults = { sens: 1, fov: 80, vol: 0.7, difficulty: 'regular', cls: 'assault', name: '', map: 'crossroads', mode: 'gw', quality: 'high' };
+const matchRules = () => ({ scoreLimit: MODES[settings.mode].scoreLimit, timeLimit: MODES[settings.mode].timeLimit });
 let settings = { ...defaults };
 try { Object.assign(settings, JSON.parse(localStorage.getItem('frontline.settings') || '{}')); } catch { /* storage unavailable */ }
 if (!CLASSES[settings.cls]) settings.cls = 'assault';
 if (!DIFFICULTY[settings.difficulty]) settings.difficulty = 'regular';
 if (!MAPS[settings.map]) settings.map = 'crossroads';
+const fixMode = () => { if (!MAPS[settings.map].modes.includes(settings.mode)) settings.mode = MAPS[settings.map].modes[0]; };
+fixMode();
 if (!QUALITY[settings.quality]) settings.quality = 'high';
 const save = () => { try { localStorage.setItem('frontline.settings', JSON.stringify(settings)); } catch { /* storage unavailable */ } };
 audio.setVolume(settings.vol);
@@ -88,6 +94,15 @@ function renderClassCards() {
     `<button class="${k === settings.quality ? 'on' : ''}" data-q="${k}">${q.name}</button>`).join('');
   $('lobbyMaps').innerHTML = Object.entries(MAPS).map(([k, m]) =>
     `<button class="${k === settings.map ? 'on' : ''}" data-map="${k}"${net.active && !net.isHost ? ' disabled' : ''}>${m.name}</button>`).join('');
+  const modes = MAPS[settings.map].modes;
+  $('modesel').innerHTML = Object.entries(MODES).map(([k, m]) =>
+    `<button class="card${k === settings.mode ? ' on' : ''}${modes.includes(k) ? '' : ' off'}" data-mode="${k}"><b>${m.name}</b><span>${modes.includes(k) ? m.desc : `Not on ${MAPS[settings.map].name}`}</span></button>`).join('');
+  $('lobbyGm').innerHTML = Object.entries(MODES).filter(([k]) => modes.includes(k)).map(([k, m]) =>
+    `<button class="${k === settings.mode ? 'on' : ''}" data-gm="${k}"${net.active && !net.isHost ? ' disabled' : ''}>${m.name}</button>`).join('');
+  $('modeName').textContent = MODES[settings.mode].name;
+  const pr = profile();
+  $('rankLine').innerHTML = `Rank <b>${pr.level}</b> &middot; ${pr.title}` + (pr.next ? ` &middot; ${pr.cur.toLocaleString()} / ${pr.next.toLocaleString()} XP` : ' &middot; max rank');
+  $('deploy').textContent = MODES[settings.mode].coop ? 'PLAY SOLO MISSION' : 'PLAY SOLO';
 }
 
 $('classes').addEventListener('click', (e) => {
@@ -106,11 +121,19 @@ $('diffs').addEventListener('click', (e) => {
   settings.difficulty = b.dataset.diff; save(); audio.init(); audio.ui(); renderClassCards();
 });
 function chooseMap(id) {
-  settings.map = id; save(); audio.init(); audio.ui();
+  settings.map = id; fixMode(); save(); audio.init(); audio.ui();
   if (game.state !== 'playing') loadMapById(id);
-  if (net.active && net.isHost) net.setMap(id);
+  if (net.active && net.isHost) { net.setMap(id); net.setGameMode(settings.mode); }
   renderClassCards();
 }
+function chooseMode(k) {
+  if (!MODES[k] || !MAPS[settings.map].modes.includes(k)) return;
+  settings.mode = k; save(); audio.init(); audio.ui();
+  if (net.active && net.isHost) net.setGameMode(k);
+  renderClassCards();
+}
+$('modesel').addEventListener('click', (e) => { const b = e.target.closest('[data-mode]'); if (b) chooseMode(b.dataset.mode); });
+$('lobbyGm').addEventListener('click', (e) => { const b = e.target.closest('[data-gm]'); if (b && net.isHost) chooseMode(b.dataset.gm); });
 $('maps').addEventListener('click', (e) => { const b = e.target.closest('[data-map]'); if (b) chooseMap(b.dataset.map); });
 $('lobbyMaps').addEventListener('click', (e) => { const b = e.target.closest('[data-map]'); if (b && net.isHost) chooseMap(b.dataset.map); });
 $('quality').addEventListener('click', (e) => {
@@ -119,6 +142,7 @@ $('quality').addEventListener('click', (e) => {
   settings.quality = b.dataset.q; save(); audio.init(); audio.ui();
   gfx.setQuality(settings.quality, atmo);
   gfx.applyLook(MAPS[currentMap].look);
+  wetFloor()?.setScale(QUALITY[settings.quality].reflect ?? 0);
   renderClassCards();
 });
 
@@ -157,7 +181,7 @@ function hideScreens() {
 function deploy() {
   audio.init();
   if (net.active) { net.leave(); game.net = null; }
-  game.startMatch({ ...settings, ...MATCH, name: cleanName(settings.name) });
+  game.startMatch({ ...settings, ...matchRules(), name: cleanName(settings.name) });
   hideScreens();
   renderClassCards();
   lock();
@@ -197,6 +221,7 @@ const net = new Net(game, {
       b.disabled = !net.isHost;
     }
     if (!net.isHost && MAPS[state.map] && game.state !== 'playing') { settings.map = state.map; loadMapById(state.map); }
+    if (!net.isHost && MODES[state.gm]) settings.mode = state.gm;
     renderClassCards();
     $('startMp').classList.toggle('hidden', !net.isHost || state.playing);
     $('lobbyMsg').textContent = net.isHost
@@ -226,7 +251,7 @@ function showLobby() {
 
 function startMp() {
   audio.init();
-  net.startGame({ ...settings, ...MATCH });
+  net.startGame({ ...settings, ...matchRules() });
   hideScreens();
   renderClassCards();
   lock();
@@ -241,6 +266,7 @@ $('hostBtn').addEventListener('click', async () => {
   try {
     game.net = net;
     net.map = settings.map;
+    net.gameMode = settings.mode;
     await net.host(settings.name);
     $('mpMsg').textContent = '';
     showLobby();
@@ -289,7 +315,7 @@ document.addEventListener('pointerlockchange', () => {
 // ---------- input ----------
 const keys = new Set(), pressed = new Set(), mouse = new Set(), mousePressed = new Set();
 let mdx = 0, mdy = 0, wheel = 0;
-const GAME_KEYS = new Set(['Tab', 'Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyC', 'KeyG', 'KeyV', 'KeyR', 'KeyQ', 'KeyE', 'KeyF', 'KeyZ',
+const GAME_KEYS = new Set(['Tab', 'Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyC', 'KeyG', 'KeyV', 'KeyR', 'KeyQ', 'KeyE', 'KeyF', 'KeyZ', 'KeyM',
   'ControlLeft', 'ControlRight', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9']);
 
 addEventListener('keydown', (e) => {
@@ -316,14 +342,17 @@ function readInput() {
   if (wheel !== 0 && n) switchTo = (ars.cur + (wheel > 0 ? 1 : n - 1)) % n;
   const streak = pressed.has('Digit4') ? 'uav' : pressed.has('Digit5') ? 'airstrike' : pressed.has('Digit6') ? 'chopper' : null;
   const call = pressed.has('Digit7') ? 'drone' : pressed.has('Digit8') ? 'tank' : pressed.has('Digit9') ? 'jet' : null;
+  let digit = 0;
+  for (let d = 1; d <= 9 && !digit; d++) if (pressed.has(`Digit${d}`)) digit = d;
+  if (pressed.has('KeyM')) hud.toggleMap();
   const inp = {
     forward: k('KeyW'), back: k('KeyS'), left: k('KeyA'), right: k('KeyD'),
-    sprint: keys.has('ShiftLeft') || keys.has('ShiftRight'),
+    sprint: keys.has('ShiftLeft') || keys.has('ShiftRight'), sprintPressed: pressed.has('ShiftLeft') || pressed.has('ShiftRight'),
     fire: mouse.has(0), firePressed: mousePressed.has(0),
     ads: mouse.has(2), adsPressed: mousePressed.has(2),
     reload: pressed.has('KeyR'), jumpPressed: pressed.has('Space'), jump: keys.has('Space'), crouchPressed: pressed.has('KeyC'),
     pronePressed: pressed.has('ControlLeft') || pressed.has('ControlRight') || pressed.has('KeyZ'),
-    leanL: keys.has('KeyQ'), leanR: keys.has('KeyE'), usePressed: pressed.has('KeyF'),
+    leanL: keys.has('KeyQ'), leanR: keys.has('KeyE'), usePressed: pressed.has('KeyF'), use: keys.has('KeyF'), digit,
     melee: pressed.has('KeyV'), nade: keys.has('KeyG'), nadePressed: pressed.has('KeyG'),
     switchTo, streak, call, dx: mdx, dy: mdy,
   };
@@ -342,6 +371,7 @@ function resize() {
 addEventListener('resize', resize);
 resize();
 
+const _sun = new THREE.Vector3(), _cd = new THREE.Vector3();
 const timer = new THREE.Timer();
 timer.connect(document);
 let menuT = 0;
@@ -355,9 +385,10 @@ function frame(ts) {
     else { readInput(); game.effects.update(0); }
   } else if (game.state === 'menu') {
     menuT += dt * 0.05;
-    camera.position.set(SIZE / 2 + Math.cos(menuT) * 70, 30, SIZE / 2 + Math.sin(menuT) * 70);
+    const small = SIZE < 100, rad = small ? 30 : 70;
+    camera.position.set(SIZE / 2 + Math.cos(menuT) * rad, small ? 14 : 30, SIZE / 2 + Math.sin(menuT) * rad);
     camera.fov = 60; camera.updateProjectionMatrix();
-    camera.lookAt(SIZE / 2, 3, SIZE / 2);
+    camera.lookAt(SIZE / 2, small ? 1 : 3, SIZE / 2);
     game.arsenal.holder.visible = false;
     game.effects.update(dt);
   } else {
@@ -365,7 +396,17 @@ function frame(ts) {
   }
   const px = renderer.domElement.height / (2 * Math.tan(camera.fov * Math.PI / 360));
   atmo.update(dt, camera, px);
-  updateWorld(dt);
+  updateWorld(dt, camera.position, scene.fog.far + 60);
+  camera.updateMatrixWorld();
+  wetFloor()?.render(renderer, scene, camera, dt);
+  // sun shafts: where the sun is on screen, and how much we face it
+  const look = MAPS[currentMap].look;
+  if (gfx.rays && atmo.sunDir) {
+    _sun.copy(camera.position).addScaledVector(atmo.sunDir, 1000).project(camera);
+    camera.getWorldDirection(_cd);
+    const facing = _cd.dot(atmo.sunDir);
+    gfx.setSun((_sun.x + 1) / 2, (_sun.y + 1) / 2, facing > 0 && _sun.z < 1 ? (look.rays || 0) * Math.min(1, facing * 1.5) : 0, look.sunGlow);
+  }
   const pl = game.player, playing = game.state === 'playing';
   const veh = playing && pl.alive ? pl.vehicle : null;
   const hurt = playing ? (pl.alive ? Math.max(0, (45 - pl.health) / 45) * 0.8 : 0.7) : 0;
@@ -377,4 +418,4 @@ function frame(ts) {
 requestAnimationFrame(frame);
 
 // hook for automated screenshots in dev and test builds only
-if (import.meta.env.DEV || import.meta.env.VITE_TEST_HOOK) window.__fl = { game, THREE, deploy, settings, loadMapById, gfx, atmo, audio, CLASSES };
+if (import.meta.env.DEV || import.meta.env.VITE_TEST_HOOK) window.__fl = { game, THREE, deploy, settings, loadMapById, gfx, atmo, audio, CLASSES, sites };

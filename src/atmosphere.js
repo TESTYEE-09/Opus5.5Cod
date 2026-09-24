@@ -65,6 +65,49 @@ void main() {
   #include <colorspace_fragment>
 }`;
 
+// Rain: camera-facing streaks stretched along the fall direction (instanced quads), wrapped
+// in a box that follows the camera, plus little splash rings on the floor around you.
+const RAIN_VERT = `attribute vec2 corner; attribute vec4 drop;
+uniform float time, fall, len, width; uniform vec3 cam, boxSize, wind;
+varying float vA; varying vec2 vUv;
+void main() {
+  float sp = fall * (0.85 + drop.w * 0.3);
+  vec3 p = drop.xyz * boxSize + vec3(wind.x, -sp, wind.z) * time;
+  vec3 rel = mod(p - cam + boxSize * 0.5, boxSize) - boxSize * 0.5;
+  vec3 wp = cam + rel;
+  vec3 vel = normalize(vec3(wind.x, -sp, wind.z));
+  vec3 side = normalize(cross(vel, normalize(cameraPosition - wp))) * width;
+  vec3 pos = wp + side * corner.x - vel * len * (0.7 + drop.w * 0.6) * corner.y;
+  vA = smoothstep(boxSize.x * 0.5, boxSize.x * 0.15, length(rel.xz)) * smoothstep(0.4, 2.0, length(rel));
+  vUv = vec2(corner.x + 0.5, corner.y);
+  gl_Position = projectionMatrix * viewMatrix * vec4(pos, 1.0);
+}`;
+const RAIN_FRAG = `uniform vec3 color; uniform float opacity; varying float vA; varying vec2 vUv;
+void main() {
+  float a = (1.0 - abs(vUv.x * 2.0 - 1.0)) * (1.0 - vUv.y) * vA * opacity;
+  gl_FragColor = vec4(color, a);
+  #include <colorspace_fragment>
+}`;
+const SPLASH_VERT = `attribute vec3 seed3; uniform float time, scale, floorY; uniform vec3 cam; varying float vA, vT;
+float h1(float n) { return fract(sin(n) * 43758.5453); }
+void main() {
+  float cyc = time * 2.4 + seed3.z * 10.0, id = floor(cyc);
+  vT = fract(cyc);
+  vec2 xz = vec2(h1(id * 12.9898 + seed3.x * 78.233), h1(id * 39.346 + seed3.y * 11.135)) - 0.5;
+  vec3 wp = vec3(cam.x + xz.x * 30.0, floorY + 0.03, cam.z + xz.y * 30.0);
+  vec4 mv = viewMatrix * vec4(wp, 1.0);
+  vA = (1.0 - vT) * smoothstep(15.0, 5.0, length(xz * 30.0));
+  gl_PointSize = (0.05 + vT * 0.22) * scale / max(-mv.z, 0.1);
+  gl_Position = projectionMatrix * mv;
+}`;
+const SPLASH_FRAG = `uniform vec3 color; varying float vA, vT;
+void main() {
+  float d = length(gl_PointCoord - 0.5);
+  float ring = smoothstep(0.5, 0.38, d) * smoothstep(0.1 + vT * 0.25, 0.38, d);
+  gl_FragColor = vec4(color, ring * vA * 0.55);
+  #include <colorspace_fragment>
+}`;
+
 const lin = (hex) => new THREE.Color(hex);
 const _up = new THREE.Vector3(0, 1, 0), _sx = new THREE.Vector3(), _sy = new THREE.Vector3(), _sc = new THREE.Vector3();
 
@@ -113,6 +156,33 @@ export class Atmosphere {
     this.wx.frustumCulled = false;
     this.wx.visible = false;
     scene.add(this.wx);
+
+    // rain streaks
+    const RN = 9000, rg = new THREE.InstancedBufferGeometry();
+    rg.setAttribute('corner', new THREE.Float32BufferAttribute([-0.5, 0, 0.5, 0, 0.5, 1, -0.5, 1], 2));
+    rg.setIndex([0, 1, 2, 0, 2, 3]);
+    const drops = new Float32Array(RN * 4);
+    for (let i = 0; i < drops.length; i++) drops[i] = Math.random();
+    rg.setAttribute('drop', new THREE.InstancedBufferAttribute(drops, 4));
+    rg.instanceCount = RN;
+    this.rainU = {
+      time: { value: 0 }, fall: { value: 16 }, len: { value: 0.55 }, width: { value: 0.012 },
+      cam: { value: new THREE.Vector3() }, boxSize: { value: new THREE.Vector3(34, 22, 34) }, wind: { value: new THREE.Vector3(1.6, 0, 0.9) },
+      color: { value: new THREE.Color(0xb8c4d0) }, opacity: { value: 0.32 },
+    };
+    this.rain = new THREE.Mesh(rg, new THREE.ShaderMaterial({ uniforms: this.rainU, vertexShader: RAIN_VERT, fragmentShader: RAIN_FRAG, transparent: true, depthWrite: false }));
+    this.rain.frustumCulled = false; this.rain.visible = false; this.rain.renderOrder = 5;
+    scene.add(this.rain);
+    const SN = 700, sp = new Float32Array(SN * 3);
+    for (let i = 0; i < sp.length; i++) sp[i] = Math.random();
+    const sg = new THREE.BufferGeometry();
+    sg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(SN * 3), 3));
+    sg.setAttribute('seed3', new THREE.BufferAttribute(sp, 3));
+    this.splashU = { time: { value: 0 }, scale: { value: 600 }, floorY: { value: 0 }, cam: { value: new THREE.Vector3() }, color: { value: new THREE.Color(0xc8d4e0) } };
+    this.splash = new THREE.Points(sg, new THREE.ShaderMaterial({ uniforms: this.splashU, vertexShader: SPLASH_VERT, fragmentShader: SPLASH_FRAG, transparent: true, depthWrite: false }));
+    this.splash.frustumCulled = false; this.splash.visible = false;
+    scene.add(this.splash);
+    this.flash = 0; this.boltT = 8; this.onThunder = null;
     this.time = 0;
   }
 
@@ -123,6 +193,7 @@ export class Atmosphere {
     this.sun.color.set(look.sunColor); this.sun.intensity = look.sunIntensity;
     this.sun.position.set(SIZE / 2, 0, SIZE / 2).addScaledVector(dir, 100);
     this.sun.target.position.set(SIZE / 2, 0, SIZE / 2);
+    this.baseSun = look.sunIntensity; this.baseHemi = look.hemiIntensity;
     this.sun.shadow.radius = look.shadowSoft || 2;
     this.hemi.color.set(look.hemiSky); this.hemi.groundColor.set(look.hemiGround); this.hemi.intensity = look.hemiIntensity;
     this.scene.fog.color.set(look.fog); this.scene.fog.near = look.fogNear; this.scene.fog.far = look.fogFar;
@@ -132,14 +203,18 @@ export class Atmosphere {
       u.sunCol.value.copy(lin(look.sunGlow)); u.cloudCol.value.copy(lin(look.cloudColor)); u.cover.value = look.cloudCover;
     }
     this.envUniforms.sunDisk.value = 0;
+    this.uniforms.sunDisk.value = look.sunDisk ?? 30;
     this.renderer.toneMappingExposure = look.exposure;
     this.refreshEnv();
 
     const wx = look.particles;
-    this.wx.visible = !!wx;
+    const rain = wx === 'rain';
+    this.rain.visible = this.splash.visible = rain;
+    this.lightning = !!look.lightning; this.flash = 0; this.boltT = 6 + Math.random() * 8;
+    this.wx.visible = !!wx && !rain;
     if (wx === 'snow') Object.assign(this, { wxCfg: { fall: 1.3, sway: 0.6, size: 0.06, opacity: 0.95, color: 0xffffff, count: 5000 } });
     else if (wx === 'dust') Object.assign(this, { wxCfg: { fall: -0.05, sway: 0.8, size: 0.02, opacity: 0.35, color: look.sunColor, count: 1500 } });
-    if (wx) {
+    if (wx && !rain) {
       const c = this.wxCfg;
       this.wxU.fall.value = c.fall; this.wxU.sway.value = c.sway; this.wxU.size.value = c.size; this.wxU.opacity.value = c.opacity;
       this.wxU.color.value.set(c.color);
@@ -178,6 +253,30 @@ export class Atmosphere {
     }
     this.uniforms.time.value = this.time;
     this.sky.position.copy(camera.position);
+    if (this.rain.visible) {
+      this.rainU.time.value = this.time; this.rainU.cam.value.copy(camera.position);
+      this.splashU.time.value = this.time; this.splashU.cam.value.copy(camera.position); this.splashU.scale.value = pxScale;
+      this.splash.visible = camera.position.y < 30;
+    }
+    // lightning: a double flicker that lights the sky and the whole scene, thunder follows
+    if (this.lightning) {
+      if ((this.boltT -= dt) <= 0) {
+        this.boltT = 7 + Math.random() * 14;
+        this.flashT = 0; this.flashing = true;
+        const dist = 0.3 + Math.random() * 2.5;
+        this.onThunder?.(dist, 1 - dist / 3);
+      }
+      if (this.flashing) {
+        this.flashT += dt;
+        const t = this.flashT;
+        this.flash = t < 0.07 ? 1 : t < 0.14 ? 0.25 : t < 0.2 ? 0.8 : Math.max(0, 0.8 - (t - 0.2) * 3);
+        if (t > 0.5) { this.flashing = false; this.flash = 0; }
+      }
+      this.hemi.intensity = this.baseHemi * (1 + this.flash * 3.5);
+      this.renderer.toneMappingExposure = this.look.exposure * (1 + this.flash * 0.45);
+      this.uniforms.cover.value = this.look.cloudCover;
+      this.uniforms.cloudCol.value.copy(lin(this.look.cloudColor)).multiplyScalar(1 + this.flash * 4);
+    }
     if (this.wx.visible) {
       this.wxU.time.value = this.time;
       this.wxU.cam.value.copy(camera.position);

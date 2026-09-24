@@ -56,6 +56,17 @@ export const WEAPONS = {
     mag: 1, reserve: 2, reload: 2.6, reloadEmpty: 2.6, hip: 3, ads: 0.4, move: 2, bloom: 0, bloomMax: 0, lock: 1.0,
     adsTime: 0.35, fov: 45, recoil: { v: 2.5, h: 0.5 }, kick: 0.16, speed: 0.9, pref: 30, reloadKind: 'rocket',
   },
+  // suppressed: heard only close by, no tracer, no minimap blip (Undercover's Operator kit)
+  spistol: {
+    name: 'P-12 SD', model: 'spistol', auto: false, rpm: 380, dmg: [40, 22], range: [10, 24], head: 2.3,
+    mag: 12, reserve: 72, reload: 1.3, reloadEmpty: 1.55, hip: 2.3, ads: 0.35, move: 1.4, bloom: 0.45, bloomMax: 2,
+    adsTime: 0.15, fov: 62, recoil: { v: 0.7, h: 0.25 }, kick: 0.04, speed: 1.1, pref: 10, reloadKind: 'mag', silent: true,
+  },
+  ssmg: {
+    name: 'VX-9 SD', model: 'ssmg', auto: true, rpm: 820, dmg: [24, 14], range: [9, 22], head: 1.5,
+    mag: 30, reserve: 150, reload: 1.6, reloadEmpty: 1.95, hip: 2.3, ads: 0.35, move: 1.4, bloom: 0.25, bloomMax: 2,
+    adsTime: 0.17, fov: 60, recoil: { v: 0.32, h: 0.28 }, kick: 0.022, speed: 1.05, pref: 12, reloadKind: 'mag', silent: true,
+  },
   revolver: {
     name: 'R-44', model: 'revolver', auto: false, rpm: 140, dmg: [62, 38], range: [14, 32], head: 1.7,
     mag: 6, reserve: 36, reload: 2.3, reloadEmpty: 2.3, hip: 2.6, ads: 0.3, move: 1.8, bloom: 0.9, bloomMax: 2.5,
@@ -72,6 +83,7 @@ export const CLASSES = {
   tactician: { name: 'Tactician', desc: 'BR-3 three-round burst. Kills in one burst up close.', primary: 'burst', secondary: 'pistol', frags: 2 },
   recon: { name: 'Recon', desc: 'SVX-10 marksman rifle, 4x scope, and an R-44 Magnum.', primary: 'dmr', secondary: 'revolver', frags: 1 },
   antitank: { name: 'Anti-Tank', desc: 'VX-9 SMG plus an RPG-7 (key 3) for tanks and helicopters.', primary: 'smg', secondary: 'pistol', launcher: 'rpg', frags: 1 },
+  operator: { name: 'Operator', desc: 'Suppressed VX-9 SD and P-12 SD. Quiet: made for Undercover.', primary: 'ssmg', secondary: 'spistol', frags: 1 },
   antiair: { name: 'Anti-Air', desc: 'AR-4 plus a Stinger (key 3). Aim at aircraft until it locks.', primary: 'ar', secondary: 'pistol', launcher: 'stinger', frags: 1 },
 };
 
@@ -285,7 +297,7 @@ const BUILD = {
     const off = arms(g, [0, -0.1, 0.12], [0, -0.02, -0.3]);
     return finish(g, { mag, charge, off, muzzleZ: -0.79, muzzleY: 0.035, sightY: 0.118, sightZ: -0.05, adsDist: 0.26, hip: new THREE.Vector3(0.14, -0.19, -0.5), eject: new THREE.Vector3(0.04, 0.05, 0) });
   },
-  smg() {
+  smg(sup = false) {
     const g = new THREE.Group();
     part(g, bx(0.055, 0.08, 0.3), M.poly, 0, 0, -0.02);
     part(g, bx(0.045, 0.03, 0.3), M.metal, 0, 0.05, -0.02);
@@ -305,7 +317,8 @@ const BUILD = {
     const charge = part(g, bx(0.012, 0.02, 0.03), M.steel, -0.03, 0.03, -0.15);
     reflex(g, 0.1, -0.02, 0.045);
     const off = arms(g, [0, -0.09, 0.08], [0, -0.03, -0.21]);
-    return finish(g, { mag, charge, off, muzzleZ: -0.39, muzzleY: 0.01, sightY: 0.1, sightZ: -0.02, adsDist: 0.24, hip: new THREE.Vector3(0.13, -0.17, -0.44), flashSize: 0.14, eject: new THREE.Vector3(0.035, 0.04, -0.02) });
+    if (sup) { part(g, cy(0.021, 0.2, 14), M.metal, 0, 0.01, -0.48); part(g, cy(0.023, 0.02, 14), M.steel, 0, 0.01, -0.575); }
+    return finish(g, { mag, charge, off, muzzleZ: sup ? -0.59 : -0.39, muzzleY: 0.01, sightY: 0.1, sightZ: -0.02, adsDist: 0.24, hip: new THREE.Vector3(0.13, -0.17, -0.44), flashSize: sup ? 0.05 : 0.14, eject: new THREE.Vector3(0.035, 0.04, -0.02) });
   },
   lmg() {
     const g = new THREE.Group();
@@ -398,7 +411,7 @@ const BUILD = {
     const o = finish(g, { mag, off, pump, shell, muzzleZ: -0.67, muzzleY: 0.022, sightY: 0.047, sightZ: 0, adsDist: 0.34, hip: new THREE.Vector3(0.14, -0.18, -0.5), flashSize: 0.3, eject: new THREE.Vector3(0.04, 0.01, -0.02) });
     return o;
   },
-  pistol() {
+  pistol(sup = false) {
     const g = new THREE.Group();
     part(g, bx(0.034, 0.034, 0.18), M.poly, 0, 0, -0.03);
     const slide = group(g, 0, 0.034, -0.03);
@@ -423,7 +436,11 @@ const BUILD = {
     const off = group(g, -0.03, -0.07, 0.04);
     part(off, bx(0.05, 0.08, 0.08), M.glove, 0, 0, 0);
     part(off, bx(0.085, 0.085, 0.42), M.sleeve, -0.07, -0.09, 0.21, 0.5, -0.35, 0);
-    return finish(g, { mag, off, slide, muzzleZ: -0.145, muzzleY: 0.034, sightY: 0.058, sightZ: 0, adsDist: 0.36, hip: new THREE.Vector3(0.11, -0.14, -0.4), flashSize: 0.12, eject: new THREE.Vector3(0.025, 0.045, -0.02) });
+    if (sup) { part(g, cy(0.016, 0.17, 14), M.metal, 0, 0.034, -0.23); part(g, cy(0.017, 0.015, 14), M.steel, 0, 0.034, -0.31); }
+    return finish(g, { mag, off, slide, muzzleZ: sup ? -0.32 : -0.145, muzzleY: 0.034, sightY: 0.058, sightZ: 0, adsDist: 0.36, hip: new THREE.Vector3(0.11, -0.14, -0.4), flashSize: sup ? 0.04 : 0.12, eject: new THREE.Vector3(0.025, 0.045, -0.02) });
+  },
+  spistol() { return BUILD.pistol(true); },
+  ssmg() { return BUILD.smg(true);
   },
   revolver() {
     const g = new THREE.Group();

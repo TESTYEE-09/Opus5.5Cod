@@ -390,6 +390,140 @@ export const PROPS = {
   },
 };
 
+const shade = (c, k) => (Math.min(255, ((c >> 16) & 255) * k) << 16) | (Math.min(255, ((c >> 8) & 255) * k) << 8) | Math.min(255, (c & 255) * k);
+// a thin bar from a to b ([x, y, z] in the prop's local space)
+function seg(k, a, b, r, kind, col) {
+  const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2], l = Math.hypot(dx, dy, dz);
+  k.part(box(r, r, l), kind, col, (a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2, -Math.atan2(dy, Math.hypot(dx, dz)), Math.atan2(dx, dz), 0);
+}
+
+Object.assign(PROPS, {
+  // frame, corner castings and door hardware for a shipping container (length along local z)
+  cframe(k, o) {
+    const L = o.len || 6.1, W = o.wid || 2.44, H = 2.6;
+    const cols = o.cols || [o.col ?? 0x2d5870];
+    for (let lv = 0; lv < cols.length; lv++) {
+      const col = cols[lv] ?? 0x2d5870, dark = shade(col, 0.6), y0 = lv * H;
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+        k.part(box(0.17, H - 0.04, 0.17), 'paint', dark, sx * (W / 2 - 0.07), y0 + H / 2, sz * (L / 2 - 0.07));
+        for (const yy of [0.08, H - 0.08]) k.part(box(0.22, 0.15, 0.22), 'metal', 0x2a2a28, sx * (W / 2 - 0.08), y0 + yy, sz * (L / 2 - 0.08));
+      }
+      for (const sx of [-1, 1]) for (const yy of [0.09, H - 0.09]) k.part(box(0.1, 0.16, L - 0.34), 'paint', dark, sx * (W / 2 - 0.01), y0 + yy, 0);
+      for (const sz of [-1, 1]) for (const yy of [0.09, H - 0.09]) k.part(box(W - 0.34, 0.16, 0.1), 'paint', dark, 0, y0 + yy, sz * (L / 2 - 0.01));
+      if (!o.open) for (const x of [-0.85, -0.45, 0.45, 0.85]) {
+        k.part(cyl(0.028, 0.028, H - 0.35, 6), 'metal', shade(col, 0.85), x, y0 + H / 2, L / 2 + 0.04);
+        for (const yy of [0.3, H - 0.3]) k.part(box(0.09, 0.06, 0.07), 'metal', 0x3a3a38, x, y0 + yy, L / 2 + 0.06);
+        k.part(box(0.045, 0.34, 0.05), 'metal', shade(col, 0.7), x + 0.09, y0 + 1.2, L / 2 + 0.09);
+      }
+      if (o.open) continue;
+      k.part(box(0.05, H - 0.3, 0.05), 'paint', dark, 0, y0 + H / 2, L / 2 + 0.03);
+      for (const sx of [-1, 1]) for (const yy of [0.5, 1.3, 2.1]) k.part(box(0.06, 0.13, 0.1), 'metal', 0x333331, sx * (W / 2 - 0.1), y0 + yy, L / 2 + 0.04);
+    }
+  },
+  // stacked white rugged equipment cases
+  cases(k, o, R) {
+    const w = o.w || 1.2, d = o.d || 0.8;
+    let y = 0;
+    for (let i = 0; i < (o.n || 3); i++) {
+      const h = 0.55 + R() * 0.25, c = [0xd4d7d4, 0xc2c6c4, 0xb4b9b8][i % 3];
+      k.part(rbox(w, h, d, 0.05), 'metal', c, 0, y + h / 2, 0, 0, (R() - 0.5) * 0.06, 0);
+      k.part(box(w + 0.02, 0.05, d + 0.02), 'metal', 0x80847f, 0, y + h - 0.12, 0);
+      for (const sx of [-1, 1]) k.part(box(0.2, 0.06, 0.05), 'metal', 0x444846, sx * w * 0.3, y + h * 0.55, d / 2 + 0.02);
+      k.part(box(0.3, 0.04, 0.04), 'metal', 0x303432, 0, y + h * 0.78, d / 2 + 0.03);
+      if (R() < 0.6) k.part(box(0.28, 0.18, 0.01), 'paint', [0x2a2a2a, 0xb03a2e, 0xe0c040][Math.floor(R() * 3)], -w * 0.18, y + h * 0.45, d / 2 + 0.012);
+      y += h;
+    }
+  },
+  // blue plastic crates on a pallet
+  bluecrates(k, o, R) {
+    k.part(box(1.2, 0.14, 1.0), 'rough', 0x7a6242, 0, 0.07, 0);
+    for (let i = 0; i < (o.n || 4); i++) {
+      const x = (i % 2 - 0.5) * 0.6, y = 0.14 + Math.floor(i / 2) * 0.46 + 0.23;
+      k.part(rbox(0.58, 0.44, 0.95, 0.04), 'paint', [0x1f5f9a, 0x2a6aa8, 0xd0d4d4][Math.floor(R() * 3)], x, y, 0);
+      k.part(box(0.3, 0.2, 0.01), 'paint', 0xe8e8e0, x, y, 0.48);
+    }
+  },
+  // deck crane: pedestal, cab and a lattice boom raised by `pitch`, with its cables and hook
+  shipcrane(k, o) {
+    const Y = o.color || 0xc49a22, p = o.pitch ?? 0.55, L = o.len || 26;
+    k.part(cyl(1.3, 1.7, 10, 14), 'paint', Y, 0, 5, 0);
+    k.part(cyl(1.9, 1.9, 0.5, 16), 'metal', 0x3a3c3e, 0, 10.2, 0);
+    k.part(rbox(4, 3, 4.4, 0.2), 'paint', 0xd8d4c8, 0, 11.9, 0.4);
+    k.part(box(3.6, 1.1, 0.05), 'glass', 0x18212a, 0, 12.3, -1.83);
+    k.part(box(0.35, 0.25, 0.35), 'glow', [0xff3010, 4], 0, 13.55, 0.4);
+    k.push(0, 11, -1.4, 0, p);
+    k.part(box(1.3, 1.3, L), 'paint', Y, 0, 0, -L / 2);
+    for (let z = -2; z > -L; z -= 2.6) for (const sx of [-1, 1]) k.part(box(0.1, 0.1, 1.9), 'paint', shade(Y, 0.7), sx * 0.66, 0.4, z, 0, 0.6 * sx, 0);
+    k.pop();
+    const tip = [0, 11 + Math.sin(p) * L, -1.4 - Math.cos(p) * L];
+    for (const x of [-0.4, 0.4]) seg(k, [x, 13.4, 1.8], [x, tip[1], tip[2]], 0.05, 'metal', 0x151515);
+    seg(k, [0, tip[1], tip[2]], [0, 7, tip[2]], 0.05, 'metal', 0x151515);
+    k.part(rbox(0.7, 0.9, 0.5, 0.08), 'paint', 0xd8a020, 0, 6.6, tip[2]);
+    k.part(torus(0.28, 0.07, Math.PI * 1.4), 'metal', 0x2a2a2a, 0, 5.9, tip[2], 0, Math.PI / 2, 0);
+  },
+  // light mast with a bank of floodlights aimed along local -z
+  mast(k, o) {
+    const h = o.h || 14;
+    k.part(cyl(0.14, 0.22, h, 8), 'paint', 0xb8b4a8, 0, h / 2, 0);
+    k.part(box(1.8, 0.12, 0.14), 'metal', 0x333533, 0, h - 0.25, 0);
+    for (const x of [-0.6, 0, 0.6]) {
+      k.part(rbox(0.46, 0.36, 0.3, 0.04), 'metal', 0x2a2c2a, x, h, -0.12, -0.55, 0, 0);
+      k.part(box(0.37, 0.27, 0.03), 'glow', [0xeef3ff, 6], x, h - 0.09, -0.27, -0.55, 0, 0);
+    }
+  },
+  railing(k, o) {
+    const L = o.len || 10, c = o.color || 0xd2c9a8;
+    for (let x = -L / 2; x <= L / 2 + 0.01; x += 1.5) k.part(cyl(0.03, 0.03, 1.1, 6), 'paint', c, x, 0.55, 0);
+    for (const y of [0.55, 1.1]) k.part(cyl(0.025, 0.025, L, 6), 'paint', c, 0, y, 0, 0, 0, Math.PI / 2);
+  },
+  // a field desk with a laptop (the Undercover intel)
+  laptop(k, o) {
+    k.part(box(1.4, 0.05, 0.7), 'rough', 0x5a4a38, 0, 0.76, 0);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) k.part(box(0.05, 0.74, 0.05), 'metal', 0x2a2a2a, sx * 0.62, 0.37, sz * 0.3);
+    k.part(box(0.38, 0.022, 0.26), 'metal', 0x1c1c1c, 0, 0.8, 0.05);
+    k.part(box(0.38, 0.25, 0.015), 'metal', 0x1c1c1c, 0, 0.93, -0.1, -0.25, 0, 0);
+    k.part(box(0.33, 0.2, 0.01), 'glow', [0x4a9cff, 2.5], 0, 0.93, -0.092, -0.25, 0, 0);
+    k.part(box(0.22, 0.01, 0.3), 'paint', 0xe8e4d8, 0.45, 0.79, 0.1, 0, 0.3, 0);
+    k.part(rbox(0.16, 0.28, 0.08, 0.02), 'metal', 0x3a4030, -0.5, 0.92, 0);
+    k.part(box(0.01, 0.35, 0.01), 'metal', 0x111111, -0.45, 1.2, 0);
+  },
+  // a mobile SAM launcher: 6x6 chassis, cab, and four missiles on a raised rail
+  sam(k, o) {
+    const G = o.color || 0x4a5234, D = 0x2a2e22, burnt = o.burnt;
+    const P = (c) => burnt ? 0x1c1a18 : c;
+    k.part(rbox(2.9, 1.1, 8.4, 0.1), 'paint', P(G), 0, 1.35, 0);
+    for (const z of [-3, -1.4, 2.6]) for (const sx of [-1, 1]) k.part(cyl(0.58, 0.58, 0.45, 14), 'rough', 0x161616, sx * 1.3, 0.58, z, 0, 0, Math.PI / 2);
+    k.part(rbox(2.8, 1.5, 2, 0.15), 'paint', P(G), 0, 2.6, -3.4);
+    if (!burnt) k.part(box(2.5, 0.6, 0.05), 'glass', 0x18212a, 0, 2.95, -4.42);
+    k.part(cyl(1.1, 1.25, 0.5, 12), 'metal', P(D), 0, 2.15, 1.2);
+    if (burnt) return;
+    k.push(0, 2.6, 1.2, 0, 0.62);
+    k.part(box(2.4, 0.2, 5.8), 'metal', D, 0, 0, 0);
+    for (const x of [-0.9, -0.3, 0.3, 0.9]) {
+      k.part(cyl(0.2, 0.2, 5.2, 10), 'paint', 0xd8d8d0, x, 0.36, 0.2, Math.PI / 2, 0, 0);
+      k.part(cone(0.2, 0.7, 10), 'paint', 0xd8d8d0, x, 0.36, -2.75, -Math.PI / 2, 0, 0);
+      for (const r of [0, Math.PI / 2]) k.part(box(0.02, 0.6, 0.5), 'paint', 0xc8c8c0, x, 0.36, 2.4, 0, 0, r);
+    }
+    k.pop();
+    k.part(box(1.4, 1.1, 0.2), 'metal', 0x303830, 0, 3.6, -2.2);
+  },
+  helipad(k) {
+    k.part(cyl(7, 7, 0.06, 40), 'rough', 0x575755, 0, 0.03, 0);
+    k.part(cyl(6.4, 6.4, 0.065, 40), 'paint', 0xd8c040, 0, 0.034, 0);
+    k.part(cyl(6.0, 6.0, 0.07, 40), 'rough', 0x575755, 0, 0.036, 0);
+    for (const x of [-1.5, 1.5]) k.part(box(0.6, 0.02, 5), 'paint', 0xe8e8e0, x, 0.08, 0);
+    k.part(box(3, 0.02, 0.6), 'paint', 0xe8e8e0, 0, 0.08, 0);
+    for (let i = 0; i < 8; i++) { const a = i / 8 * Math.PI * 2; k.part(box(0.3, 0.2, 0.3), 'glow', [0x80ff60, 2], Math.cos(a) * 7.2, 0.1, Math.sin(a) * 7.2); }
+  },
+  // Ground War capture point: a pole with a beacon
+  cappole(k) {
+    k.part(cyl(0.07, 0.1, 6, 8), 'metal', 0xb8bcbe, 0, 3, 0);
+    k.part(cyl(0.5, 0.6, 0.25, 12), 'metal', 0x3a3c3e, 0, 0.12, 0);
+    k.part(box(1.6, 1.0, 0.03), 'fabric', 0xe0e0d8, 0.85, 5.3, 0);
+    k.part(sph(0.12, 8, 6), 'glow', [0xffffff, 3], 0, 6.05, 0);
+  },
+});
+
 export function buildProp(kit, type, o, seed) {
   const fn = PROPS[type];
   if (!fn) return;

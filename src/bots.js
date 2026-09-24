@@ -1,7 +1,8 @@
 import * as THREE from 'three';
-import { moveBody, findPath, lineWalkable, overlaps, interest, randomWalkable, lineOfSight, SIZE, STEP } from './world.js';
+import { moveBody, findPath, lineWalkable, overlaps, interest, randomWalkable, lineOfSight, walkable, SIZE, STEP } from './world.js';
 import { WEAPONS } from './weapons.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { surface, R } from './textures.js';
 
 export const DIFFICULTY = {
@@ -24,6 +25,7 @@ const TEAM_LOOK = [
 ];
 
 const geoCache = {};
+const accentGold = new THREE.MeshStandardMaterial({ color: 0xc8a040, roughness: 0.4, metalness: 0.7 });
 const box = (w, h, d) => (geoCache[`${w},${h},${d}`] ||= new RoundedBoxGeometry(w, h, d, 2, Math.min(w, h, d) * 0.25));
 const helmetGeo = new THREE.SphereGeometry(0.16, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.55);
 const cupGeo = new THREE.CylinderGeometry(0.045, 0.045, 0.04, 12).rotateZ(Math.PI / 2);
@@ -75,7 +77,8 @@ function matsFor(team) {
   return teamMats[team];
 }
 
-export function buildSoldier(team, name) {
+// opts.officer: the Undercover target, in a peaked cap and no body armour
+export function buildSoldier(team, name, opts = {}) {
   const L = TEAM_LOOK[team], T = matsFor(team);
   const skin = new THREE.MeshStandardMaterial({ color: new THREE.Color().setHSL(0.07, 0.35, 0.3 + Math.random() * 0.25), roughness: 0.7 });
   const accent = new THREE.MeshStandardMaterial({ color: L.accent, emissive: L.accent, emissiveIntensity: 0.45 });
@@ -96,21 +99,33 @@ export function buildSoldier(team, name) {
     legs.push({ leg, shin });
   }
   const torso = new THREE.Group(); hips.add(torso);
-  mesh(torso, box(0.42, 0.56, 0.25), T.uni, 0, 0.3, 0);
-  mesh(torso, box(0.46, 0.4, 0.31), T.vest, 0, 0.34, 0);
-  for (const x of [-0.12, 0, 0.12]) mesh(torso, box(0.1, 0.13, 0.07), T.gear, x, 0.25, -0.18);
-  mesh(torso, box(0.13, 0.1, 0.06), T.gear, 0.14, 0.42, -0.17);
-  mesh(torso, box(0.3, 0.36, 0.14), T.gear, 0, 0.34, 0.21);
-  mesh(torso, box(0.08, 0.3, 0.06), T.gear, -0.2, 0.38, 0.14);
+  const off = !!opts.officer;
+  mesh(torso, box(0.42, 0.56, 0.25), off ? T.helmet : T.uni, 0, 0.3, 0);
+  if (off) {
+    for (const x of [-0.17, 0.17]) mesh(torso, box(0.1, 0.03, 0.16), accentGold, x, 0.575, 0);
+    mesh(torso, box(0.44, 0.06, 0.27), T.boot, 0, 0.08, 0);
+  } else {
+    mesh(torso, box(0.46, 0.4, 0.31), T.vest, 0, 0.34, 0);
+    for (const x of [-0.12, 0, 0.12]) mesh(torso, box(0.1, 0.13, 0.07), T.gear, x, 0.25, -0.18);
+    mesh(torso, box(0.13, 0.1, 0.06), T.gear, 0.14, 0.42, -0.17);
+    mesh(torso, box(0.3, 0.36, 0.14), T.gear, 0, 0.34, 0.21);
+    mesh(torso, box(0.08, 0.3, 0.06), T.gear, -0.2, 0.38, 0.14);
+  }
   mesh(torso, box(0.3, 0.08, 0.3), T.uni, 0, 0.56, 0);
   const head = new THREE.Group(); head.position.y = 0.62; torso.add(head);
-  mesh(head, box(0.19, 0.24, 0.21), team ? T.mask : skin, 0, 0.11, 0);
-  if (team) mesh(head, box(0.15, 0.045, 0.02), skin, 0, 0.15, -0.1);
-  else mesh(head, box(0.17, 0.05, 0.03), T.lens, 0, 0.16, -0.105);
-  mesh(head, helmetGeo, T.helmet, 0, 0.19, 0.005);
-  mesh(head, box(0.28, 0.035, 0.3), T.helmet, 0, 0.2, 0.01);
-  for (const x of [-0.105, 0.105]) mesh(head, cupGeo, T.gear, x, 0.13, 0.01);
-  mesh(head, box(0.05, 0.04, 0.03), T.gun, 0, 0.27, -0.14);
+  mesh(head, box(0.19, 0.24, 0.21), team && !off ? T.mask : skin, 0, 0.11, 0);
+  if (off) {
+    mesh(head, box(0.26, 0.07, 0.27), T.boot, 0, 0.25, 0);
+    mesh(head, box(0.24, 0.02, 0.12), T.boot, 0, 0.215, -0.15);
+    mesh(head, box(0.08, 0.06, 0.02), accentGold, 0, 0.26, -0.135);
+  } else {
+    if (team) mesh(head, box(0.15, 0.045, 0.02), skin, 0, 0.15, -0.1);
+    else mesh(head, box(0.17, 0.05, 0.03), T.lens, 0, 0.16, -0.105);
+    mesh(head, helmetGeo, T.helmet, 0, 0.19, 0.005);
+    mesh(head, box(0.28, 0.035, 0.3), T.helmet, 0, 0.2, 0.01);
+    for (const x of [-0.105, 0.105]) mesh(head, cupGeo, T.gear, x, 0.13, 0.01);
+    mesh(head, box(0.05, 0.04, 0.03), T.gun, 0, 0.27, -0.14);
+  }
   mesh(torso, box(0.24, 0.06, 0.24), accent, 0, 0.6, 0);
 
   const arms = new THREE.Group(); arms.position.set(0, 0.5, 0); torso.add(arms);
@@ -130,10 +145,38 @@ export function buildSoldier(team, name) {
   mesh(rifle, box(0.04, 0.05, 0.08), T.gun, 0, 0.075, -0.05);
   const muzzle = new THREE.Object3D(); muzzle.position.set(0, 0.01, -0.63); rifle.add(muzzle);
 
+  for (const gr of [hips, ...legs.flatMap(l => [l.leg, l.shin]), torso, head, arms, rifle]) mergeParts(gr);
   const tag = nameTag(name, '#7fb4ff');
   tag.position.y = 2.2;
   root.add(tag);
   return { root, hips, legs, torso, head, arms, muzzle, tag, accent };
+}
+
+// Bakes a body part's pieces into one mesh per look: the camo cloth, the glowing team accent,
+// and everything else in a single vertex-coloured mesh. About 17 draw calls a soldier, not 45.
+const solidMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.78, metalness: 0.12 });
+function mergeParts(group) {
+  const buckets = new Map();
+  for (const c of group.children.slice()) {
+    if (!c.isMesh) continue;
+    const m = c.material, key = m.map || m.emissiveIntensity > 0 ? m : solidMat;
+    c.updateMatrix();
+    const g = (c.geometry.index ? c.geometry.toNonIndexed() : c.geometry.clone()).applyMatrix4(c.matrix);
+    for (const a of Object.keys(g.attributes)) if (a !== 'position' && a !== 'normal' && a !== 'uv') g.deleteAttribute(a);
+    if (key === solidMat) {
+      const n = g.attributes.position.count, col = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) { col[i * 3] = m.color.r; col[i * 3 + 1] = m.color.g; col[i * 3 + 2] = m.color.b; }
+      g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    }
+    (buckets.get(key) || buckets.set(key, []).get(key)).push(g);
+    group.remove(c);
+  }
+  for (const [mat, geos] of buckets) {
+    const mm = new THREE.Mesh(mergeGeometries(geos), mat);
+    mm.castShadow = true;
+    group.add(mm);
+    for (const g of geos) g.dispose();
+  }
 }
 
 // Accent colour and name tag depend on which side the local player is on.
@@ -176,23 +219,33 @@ export function animateDeath(m, s, dt) {
   const f = Math.min(1, s.deathT / 0.5);
   m.root.rotation.x = -f * f * 1.45 * s.fallDir;
   m.root.position.y = s.pos.y + 0.1 * f;
-  if (s.deathT > 3.5) m.root.position.y = s.pos.y - (s.deathT - 3.5) * 0.4;
-  if (s.deathT > 4.5) m.root.visible = false;
+  const keep = s.bodyTime ?? 3.5;
+  if (s.deathT > keep) m.root.position.y = s.pos.y - (s.deathT - keep) * 0.4;
+  if (s.deathT > keep + 1) m.root.visible = false;
 }
 
 const _v = new THREE.Vector3(), _a = new THREE.Vector3(), _b = new THREE.Vector3(), _dir = new THREE.Vector3();
+// the nearest open, walkable spot within a few metres of (x, z)
+function openSpot(x, z) {
+  for (let r = 0; r < 12; r += 1.5) for (let n = 0; n < (r ? 8 : 1); n++) {
+    const a = n / 8 * Math.PI * 2, px = x + Math.cos(a) * r, pz = z + Math.sin(a) * r;
+    if (walkable(Math.floor(px), Math.floor(pz)) && !overlaps(px, pz, 0.4, STEP, 1.8)) return { x: px, z: pz };
+  }
+  return null;
+}
 const wrap = (a) => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; };
 
 export class Bot {
-  constructor(game, team, name) {
+  constructor(game, team, name, opts = {}) {
     this.game = game;
     this.team = team;
     this.name = name;
+    this.role = null; this.hostile = false; this.far = false; this.camD = 0;
     this.isPlayer = false;
     this.pos = new THREE.Vector3();
     this.vel = new THREE.Vector3();
     this.body = { pos: this.pos, vel: this.vel, r: 0.35, h: 1.75, onGround: true };
-    this.model = buildSoldier(team, name);
+    this.model = buildSoldier(game.mode ? game.mode.lookFor(this) : team, name, opts);
     game.scene.add(this.model.root);
     this.damagers = new Map();
     this.lastKnown = new THREE.Vector3();
@@ -214,7 +267,7 @@ export class Bot {
     this.target = null; this.visible = false; this.lastSeenT = -99;
     this.reactT = 0; this.err = 1; this.fireT = 0; this.burst = 0; this.reloadT = 0;
     this.strafeDir = 0; this.strafeT = 0;
-    this.path = null; this.pathIdx = 0; this.goal = null; this.goalKey = null; this.repathT = 0;
+    this.path = null; this.pathIdx = 0; this.goal = null; this.goalKey = null; this.repathT = 0; this.leg = null; this.waitT = 0;
     this.senseT = Math.random() * 0.2;
     this.stuckT = 0; this.stuckPos = new THREE.Vector3().copy(this.pos);
     this.grenades = 1; this.nadeCool = 3;
@@ -239,6 +292,7 @@ export class Bot {
   eye(out) { return out.set(this.pos.x, this.pos.y + 1.6 - 0.5 * this.crouchAmt, this.pos.z); }
 
   hurtBy(attacker) {
+    if (this.game.mode.kind === 'uc' && this.team === 1 && !this.hostile && attacker) this.game.mode.alert(this, attacker, attacker.pos);
     if (attacker?.vehicle?.alive) attacker = attacker.vehicle;
     if (!attacker || attacker === this || !attacker.alive || (attacker.isVehicle && (attacker.air || (attacker.kind === 'aa' && !attacker.driver)))) return;
     if (!this.visible || this.target !== attacker) {
@@ -262,7 +316,10 @@ export class Bot {
     this.alive = false;
     this.deathT = 0;
     this.fallDir = Math.random() < 0.5 ? 1 : -1;
-    this.respawnT = 4 + Math.random() * 1.5;
+    const g = this.game;
+    this.respawnT = g.mode.respawnDelay(this);
+    // Undercover keeps the bodies where they fell, for the guards to find
+    this.bodyTime = g.mode.kind === 'uc' ? 90 : 3.5;
   }
 
   sense() {
@@ -270,7 +327,7 @@ export class Bot {
     const eye = this.eye(_a);
     let best = null, bestScore = Infinity;
     const fx = -Math.sin(this.yaw), fz = -Math.cos(this.yaw);
-    for (const e of g.targetsFor(this.team)) {
+    for (const e of g.targetsFor(this.team, this)) {
       const p = e.aimPoint(_b, false);
       const dx = p.x - eye.x, dz = p.z - eye.z;
       const dist = Math.hypot(dx, dz, p.y - eye.y);
@@ -324,7 +381,11 @@ export class Bot {
     let crouch = false;
 
     const danger = g.dangerNear(this, 6);
-    if (danger) {
+    const calm = this.role && g.mode.kind === 'uc' && !g.mode.hostileTo(this);
+    if (calm && !danger) {
+      this.calm(dt);
+      speed = 4.6;
+    } else if (danger) {
       _v.subVectors(this.pos, danger.pos).setY(0).normalize();
       this.wish.copy(_v);
       speed = 6;
@@ -367,6 +428,22 @@ export class Bot {
     }
 
     this.animate(dt);
+  }
+
+  // Undercover: a calm soldier strolls his post or patrol route, stops, looks about
+  calm(dt) {
+    const g = this.game;
+    this.target = null; this.visible = false;
+    if (this.waitT > 0) {
+      this.waitT -= dt;
+      if ((this.lookT = (this.lookT || 0) - dt) <= 0) { this.lookT = 2 + Math.random() * 4; this.lookYaw = this.yaw + (Math.random() - 0.5) * 2.4; }
+      this.faceToward(this.pos.x - Math.sin(this.lookYaw), this.pos.z - Math.cos(this.lookYaw), dt, 1.1);
+      this.pitch *= 0.9;
+      return;
+    }
+    if (!this.goal) { this.goal = g.mode.botGoal(this); this.path = null; if (!this.goal) { this.waitT = 3; return; } }
+    this.goTo(this.goal.x, this.goal.z, dt, this.goal.pace || 0.35, true);
+    if (this.goal && Math.hypot(this.goal.x - this.pos.x, this.goal.z - this.pos.z) < 1.2) { this.waitT = this.goal.wait || 4; this.goal = null; }
   }
 
   footsteps(dt) {
@@ -485,7 +562,7 @@ export class Bot {
     const g = this.game;
     if (!this.goal) this.pickGoal();
     this.goTo(this.goal.x, this.goal.z, dt, 0.85, true);
-    if (Math.hypot(this.goal.x - this.pos.x, this.goal.z - this.pos.z) < 1.5) this.goal = null;
+    if (this.goal && Math.hypot(this.goal.x - this.pos.x, this.goal.z - this.pos.z) < 1.5) this.goal = null;
     if (g.uav[this.team] > 0 && Math.random() < dt * 0.5) {
       const e = g.nearestEnemy(this);
       if (e) this.hear(e, e.pos);
@@ -494,6 +571,8 @@ export class Bot {
 
   pickGoal() {
     const g = this.game, intel = g.intel[this.team];
+    const mg = g.mode.botGoal(this);
+    if (mg) { this.goal = mg; this.path = null; return; }
     const r = Math.random();
     if (intel.length && r < 0.45) {
       const i = intel[Math.floor(Math.random() * intel.length)];
@@ -508,6 +587,16 @@ export class Bot {
 
   goTo(x, z, dt, speedMul, look) {
     const g = this.game;
+    // far goals (the big maps): walk there in legs of about 80 m, each one path-found on its own
+    const fx = x - this.pos.x, fz = z - this.pos.z, fd = Math.hypot(fx, fz);
+    if (fd > 110) {
+      const key = `${x | 0},${z | 0}`;
+      if (!this.leg || this.legFor !== key || Math.hypot(this.leg.x - this.pos.x, this.leg.z - this.pos.z) < 4) {
+        this.legFor = key;
+        this.leg = openSpot(this.pos.x + fx * 80 / fd, this.pos.z + fz * 80 / fd) || { x: this.pos.x + fx * 80 / fd, z: this.pos.z + fz * 80 / fd };
+      }
+      x = this.leg.x; z = this.leg.z;
+    } else this.leg = null;
     if (this.goalKey !== `${x | 0},${z | 0}` || (!this.path && (this.repathT -= dt) <= 0)) {
       this.goalKey = `${x | 0},${z | 0}`;
       if (lineWalkable(this.pos.x, this.pos.z, x, z)) { this.path = [{ x, z }]; this.pathIdx = 0; }
@@ -535,7 +624,11 @@ export class Bot {
     }
   }
 
-  animate(dt) { animateSoldier(this.model, this, dt); }
+  animate(dt) {
+    // past the fog there is no point posing (or drawing) a soldier
+    this.model.root.visible = this.camD < 330;
+    if (this.model.root.visible) animateSoldier(this.model, this, dt);
+  }
 
   remove() { this.game.scene.remove(this.model.root); }
 }

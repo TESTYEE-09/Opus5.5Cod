@@ -220,3 +220,59 @@ button:disabled { opacity: 0.5; cursor: default; }
 .sk.call { opacity: 0.6; }
 .sk.call.ready { opacity: 1; color: var(--hud); }
 .sk.call.ready em { animation: none; color: #9fe39f; }
+
+/* ---------- game modes ---------- */
+#flagsRow { position: absolute; top: 58px; left: 50%; transform: translateX(-50%); display: none; gap: 8px; }
+#hud.mode-gw #flagsRow { display: flex; }
+.fl { position: relative; width: 34px; height: 34px; border: 2px solid rgba(255,255,255,0.75); background: rgba(0,0,0,0.5); overflow: hidden; display: flex; align-items: center; justify-content: center; }
+.fl i { position: absolute; left: 0; right: 0; bottom: 0; opacity: 0.55; }
+.fl i.ally { background: var(--ally); }
+.fl i.enemy { background: var(--enemy); }
+.fl b { position: relative; font-size: 20px; }
+.fl.ally { border-color: var(--ally); }
+.fl.enemy { border-color: var(--enemy); }
+.fl.contested { animation: pulse 0.5s infinite; border-color: var(--gold); }
+.fl.here { transform: scale(1.18); box-shadow: 0 0 10px rgba(255,210,74,0.6); }
+#hud.mode-uc #scorebar .team { visibility: hidden; }
+
+#objectives { position: absolute; top: 250px; left: 16px; width: 290px; padding: 8px 12px; background: rgba(0,0,0,0.4); border-left: 3px solid var(--gold); display: none; }
+#hud.mode-uc #objectives { display: block; }
+#objectives .ot { font-size: 13px; letter-spacing: 3px; opacity: 0.7; font-weight: 700; }
+#objList { margin: 4px 0 0; padding-left: 18px; font-size: 15px; font-weight: 600; line-height: 1.35; }
+#objList li { opacity: 0.45; }
+#objList li.cur { opacity: 1; color: var(--gold); }
+#objList li.done { opacity: 0.55; text-decoration: line-through; }
+
+#susp { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); width: 260px; text-align: center; display: none; }
+#hud.mode-uc #susp { display: block; }
+#suspState { font-size: 15px; font-weight: 700; letter-spacing: 3px; }
+#susp .bar { height: 6px; margin-top: 4px; background: rgba(0,0,0,0.5); border: 1px solid var(--line); }
+#suspBar { display: block; height: 100%; width: 0; background: var(--gold); transition: width 0.1s; }
+#susp.calm #suspState { color: #9fe39f; }
+#susp.sus #suspState { color: var(--gold); }
+#susp.made #suspState, #susp.made #suspBar { color: #ff9a3a; background: #ff9a3a; animation: pulse 0.4s infinite; }
+#susp.alarm #suspState { color: var(--enemy); animation: pulse 0.7s infinite; }
+#susp.alarm #suspBar { background: var(--enemy); }
+
+#actbar { position: absolute; left: 50%; top: calc(50% + 60px); transform: translateX(-50%); text-align: center; display: none; }
+#actbar.show { display: block; }
+#actText { font-size: 18px; font-weight: 700; }
+#actbar .bar { width: 220px; height: 6px; margin: 5px auto 0; background: rgba(0,0,0,0.5); border: 1px solid var(--line); }
+#actFill { display: block; height: 100%; width: 0; background: var(--gold); }
+
+#bigmap { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); border: 2px solid var(--line); box-shadow: 0 0 40px rgba(0,0,0,0.8); }
+#spawnSel { font-size: 17px !important; }
+#spawnSel span { margin: 0 6px; opacity: 0.7; }
+#spawnSel span.on { opacity: 1; color: var(--gold); }
+#spawnSel em { opacity: 0.6; font-size: 14px; }
+
+.cards.modes { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+.card.off { opacity: 0.35; }
+.map-shipment::before { background: linear-gradient(135deg, #2f6a6a, #1a222c 60%, #a8541e); }
+.rank { margin: 6px 0 0; font-size: 16px; opacity: 0.85; letter-spacing: 1px; }
+.rank b { color: var(--gold); }
+.xp { text-align: center; font-size: 18px; font-weight: 600; margin: 0 0 12px; }
+.xp .promo { color: var(--gold); letter-spacing: 3px; margin-left: 6px; animation: pulse 0.8s infinite; }
+.xpbar { display: block; width: 260px; height: 5px; margin: 6px auto 0; background: rgba(255,255,255,0.12); }
+.xpbar i { display: block; height: 100%; background: var(--gold); }
+#hud.mode-uc #streaks { display: none; }

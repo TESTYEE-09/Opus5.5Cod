@@ -21,7 +21,10 @@ export const GUN_SOUND = {
   ar: ['ar', 1], smg: ['smg', 1], lmg: ['lmg', 1], sniper: ['sniper', 1], shotgun: ['shotgun', 1], pistol: ['pistol', 1],
   burst: ['ar', 1.12], dmr: ['sniper', 1.3], revolver: ['sniper', 1.55], heli: ['lmg', 0.75],
   jetgun: ['lmg', 1.45], flak: ['sniper', 0.8], rpg: ['shotgun', 0.6], stinger: ['shotgun', 0.6],
+  spistol: ['pistol', 1], ssmg: ['smg', 1],
 };
+// suppressed guns: a muffled thump instead of the recorded report
+const SUPPRESSED = new Set(['spistol', 'ssmg']);
 
 // Mix in dB after loudness normalisation. Guns and explosions lead; feedback sits under them.
 const MIX = {
@@ -121,6 +124,11 @@ export class Sfx {
         const gust = 0.55 + 0.45 * Math.sin(t * Math.PI * 2 / 8 + c) * Math.sin(t * Math.PI * 2 / 4 + 1.3);
         let v = b * 3.5 * gust;
         if (kind === 'snow') { w = w * 0.96 + white * 0.04; v = v * 1.3 + w * 0.35 * gust; }
+        if (kind === 'rain') {
+          // steady hiss of rain on steel, plus heavier drips
+          w = w * 0.55 + white * 0.45;
+          v = b * 1.2 * gust + w * 0.55 + (Math.random() < 0.0009 ? (Math.random() * 2 - 1) * 2 : 0);
+        }
         if (kind === 'harbor') {
           const swell = Math.max(0, Math.sin(t * Math.PI * 2 / 4 + c * 0.7)) ** 3;
           w = w * 0.9 + white * 0.1;
@@ -133,11 +141,11 @@ export class Sfx {
     }
     const src = ctx.createBufferSource();
     src.buffer = buf; src.loop = true;
-    const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = kind === 'snow' ? 2400 : 1400;
+    const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = kind === 'rain' ? 6500 : kind === 'snow' ? 2400 : 1400;
     src.connect(f).connect(this.ambGain);
     src.start();
     this.amb = src;
-    this.ambGain.gain.setTargetAtTime(db(kind === 'snow' ? -20 : -24), ctx.currentTime, 1);
+    this.ambGain.gain.setTargetAtTime(db(kind === 'rain' ? -21 : kind === 'snow' ? -20 : -24), ctx.currentTime, 1);
   }
 
   // local player state: 0..1 low-health muffle
@@ -207,6 +215,7 @@ export class Sfx {
   // model is a weapon model name; pos omitted = the local player's own gun
   shot(model, pos, rate = 1) {
     if (!this.ctx) return;
+    if (SUPPRESSED.has(model)) { this.suppressed(model, pos); return; }
     const [key, pitch] = GUN_SOUND[model] || GUN_SOUND.ar;
     const r = rate * pitch * (0.97 + Math.random() * 0.06);
     const heavy = key === 'sniper' || key === 'shotgun' ? 1.15 : 1;
@@ -229,11 +238,11 @@ export class Sfx {
 
   // stage: out | in | charge | bolt | shell | pump | slide, per weapon family
   reload(model, stage) {
-    const fam = { smg: 'smg', lmg: 'lmg', pistol: 'pistol', revolver: 'pistol' }[model] || '';
+    const fam = { smg: 'smg', ssmg: 'smg', lmg: 'lmg', pistol: 'pistol', spistol: 'pistol', revolver: 'pistol' }[model] || '';
     let name, rate = 1;
     if (stage === 'out') name = fam ? `${fam}_out` : 'mag_out';
     else if (stage === 'in') name = fam ? `${fam}_in` : 'mag_in';
-    else if (stage === 'charge') name = model === 'pistol' ? 'slide' : 'charge';
+    else if (stage === 'charge') name = model === 'pistol' || model === 'spistol' ? 'slide' : 'charge';
     else name = stage;
     if (model === 'dmr') rate = 0.92;
     if (model === 'burst') rate = 1.05;
@@ -346,6 +355,41 @@ export class Sfx {
   }
 
   flares(pos) { this.whoosh(pos, { dur: 0.5, f0: 3000, f1: 1500, gain: 0.35, q: 1.2 }); }
+
+  suppressed(model, pos) {
+    const s = this.at(pos);
+    if (pos && s.dist > 40) return;
+    this.whoosh(pos, { dur: 0.1, f0: model === 'ssmg' ? 2200 : 1700, f1: 500, q: 0.9, gain: pos ? 0.5 : 0.7, attack: 0.002 });
+    this.play(pick('pistol_near', 2), { mix: 'gunNear', gain: pos ? 0.05 : 0.08, rate: 1.8, pan: s.pan, dist: 30 + s.dist, back: s.back });
+    if (!pos && Math.random() < 0.4) this.play(pick('casings', 3), { mix: 'casings', cap: 'casings', when: 0.3 + Math.random() * 0.2 });
+  }
+
+  // distant thunder after a lightning flash: dist 0..3 (km-ish) delays and darkens it
+  thunder(dist, strength = 1) {
+    if (!this.ctx) return;
+    const when = dist * 2.2;
+    this.play('explosion_far', { mix: 'explosionFar', gain: 0.9 * Math.max(0.3, strength), rate: 0.32 + Math.random() * 0.08, when, send: 1.2, dist: 60 + dist * 80, ui: false });
+    this.play('explosion', { mix: 'explosionFar', gain: 0.45 * Math.max(0.2, strength), rate: 0.22, when: when + 0.15, send: 1.5, dist: 120 });
+  }
+
+  // a wailing base siren (Undercover alarm), started and stopped by the mission
+  siren(on) {
+    if (!this.ctx) return;
+    const ctx = this.ctx;
+    if (!on) { if (this.sirenO) { const o = this.sirenO; this.sirenG.gain.setTargetAtTime(0, ctx.currentTime, 0.4); setTimeout(() => o.stop(), 1500); this.sirenO = null; } return; }
+    if (this.sirenO) return;
+    const o = ctx.createOscillator(), lfo = ctx.createOscillator(), lg = ctx.createGain(), g = ctx.createGain(), f = ctx.createBiquadFilter();
+    o.type = 'sawtooth'; o.frequency.value = 620;
+    lfo.frequency.value = 0.22; lg.gain.value = 230;
+    lfo.connect(lg).connect(o.frequency);
+    f.type = 'bandpass'; f.frequency.value = 900; f.Q.value = 0.8;
+    g.gain.value = 0; g.gain.setTargetAtTime(db(-30), ctx.currentTime, 0.5);
+    o.connect(f).connect(g).connect(this.world);
+    const s = ctx.createGain(); s.gain.value = 0.8; g.connect(s).connect(this.verbIn);
+    o.start(); lfo.start();
+    this.sirenO = o; this.sirenG = g;
+    o.onended = () => { try { lfo.stop(); } catch { /* stopped */ } };
+  }
 
   // lock-on and warning beeps
   tone(freq, dur = 0.07, gain = 0.08) {

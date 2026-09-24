@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { moveBody, overlaps, raycastWorld, STEP } from './world.js';
+import { moveBody, overlaps, raycastWorld, groundAt, STEP } from './world.js';
 
 const DEG = Math.PI / 180;
 const STAND_H = 1.75, CROUCH_H = 1.15, PRONE_H = 0.7, STAND_EYE = 1.62, CROUCH_EYE = 1.02, PRONE_EYE = 0.4;
@@ -39,6 +39,7 @@ export class Player {
     this.prone = false; this.proneAmt = 0; this.lean = 0; this.leanOff = 0;
     this.vehicle = null; this.inVehicle = false;
     this.slideT = 0; this.sprinting = false; this.sprintOut = 0;
+    this.mantle = null; this.tacT = 0; this.tacCd = 0; this.lastShift = -9;
     this.recoilDebt = 0; this.lastShot = -99; this.punch = 0;
     this.bobPhase = 0; this.stepDist = 0; this.landDip = 0; this.hSpeed = 0;
     this.scopeSwayX = this.scopeSwayY = 0;
@@ -85,6 +86,28 @@ export class Player {
 
   canStand(h = STAND_H) { return !overlaps(this.pos.x, this.pos.z, this.body.r, this.pos.y + STEP, this.pos.y + h); }
 
+  // A ledge 0.7-2.05 m up, straight ahead, with room to stand on top: climb onto it.
+  tryMantle() {
+    const p = this.pos, fx = -Math.sin(this.yaw), fz = -Math.cos(this.yaw);
+    const top = groundAt(p.x + fx * 0.75, p.z + fz * 0.75, 0.25, p.y + 2.1);
+    const rise = top - p.y;
+    if (rise < 0.7 || rise > 2.05) return false;
+    if (overlaps(p.x, p.z, 0.3, p.y + STAND_H - 0.05, top + STAND_H)) return false;
+    for (const d of [0.95, 0.75, 1.2]) {
+      const x = p.x + fx * d, z = p.z + fz * d;
+      if (Math.abs(groundAt(x, z, 0.3, top + 0.1) - top) > 0.05) continue;
+      if (overlaps(x, z, 0.35, top + 0.05, top + CROUCH_H)) continue;
+      const low = overlaps(x, z, 0.35, top + 0.05, top + STAND_H);
+      this.mantle = { t: 0, dur: 0.3 + rise * 0.12, x0: p.x, y0: p.y, z0: p.z, x1: x, y1: top, z1: z };
+      if (low) this.crouched = true;
+      this.vel.set(0, 0, 0);
+      this.sprinting = false; this.slideT = 0;
+      this.game.audio.land();
+      return true;
+    }
+    return false;
+  }
+
   update(dt, inp) {
     const g = this.game, ars = g.arsenal;
     if (this.protect > 0) this.protect -= dt;
@@ -101,6 +124,27 @@ export class Player {
       this.pitch -= r * 0.6; this.recoilDebt -= r;
     }
     this.punch *= Math.exp(-dt * 12);
+
+    // climbing a ledge: the move plays out on its own
+    if (this.mantle) {
+      const m = this.mantle;
+      m.t += dt;
+      const k = Math.min(1, m.t / m.dur), up = Math.min(1, k / 0.6), fw = Math.max(0, (k - 0.35) / 0.65);
+      const e = (t) => t * t * (3 - 2 * t);
+      this.pos.set(m.x0 + (m.x1 - m.x0) * e(fw), m.y0 + (m.y1 - m.y0) * e(up), m.z0 + (m.z1 - m.z0) * e(fw));
+      this.vel.set(0, 0, 0);
+      this.landDip = Math.sin(k * Math.PI) * 0.08;
+      if (k >= 1) { this.mantle = null; this.body.onGround = true; }
+      this.hSpeed = 0;
+      return;
+    }
+
+    // tactical sprint: double-tap Shift for a few seconds of a faster run
+    if (inp.sprintPressed) {
+      if (this.game.time - this.lastShift < 0.32 && this.tacCd <= 0) { this.tacT = 3.2; this.tacCd = 8; }
+      this.lastShift = this.game.time;
+    }
+    if (this.tacCd > 0 && this.tacT <= 0) this.tacCd -= dt;
 
     // prone: Ctrl or Z. Crouch or jump gets back up
     if (this.sprintOut > 0) this.sprintOut -= dt;
@@ -128,6 +172,8 @@ export class Player {
       } else if (this.crouched) { if (this.canStand()) this.crouched = false; }
       else this.crouched = true;
     }
+    const fwdIn = inp.forward - inp.back;
+    if (fwdIn > 0 && !this.prone && ((inp.jumpPressed && this.body.onGround) || (!this.body.onGround && this.body.hitWall && inp.jump)) && this.tryMantle()) return;
     if (inp.jumpPressed) {
       if (this.slideT > 0 && this.canStand()) { this.slideT = 0; this.crouched = false; this.vel.y = 5.2; this.body.onGround = false; }
       else if (this.crouched) { if (this.canStand()) this.crouched = false; }
@@ -145,7 +191,9 @@ export class Player {
     if (wl > 0) { wx /= wl; wz /= wl; }
     const def = ars.w.def;
     this.sprinting = inp.sprint && f > 0 && !this.crouched && !this.prone && ars.ads < 0.3 && !ars.cook && this.sprintOut <= 0 && !(ars.w.def.scope && ars.ads > 0);
-    let speed = this.sprinting ? 7.2 : this.prone ? 1.15 : this.crouched ? 2.6 : 4.8;
+    if (!this.sprinting) this.tacT = 0;
+    else if (this.tacT > 0) this.tacT -= dt;
+    let speed = this.sprinting ? (this.tacT > 0 ? 8.7 : 7.2) : this.prone ? 1.15 : this.crouched ? 2.6 : 4.8;
     speed *= def.speed * (1 - 0.45 * ars.adsEase());
 
     // lean around corners with Q / E; the head stops short of walls

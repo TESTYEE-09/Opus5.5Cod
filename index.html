@@ -20,6 +20,11 @@
     <div id="timer">10:00</div>
     <div class="team enemy"><div class="bar"><i id="barE"></i></div><span id="scoreE">0</span><b class="tname" id="nameE">RUSSIA</b></div>
   </div>
+  <div id="flagsRow"></div>
+  <div id="susp"><div id="suspState">UNDERCOVER</div><div class="bar"><i id="suspBar"></i></div></div>
+  <div id="objectives"><div class="ot">MISSION</div><ol id="objList"></ol></div>
+  <div id="actbar"><div id="actText"></div><div class="bar"><i id="actFill"></i></div></div>
+  <canvas id="bigmap" class="hidden"></canvas>
   <div id="banner"></div>
   <div id="killfeed"></div>
   <div id="crosshair"><i class="t"></i><i class="b"></i><i class="l"></i><i class="r"></i><b></b></div>
@@ -71,14 +76,18 @@
   <h2>KILLED IN ACTION</h2>
   <p id="deathBy"></p>
   <p id="respawnIn"></p>
+  <p id="spawnSel"></p>
 </div>
 
 <div id="menu" class="screen">
   <div class="panel">
     <h1>FRONTLINE</h1>
-    <p class="sub">Team Deathmatch &middot; <span id="mapName">Crossroads</span> &middot; USA vs Russia &middot; 8 v 8</p>
+    <p class="sub"><span id="modeName">Ground War</span> &middot; <span id="mapName">Crossroads</span> &middot; USA vs Russia</p>
+    <p id="rankLine" class="rank"></p>
     <h3>Map</h3>
     <div id="maps" class="cards maps"></div>
+    <h3>Mode</h3>
+    <div id="modesel" class="cards modes"></div>
     <h3>Class</h3>
     <div id="classes" class="cards"></div>
     <div class="cols">
@@ -113,8 +122,10 @@
       <span><kbd>Q</kbd><kbd>E</kbd> lean</span><span><kbd>Ctrl</kbd>/<kbd>Z</kbd> prone</span><span><kbd>V</kbd> knife</span>
       <span><kbd>F</kbd> enter / exit vehicle</span><span><kbd>4</kbd><kbd>5</kbd><kbd>6</kbd> killstreaks</span>
       <span><kbd>7</kbd> FPV drone <kbd>8</kbd> tank <kbd>9</kbd> jet</span><span><kbd>Tab</kbd> scores</span>
+      <span><kbd>Shift</kbd><kbd>Shift</kbd> tactical sprint</span><span><kbd>Space</kbd> at a ledge: mantle</span>
+      <span><kbd>M</kbd> map</span><span>hold <kbd>F</kbd> objectives</span>
     </div>
-    <p class="note">First team to 100 kills or the most kills after 10 minutes wins. Bots fill empty slots in multiplayer.</p>
+    <p class="note">Ground War: capture the five flags, spawn on any your team holds, first to 400. Undercover: co-op, wear their uniform and don't get made. Shipment: 6 v 6 team deathmatch to 75. Bots fill empty slots in multiplayer.</p>
   </div>
 </div>
 
@@ -128,6 +139,8 @@
     <div id="modes" class="seg"><button data-mode="versus">Versus</button><button data-mode="coop">Co-op vs bots</button></div>
     <h3>Map</h3>
     <div id="lobbyMaps" class="seg"></div>
+    <h3>Game mode</h3>
+    <div id="lobbyGm" class="seg"></div>
     <h3>Players</h3>
     <ul id="members" class="members"></ul>
     <button id="startMp" class="primary">START MATCH</button>
@@ -154,6 +167,7 @@
     <h1 id="endTitle">VICTORY</h1>
     <p id="endScore" class="bigscore"></p>
     <div id="endStats" class="stats"></div>
+    <p id="endXp" class="xp"></p>
     <div id="endBoard" class="board"></div>
     <div class="row-btns"><button id="again" class="primary">PLAY AGAIN</button><button id="toMenu">MAIN MENU</button></div>
     <p id="endNote" class="note"></p>

@@ -1,16 +1,24 @@
 import * as THREE from 'three';
 import { raycastWorld, lineOfSight, pointSolid, groundAt, overlaps, spawns, SIZE, GRAVITY, STEP, materialAt, objectAt, objectsNear, breakObject } from './world.js';
 import { Effects } from './effects.js';
-import { Arsenal, CLASSES, falloff, FUSE } from './weapons.js';
+import { Arsenal, CLASSES, falloff, FUSE, WEAPONS } from './weapons.js';
 import { Player } from './player.js';
 import { Bot, DIFFICULTY } from './bots.js';
 import { Jet } from './streaks.js';
 import { NetSoldier } from './net.js';
 import { Chopper, Tank, FighterJet, Drone, VehicleProxy, Projectiles, PROJ, VEHICLE_WEAPONS, hitSoldier, placeEmplacements, tankSpot } from './vehicles.js';
+import { createMode } from './modes.js';
 
 const DEG = Math.PI / 180;
 const NAMES = ['Viper', 'Ghost', 'Havoc', 'Reaper', 'Nomad', 'Sarge', 'Hawk', 'Wolf', 'Rook', 'Blitz', 'Frost', 'Onyx',
-  'Mako', 'Diesel', 'Kestrel', 'Tank', 'Ranger', 'Cobra', 'Spike', 'Jackal', 'Raven', 'Brick', 'Ace', 'Echo', 'Bishop', 'Dozer'];
+  'Mako', 'Diesel', 'Kestrel', 'Tank', 'Ranger', 'Cobra', 'Spike', 'Jackal', 'Raven', 'Brick', 'Ace', 'Echo', 'Bishop', 'Dozer',
+  'Gunner', 'Maverick', 'Talon', 'Saber', 'Hunter', 'Bravo'];
+const RU_NAMES = ['Ivanov', 'Petrov', 'Smirnov', 'Volkov', 'Sokolov', 'Popov', 'Lebedev', 'Kozlov', 'Novikov', 'Morozov', 'Orlov', 'Pavlov',
+  'Semenov', 'Golubev', 'Vinogradov', 'Bogdanov', 'Vorobyov', 'Fedorov', 'Mikhailov', 'Belyaev', 'Tarasov', 'Belov', 'Komarov', 'Kiselev',
+  'Makarov', 'Andreev', 'Kovalev', 'Ilyin', 'Gusev', 'Titov', 'Kuzmin', 'Kudryavtsev', 'Baranov', 'Kulikov', 'Alekseev', 'Stepanov',
+  'Yakovlev', 'Sorokin', 'Sergeev', 'Romanov', 'Zakharov', 'Borisov', 'Korolev', 'Gerasimov', 'Ponomarev', 'Grigoriev'];
+// suppressed weapons: heard only close by and they don't show you on the enemy minimap
+export const SILENT = new Set(Object.values(WEAPONS).filter(w => w.silent).map(w => w.model));
 export const STREAKS = [
   { kills: 3, id: 'uav', name: 'UAV', key: '4' },
   { kills: 5, id: 'airstrike', name: 'Airstrike', key: '5' },
@@ -35,7 +43,6 @@ function cone(fwd, angle, out) {
 }
 
 const zoneMul = (def, zone) => zone === 'head' ? def.head : zone === 'legs' ? 0.85 : 1;
-const TEAM_SIZE = 8;
 export const TEAM_NAMES = ['USA', 'RUSSIA'];
 // chunk colour for each kind of breaking thing
 const DEBRIS = { wood: [0.5, 0.36, 0.22], sand: [0.62, 0.56, 0.42], metal: [0.3, 0.3, 0.3], plaster: [0.78, 0.72, 0.62], plaster2: [0.7, 0.66, 0.58],
@@ -61,11 +68,14 @@ export class Game {
     this.deadVehicles = new Set();
     this.predicted = []; this.booms = [];
     this.aiCallT = [60, 60];
+    this.mode = createMode('tdm', this);
+    this.mapDef = null;
+    this.frame = 0;
     this.net = null;
     this.role = 'solo';
     this.state = 'menu';
     this.time = 0; this.shake = 0; this.flashT = 0;
-    this.settings = { sens: 1, fov: 80, difficulty: 'regular', cls: 'assault', map: 'crossroads', scoreLimit: 100, timeLimit: 600 };
+    this.settings = { sens: 1, fov: 80, difficulty: 'regular', cls: 'assault', map: 'crossroads', mode: 'gw', scoreLimit: 400, timeLimit: 1200 };
     this.diff = DIFFICULTY.regular;
     this.nadeGeo = new THREE.SphereGeometry(0.06, 10, 8);
     this.nadeMat = new THREE.MeshStandardMaterial({ color: 0x3d4a2e, roughness: 0.6, metalness: 0.2 });
@@ -97,8 +107,11 @@ export class Game {
     this.diff = DIFFICULTY[settings.difficulty] || DIFFICULTY.regular;
     this.role = this.net?.active ? (this.net.isHost ? 'host' : 'client') : 'solo';
     this.clear();
-    this.loadMap?.(settings.map);
+    this.audio.siren(false);
+    this.mapDef = this.loadMap?.(settings.map) || this.mapDef;
+    this.mode = createMode(settings.mode, this);
     roster ||= [{ id: 0, name: settings.name || 'You', team: 0, me: true }];
+    this.spawnChoice = null;
 
     const pl = this.player, me = roster.find(r => r.me);
     pl.id = me.id; pl.team = me.team; pl.name = me.name;
@@ -109,15 +122,21 @@ export class Game {
       else this.nets.push(new NetSoldier(this, r.id, r.team, r.name, true, true));
     }
     if (this.authority) {
-      const names = NAMES.slice().sort(() => Math.random() - 0.5);
+      const names = [NAMES.slice().sort(() => Math.random() - 0.5), RU_NAMES.slice().sort(() => Math.random() - 0.5)];
       let id = 100;
       for (const team of [0, 1]) {
         const humans = roster.filter(r => r.team === team).length;
-        for (let i = humans; i < TEAM_SIZE; i++) { const b = new Bot(this, team, names.pop()); b.id = id++; this.bots.push(b); }
+        for (let i = 0; i < this.mode.teamBots(team, humans); i++) { const b = new Bot(this, team, names[team].pop() || `Bot ${id}`); b.id = id++; this.bots.push(b); }
       }
+      // Undercover: the garrison, each soldier with a post, a patrol route or the colonel to be
+      this.mode.setup((role) => {
+        const b = new Bot(this, 1, names[1].pop() || `Guard ${id}`, { officer: role.kind === 'hvt' });
+        b.id = id++; b.role = role; this.bots.push(b);
+        return b;
+      });
     }
     this.rebuild();
-    if (this.authority) this.vehicles.push(...placeEmplacements(this));
+    if (this.authority && !this.mapDef?.noVehicles) this.vehicles.push(...placeEmplacements(this));
     this.aiCallT = [50 + Math.random() * 25, 50 + Math.random() * 25];
     this.vehicleSeq = 0;
     pl.vcool = { drone: 0, tank: 0, jet: 0 };
@@ -139,10 +158,10 @@ export class Game {
       for (const n of this.nets) { const r = roster.find(x => x.id === n.id); n.pos.set(r.x, 0, r.z); n.tgt.copy(n.pos); }
       return;
     }
-    const sp = this.pickSpawn(pl.team);
+    const sp = this.pickSpawn(pl.team, pl);
     pl.spawn(sp, sp.yaw, CLASSES[settings.cls]);
-    for (const n of this.nets) { const s = this.pickSpawn(n.team); n.place(s.x, 0, s.z, s.yaw); }
-    for (const b of this.bots) { const s = this.pickSpawn(b.team); b.spawn(s, s.yaw); }
+    for (const n of this.nets) { const s = this.pickSpawn(n.team, n); n.place(s.x, 0, s.z, s.yaw); }
+    for (const b of this.bots) { const s = this.mode.initialSpot?.(b) || this.pickSpawn(b.team, b); b.spawn(s, s.yaw); }
   }
 
   // client: the host's start message
@@ -150,7 +169,8 @@ export class Game {
     const roster = (msg.roster || []).map(r => ({ ...r, me: r.id === myId }));
     if (!roster.some(r => r.me)) return;
     const rules = msg.rules || {};
-    this.startMatch({ ...this.settings, map: typeof rules.map === 'string' ? rules.map : 'crossroads', scoreLimit: rules.scoreLimit, timeLimit: rules.timeLimit, timeLeft: rules.timeLeft, score: msg.score }, roster);
+    this.startMatch({ ...this.settings, map: typeof rules.map === 'string' ? rules.map : 'crossroads', mode: ['tdm', 'gw', 'uc'].includes(rules.mode) ? rules.mode : 'tdm', scoreLimit: rules.scoreLimit, timeLimit: rules.timeLimit, timeLeft: rules.timeLeft, score: msg.score }, roster);
+    if (msg.m) this.mode.applyNet(msg.m);
     if (Array.isArray(msg.br)) for (const id of msg.br.slice(0, 5000)) breakObject(Number(id));
   }
 
@@ -167,10 +187,11 @@ export class Game {
   addRemote(id, name, team) {
     const n = new NetSoldier(this, id, team, name, true, true);
     this.nets.push(n);
-    const bot = this.bots.find(b => b.team === team);
-    if (bot && this.soldiers.filter(s => s.team === team).length >= TEAM_SIZE) { bot.remove(); this.bots.splice(this.bots.indexOf(bot), 1); }
+    const humans = this.soldiers.filter(s => s.team === team && (s.isPlayer || s.human)).length + 1;
+    const bot = this.bots.find(b => b.team === team && !b.role);
+    if (bot && this.bots.filter(b => b.team === team && !b.role).length > this.mode.teamBots(team, humans)) { bot.remove(); this.bots.splice(this.bots.indexOf(bot), 1); }
     this.rebuild();
-    const s = this.pickSpawn(team);
+    const s = this.pickSpawn(team, n);
     n.place(s.x, 0, s.z, s.yaw);
     this.emit({ k: 'roster', r: this.rosterList() });
     this.hud.toast(`${name} joined`);
@@ -181,7 +202,8 @@ export class Game {
     if (!n) return;
     n.remove();
     this.nets.splice(this.nets.indexOf(n), 1);
-    if (this.soldiers.filter(s => s.team === n.team).length - 1 < TEAM_SIZE) {
+    const humans = this.soldiers.filter(s => s.team === n.team && (s.isPlayer || s.human) && s !== n).length;
+    if (this.bots.filter(b => b.team === n.team && !b.role).length < this.mode.teamBots(n.team, humans)) {
       const b = new Bot(this, n.team, NAMES[Math.floor(Math.random() * NAMES.length)]);
       b.id = 100 + Math.max(0, ...this.bots.map(x => x.id - 99));
       this.bots.push(b);
@@ -194,7 +216,7 @@ export class Game {
   }
 
   respawnRemote(n) {
-    const s = this.pickSpawn(n.team);
+    const s = this.pickSpawn(n.team, n);
     n.place(s.x, 0, s.z, s.yaw);
     this.emit({ k: 'spawn', to: n.id, x: s.x, z: s.z, yaw: s.yaw });
   }
@@ -202,6 +224,7 @@ export class Game {
   end() {
     if (this.state === 'ended') return;
     this.state = 'ended';
+    this.audio.siren(false);
     for (const v of this.vehicles) v.remove();
     this.vehicles = [];
     this.projectiles.clear();
@@ -211,7 +234,9 @@ export class Game {
     if (document.pointerLockElement) document.exitPointerLock();
   }
 
-  pickSpawn(team) {
+  pickSpawn(team, who = null) {
+    const m = this.mode.pickSpawn(team, who);
+    if (m) return m;
     let best = spawns[team].find(s => !s.fwd) || spawns[team][0], bestScore = -Infinity;
     for (const sp of spawns[team]) {
       let minEnemy = 60, crowd = 0;
@@ -229,14 +254,20 @@ export class Game {
   }
 
   respawn(bot) {
-    const s = this.pickSpawn(bot.team);
+    // Undercover: dead guards only come back as reinforcements once the alarm is up
+    if (this.mode.kind === 'uc' && bot.team === 1) {
+      if (!this.mode.alarm || this.mode.reinforce <= 0) { bot.respawnT = 10; return; }
+      this.mode.reinforce--; bot.role = null; bot.hostile = true;
+    }
+    const s = this.pickSpawn(bot.team, bot);
     bot.spawn(s, s.yaw);
   }
 
   // ---------- queries ----------
-  targetsFor(team) {
+  // who may shoot at whom: `who` (a bot) lets Undercover keep the calm garrison off disguised players
+  targetsFor(team, who = null) {
     const out = [];
-    for (const s of this.soldiers) if (s.alive && s.team !== team && !s.inVehicle) out.push(s);
+    for (const s of this.soldiers) if (s.alive && s.team !== team && !s.inVehicle && (!who || this.mode.canTarget(who, s))) out.push(s);
     for (const v of this.vehicles) if (v.alive && v.team !== team && v.t > 5 && !(v.kind === 'aa' && !v.driver && !(v.driverId >= 0))) out.push(v);
     return out;
   }
@@ -268,7 +299,9 @@ export class Game {
   noise(source, pos, radius) {
     for (const b of this.bots) {
       if (b.team === source.team || !b.alive) continue;
-      if (b.pos.distanceTo(pos) < radius) b.hear(source, pos);
+      if (b.pos.distanceTo(pos) >= radius) continue;
+      if (this.mode.kind === 'uc' && !b.hostile) this.mode.alert(b, source?.alive ? source : null, pos);
+      else b.hear(source, pos);
     }
   }
 
@@ -330,6 +363,7 @@ export class Game {
     if (victim.isPlayer) this.localDeath(killer, weapon);
     else { victim.die(); this.dropPickup(victim.pos); }
     const valid = killer && killer !== victim && killer.team !== victim.team && !killer.isVehicle;
+    this.mode.onKill(killer, victim, weapon);
     if (valid) {
       killer.kills++;
       killer.score += 100;
@@ -457,8 +491,9 @@ export class Game {
     const fx = this.effects;
     fx.muzzleLight.position.copy(muzzle); fx.muzzleLight.intensity = 6; fx.muzzleT = 0.05;
     this.audio.shot(def.model);
-    pl.firedT = this.time;
-    if (this.authority) this.noise(pl, pl.pos, 45);
+    if (!def.silent) pl.firedT = this.time;
+    pl.shotT = this.time;
+    if (this.authority) this.noise(pl, pl.pos, def.silent ? 6 : 45);
   }
 
   botShot(bot, o, dir, muzzle, tracer) {
@@ -796,6 +831,7 @@ export class Game {
     });
     for (let i = 0; i < 7; i++) {
       this.later(3.0 + i * 0.14, () => {
+        if (this.state !== 'playing') return;
         const x = point.x + dx * (i - 3) * 3.5, z = point.z + dz * (i - 3) * 3.5;
         const y = groundAt(x, z, 0.1, 60);
         this.explode(new THREE.Vector3(x, y + 0.2, z), owner, 7.5, 170, 'Airstrike', { streak: true });
@@ -808,6 +844,7 @@ export class Game {
   playerStreak(id, point, yaw) {
     const pl = this.player, i = pl.rewards.indexOf(id);
     if (i < 0 || !pl.alive) return;
+    if (this.mode.kind === 'uc') { this.hud.toast('No support while undercover'); return; }
     if (id === 'airstrike' && !point) { this.targeting = true; this.hud.hint('Aim at the ground and click to mark the airstrike. Right-click cancels.'); return; }
     pl.rewards.splice(i, 1);
     if (this.role === 'client' && id === 'chopper') {
@@ -847,9 +884,15 @@ export class Game {
     return v;
   }
 
+  callAllowed(kind) {
+    if (!this.mode.calls) return false;
+    return !this.mapDef?.noVehicles || kind === 'drone';
+  }
+
   playerCall(kind) {
     const pl = this.player, c = CALLS.find(x => x.id === kind);
     if (!c || !pl.alive || pl.vehicle) return;
+    if (!this.callAllowed(kind)) { this.hud.toast(this.mode.kind === 'uc' ? 'No support while undercover' : 'No room for that here'); return; }
     if (pl.vcool[kind] > 0) { this.hud.toast(`${c.name} ready in ${Math.ceil(pl.vcool[kind])}s`); return; }
     if (kind === 'tank') {
       const mine = this.vehicles.find(v => v.alive && v.kind === 'tank' && v.owner === pl && !v.driver);
@@ -917,6 +960,8 @@ export class Game {
     for (const team of [0, 1]) {
       if ((this.aiCallT[team] -= dt) > 0) continue;
       this.aiCallT[team] = 30 + Math.random() * 25;
+      if (!this.mode.aiCalls(team)) continue;
+      if (this.mapDef?.noVehicles) { const b = this.bots.find(x => x.team === team && x.alive && !x.vehicle); if (b && Math.random() < 0.5) this.callVehicle(b, 'drone'); continue; }
       const bots = this.bots.filter(b => b.team === team && b.alive && !b.vehicle);
       if (!bots.length) continue;
       const owner = bots[Math.floor(Math.random() * bots.length)];
@@ -1014,6 +1059,7 @@ export class Game {
     if (typeof d.tl === 'number') this.timeLeft = d.tl;
     if (Array.isArray(d.sc)) this.teamScore = d.sc.slice(0, 2);
     if (Array.isArray(d.uav)) this.uav = d.uav.slice(0, 2);
+    if (d.m) this.mode.applyNet(d.m);
     const pl = this.player;
     for (const row of d.s || []) {
       const [id, x, y, z, yaw, pitch, c, alive, hp, k, dd, a, sc, st, ln, iv] = row;
@@ -1116,8 +1162,15 @@ export class Game {
     const pl = this.player, ars = this.arsenal;
     this.time += dt;
     this.timeLeft = Math.max(0, this.timeLeft - dt);
-    if (this.authority && this.timeLeft <= 0) { this.end(); return; }
-    this.pathBudget = 3;
+    if (this.authority && this.timeLeft <= 0) { if (this.mode.kind === 'uc') this.mode.finish(false); else this.end(); return; }
+    this.pathBudget = 4;
+    this.frame++;
+    // how far each soldier is from the camera (distant ones aren't drawn)
+    if ((this.camT = (this.camT || 0) - dt) <= 0) {
+      this.camT = 0.25;
+      const c = this.camera.position;
+      for (const s of this.soldiers) if (s !== this.player) s.camD = Math.hypot(s.pos.x - c.x, s.pos.z - c.z);
+    }
 
     for (let t = 0; t < 2; t++) {
       if (this.uav[t] > 0) this.uav[t] -= dt;
@@ -1145,10 +1198,21 @@ export class Game {
           }
           if (inp.adsPressed) { this.targeting = false; this.hud.hint(''); }
           inp.fire = inp.firePressed = inp.ads = false;
-        } else if (inp.usePressed) {
+        } else if (inp.usePressed && !this.interact) {
           const v = this.nearbyVehicle(pl);
           if (v) this.enterVehicle(pl, v);
         }
+        // Hold F: mission actions (download intel, plant charges)
+        const it = this.mode.interaction(pl);
+        this.interact = it;
+        if (it && inp.use) {
+          this.actT = (this.actId === it.id ? this.actT : 0) + dt; this.actId = it.id;
+          if (this.actT >= it.time) {
+            this.actT = 0; this.actId = null;
+            if (this.role === 'client') this.net.send({ t: 'act', id: it.id }); else this.mode.act(pl, it.id);
+            this.audio.ui();
+          }
+        } else { this.actT = 0; this.actId = null; }
         if (!pl.vehicle) {
           pl.update(dt, inp);
           ars.update(dt, inp, pl);
@@ -1156,15 +1220,31 @@ export class Game {
       }
     } else {
       this.deadT -= dt;
+      this.interact = null;
+      // Ground War: pick where to spawn with the number keys
+      if (inp.digit && this.mode.kind === 'gw') {
+        const o = this.mode.spawnOptions(pl.team)[inp.digit - 1];
+        if (o) { this.spawnChoice = o.id; this.audio.ui(); }
+      }
       if (this.authority && this.deadT <= 0) {
-        const sp = this.pickSpawn(pl.team);
+        const sp = this.pickSpawn(pl.team, pl);
         pl.spawn(sp, sp.yaw, CLASSES[this.pendingCls]);
         this.hud.hideDeath();
       }
     }
 
     if (this.authority) {
-      for (const b of this.bots) b.update(dt);
+      // bots far from every player think at half rate
+      if ((this.farT = (this.farT || 0) - dt) <= 0) {
+        this.farT = 0.5;
+        const hs = this.soldiers.filter(s => (s.isPlayer || s.human) && s.alive);
+        for (const b of this.bots) b.far = !b.target && hs.every(h => Math.abs(h.pos.x - b.pos.x) + Math.abs(h.pos.z - b.pos.z) > 180);
+      }
+      for (const b of this.bots) {
+        if (b.far && b.alive && (this.frame + b.id) & 1) continue;
+        b.update(b.far && b.alive ? Math.min(0.1, dt * 2) : dt);
+      }
+      this.mode.update(dt);
       this.updateGrenades(dt);
       for (let i = this.jobs.length - 1; i >= 0; i--) {
         if (this.jobs[i].t <= this.time) { const j = this.jobs[i]; this.jobs.splice(i, 1); j.fn(); }

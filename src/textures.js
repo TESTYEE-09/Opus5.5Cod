@@ -469,6 +469,82 @@ export const R = {
   },
 };
 
+// ship deck: worn teal-green paint over steel plates, weld seams, tie-down plates, rust
+R.shipdeck = () => (p) => {
+  const s = p.s;
+  p.base(0x344d47, 0x4d6a61, 4, 5, 1.1);
+  p.stains(40, 'rgba(34,36,38,A)', 20, 90, 0.55);
+  p.stains(16, 'rgba(105,66,38,A)', 10, 50, 0.35);
+  p.stains(10, 'rgba(160,170,160,A)', 20, 70, 0.08);
+  for (let v = 0; v < s; v += s / 2) { p.rect(0, v, s, 3, 'rgba(22,25,25,0.8)', 60); p.rect(v, 0, 3, s, 'rgba(22,25,25,0.8)', 60); }
+  for (let v = 0; v < s; v += s / 2) for (let x = 0; x < s; x += 7) { p.rect(x, v + 3, 5, 2, 'rgba(95,100,96,0.55)', 175); p.rect(v + 3, x, 2, 5, 'rgba(95,100,96,0.55)', 175); }
+  for (let y = s / 8; y < s; y += s / 4) for (let x = s / 8; x < s; x += s / 4) {
+    p.rect(x - 10, y - 7, 20, 14, 'rgba(58,40,30,0.95)', 195);
+    p.rect(x - 6, y - 3, 12, 6, 'rgba(24,20,16,0.95)', 105);
+  }
+  p.speckle(3000, (q) => `rgb(${q.rnd(36, 86) | 0},${q.rnd(46, 92) | 0},${q.rnd(44, 88) | 0})`, 1.5, 0.5, 150);
+  p.grain(0.1, 0.25, 96, 3);
+  p.cracks(14, 8, 1, 0.3);
+};
+
+// painted deck walkway: navy with worn yellow edge lines, v runs along
+R.walkway = () => (p) => {
+  const s = p.s;
+  p.base(0x1d2a40, 0x2a3a55, 4, 4, 1.1);
+  p.stains(26, 'rgba(40,44,44,A)', 10, 60, 0.5);
+  for (const x of [0, s - 40]) p.rect(x, 0, 40, s, 'rgba(196,158,40,0.95)', 150);
+  p.stains(30, 'rgba(50,48,40,A)', 6, 30, 0.45);
+  p.speckle(1600, 'rgb(40,42,44)', 1.6, 0.6, 140);
+  p.grain(0.1, 0.2, 96, 3);
+};
+
+// yellow deck marking
+R.stripe = () => (p) => {
+  p.base(0xb08a24, 0xc9a232, 4, 4, 1);
+  p.stains(24, 'rgba(45,50,48,A)', 6, 40, 0.6);
+  p.speckle(900, 'rgb(50,52,50)', 1.8, 0.7, 140);
+  p.grain(0.1, 0.1, 96, 3);
+};
+
+// dirt track through the countryside: two worn wheel ruts, v runs along
+R.track = (col = 0x8a7355) => (p) => {
+  const s = p.s, C = hex(col);
+  p.base((C[0] * 0.85 << 16) | (C[1] * 0.85 << 8) | (C[2] * 0.85 | 0), col, 4, 5, 1.2);
+  p.speckle(2000, (q) => `rgb(${q.rnd(80, 150) | 0},${q.rnd(70, 130) | 0},${q.rnd(55, 105) | 0})`, 2, 0.7, 180);
+  for (const x of [s * 0.22, s * 0.68]) for (let y = 0; y < s; y += 4) p.rect(x + Math.sin(y * 0.02) * 4, y, s * 0.1, 4, `rgba(40,32,24,${p.rnd(0.1, 0.25)})`, 95 + p.rnd(-10, 10));
+  p.stains(16, 'rgba(70,90,50,A)', 10, 30, 0.25);
+  p.grain(0.1, 0.4, 48, 4);
+};
+
+// Stencilled company logos and markings for containers and walls: one 1024 x 2048 atlas,
+// 16 rows of 8:1 text, white, weathered, so decals can tint them.
+export const LOGOS = ['VOGEL', 'ROHAN', 'HANSA LINE', 'MERIDIAN', 'KORVAX', 'TRANSOCEAN', 'СЕВМОРПУТЬ', 'ATLAS CARGO',
+  'NORDLINK', 'POLARIS', 'ОПАСНО', 'NO SMOKING', '2.6m  8\'6"', 'VGLU 402731 6', 'KRLU 118405 2', 'MAX GROSS 30480 KG'];
+let atlas = null;
+export function logoAtlas() {
+  if (atlas) return atlas;
+  const c = document.createElement('canvas'); c.width = 1024; c.height = 2048;
+  const g = c.getContext('2d'), R0 = mulberry(77);
+  g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#fff';
+  LOGOS.forEach((t, i) => {
+    const small = i >= 12;
+    let size = small ? 64 : 104;
+    g.font = `900 ${size}px Impact, "Arial Black", "Arial Narrow", sans-serif`;
+    while (g.measureText(t).width > 980 && size > 30) { size -= 4; g.font = `900 ${size}px Impact, "Arial Black", sans-serif`; }
+    g.fillText(t, 512, i * 128 + 66);
+    if (i === 1 || i === 4) { g.fillRect(512 - g.measureText(t).width / 2, i * 128 + 116, g.measureText(t).width, 6); }
+  });
+  // weather it: knock out flecks and scrapes
+  g.globalCompositeOperation = 'destination-out';
+  for (let n = 0; n < 9000; n++) { g.globalAlpha = 0.3 + R0() * 0.7; g.beginPath(); g.arc(R0() * 1024, R0() * 2048, 0.5 + R0() * 2.5, 0, 7); g.fill(); }
+  for (let n = 0; n < 160; n++) { g.globalAlpha = 0.5; g.fillRect(R0() * 1024, R0() * 2048, 10 + R0() * 60, 2 + R0() * 3); }
+  g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+  atlas = new THREE.CanvasTexture(c);
+  atlas.colorSpace = THREE.SRGBColorSpace;
+  atlas.anisotropy = anisotropy;
+  return atlas;
+}
+
 // road tile: asphalt with a dashed centre line and solid edge lines, v runs along the road
 R.road = () => (p) => {
   R.asphalt()(p);

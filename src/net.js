@@ -6,6 +6,7 @@ import { Peer } from 'peerjs';
 import { buildSoldier, setRelation, animateSoldier, animateDeath } from './bots.js';
 import { VehicleProxy, PROJ } from './vehicles.js';
 import { objects, brokenIds } from './world.js';
+import { SILENT } from './game.js';
 
 const PREFIX = 'frontline-opus55cod-';
 const RATE = 1 / 20;
@@ -29,7 +30,7 @@ export class NetSoldier {
     this.kills = 0; this.deaths = 0; this.assists = 0; this.score = 0; this.streak = 0; this.bestStreak = 0;
     this.firedT = -99; this.walkPhase = 0; this.deathT = 0; this.fallDir = 1; this.respawnT = 0;
     this.leanOff = 0; this.leanT = 0; this.inVehicle = false;
-    this.model = buildSoldier(team, name);
+    this.model = buildSoldier(game.mode ? game.mode.lookFor(this) : team, name);
     this.model.root.visible = false;
     game.scene.add(this.model.root);
     setRelation(this.model, team === game.player.team);
@@ -71,7 +72,8 @@ export class NetSoldier {
   die() {
     this.alive = false; this.deathT = 0;
     this.fallDir = Math.random() < 0.5 ? 1 : -1;
-    this.respawnT = 4;
+    this.respawnT = this.game.mode.kind === 'uc' ? 8 : 4;
+    this.bodyTime = this.game.mode.kind === 'uc' && this.team === 1 ? 90 : 3.5;
   }
 
   update(dt) {
@@ -94,7 +96,8 @@ export class NetSoldier {
     }
     if (this.protect > 0) this.protect -= dt;
     if (this.isRemote && this.game.time - this.lastHurt > 4 && this.health < 100) this.health = Math.min(100, this.health + 40 * dt);
-    animateSoldier(this.model, this, dt);
+    this.model.root.visible = !this.inVehicle && (this.camD ?? 0) < 330;
+    if (this.model.root.visible) animateSoldier(this.model, this, dt);
   }
 
   remove() { this.game.scene.remove(this.model.root); }
@@ -110,6 +113,7 @@ export class Net {
     this.clients = new Map(); // host: id -> { conn, name, team }
     this.nextId = 1;
     this.mode = 'versus';
+    this.gameMode = 'gw';
     this.map = 'crossroads';
     this.sendT = 0;
     this.myId = 0;
@@ -206,7 +210,7 @@ export class Net {
   }
 
   pickTeam() {
-    if (this.mode === 'coop') return 0;
+    if (this.mode === 'coop' || this.gameMode === 'uc') return 0;
     const count = [0, 0];
     for (const s of this.game.soldiers) if (s.isPlayer || s.human) count[s.team]++;
     return count[0] <= count[1] ? 0 : 1;
@@ -217,17 +221,19 @@ export class Net {
   }
 
   pushLobby() {
-    const state = { t: 'lobby', code: this.code, mode: this.mode, map: this.map, members: this.members(), playing: this.game.state === 'playing' };
+    const state = { t: 'lobby', code: this.code, mode: this.mode, gm: this.gameMode, map: this.map, members: this.members(), playing: this.game.state === 'playing' };
     this.broadcast(state);
     this.ui.lobby(state);
   }
 
   setMode(mode) { this.mode = mode === 'coop' ? 'coop' : 'versus'; this.pushLobby(); }
   setMap(map) { this.map = map; if (this.isHost && this.peer) this.pushLobby(); }
+  setGameMode(gm) { this.gameMode = gm; if (this.isHost && this.peer) this.pushLobby(); }
 
   startGame(settings) {
     const members = this.members();
-    const humans = members.map((m, i) => ({ id: m.id, name: m.name, team: this.mode === 'coop' ? 0 : i % 2, me: m.id === 0 }));
+    const coop = this.mode === 'coop' || settings.mode === 'uc';
+    const humans = members.map((m, i) => ({ id: m.id, name: m.name, team: coop ? 0 : i % 2, me: m.id === 0 }));
     for (const h of humans) if (h.id) this.clients.get(h.id).team = h.team;
     this.game.startMatch({ ...settings, name: this.name }, humans);
     for (const id of this.clients.keys()) this.sendStart(id);
@@ -237,7 +243,7 @@ export class Net {
   sendStart(id) {
     const g = this.game, c = this.clients.get(id);
     if (!c?.conn.open) return;
-    c.conn.send({ t: 'start', you: id, rules: { map: g.settings.map, scoreLimit: g.settings.scoreLimit, timeLimit: g.settings.timeLimit, timeLeft: g.timeLeft }, roster: g.rosterList(), score: g.teamScore, br: brokenIds() });
+    c.conn.send({ t: 'start', you: id, rules: { map: g.settings.map, mode: g.settings.mode, scoreLimit: g.settings.scoreLimit, timeLimit: g.settings.timeLimit, timeLeft: g.timeLeft }, roster: g.rosterList(), score: g.teamScore, br: brokenIds(), m: g.mode.netState() });
   }
 
   broadcast(msg) {
@@ -254,6 +260,7 @@ export class Net {
           if (p) s.setState(p.x, p.y, p.z, num(d.y), num(d.pi), Math.max(0, Math.min(2, num(d.c))));
           s.leanT = Math.max(-0.5, Math.min(0.5, num(d.l)));
           s.setInVehicle(!!d.iv);
+          s.adsing = !!d.a;
         }
         break;
       case 'vs': {
@@ -314,11 +321,17 @@ export class Net {
         else g.hitObject(o, Math.min(400, amt), s, !!d.x);
         break;
       }
-      case 'fire':
+      case 'fire': {
         if (!s.alive) break;
-        s.firedT = g.time;
-        g.noise(s, s.pos, 45);
+        const silent = SILENT.has(String(d.key));
+        if (!silent) s.firedT = g.time;
+        s.shotT = g.time;
+        g.noise(s, s.pos, silent ? 6 : 45);
         g.remoteShot(s, d);
+        break;
+      }
+      case 'act':
+        if (s.alive) g.mode.act(s, String(d.id));
         break;
       case 'nade': {
         const p = vec(d.p), v = vec(d.v);
@@ -342,7 +355,7 @@ export class Net {
   snapshot() {
     const g = this.game;
     return {
-      t: 'snap', tl: r2(g.timeLeft), sc: g.teamScore, uav: g.uav.map(r2),
+      t: 'snap', tl: r2(g.timeLeft), sc: g.teamScore, uav: g.uav.map(r2), m: g.mode.netState(),
       s: g.soldiers.map(s => [s.id, r2(s.pos.x), r2(s.pos.y), r2(s.pos.z), r2(s.yaw), r2(s.pitch || 0), r2(s.crouchAmt + (s.isPlayer ? s.proneAmt : 0)),
         s.alive ? 1 : 0, Math.max(0, Math.round(s.health)), s.kills, s.deaths, s.assists, s.score, s.streak, r2(s.leanOff || 0), s.inVehicle ? 1 : 0]),
       v: g.vehicles.filter(v => v.alive || v.persistent).map(v => (v.isProxy ? proxyRow(v) : v.netRow())),
@@ -373,7 +386,7 @@ export class Net {
     this.sendT = 0;
     if (this.isHost) { if (this.clients.size) this.broadcast(this.snapshot()); else this.game.events.length = 0; return; }
     const g = this.game, pl = g.player;
-    this.send({ t: 'st', p: [r2(pl.pos.x), r2(pl.pos.y), r2(pl.pos.z)], y: r2(pl.yaw), pi: r2(pl.pitch), c: r2(pl.crouchAmt + pl.proneAmt), l: r2(pl.leanOff), iv: pl.inVehicle ? 1 : 0 });
+    this.send({ t: 'st', p: [r2(pl.pos.x), r2(pl.pos.y), r2(pl.pos.z)], y: r2(pl.yaw), pi: r2(pl.pitch), c: r2(pl.crouchAmt + pl.proneAmt), l: r2(pl.leanOff), iv: pl.inVehicle ? 1 : 0, a: g.arsenal.ads > 0.5 ? 1 : 0 });
     for (const v of g.vehicles) if (v.local && v.alive) this.send({ t: 'vs', r: v.netRow() });
   }
 }

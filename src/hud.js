@@ -1,7 +1,9 @@
 import * as THREE from 'three';
-import { minimapImage, SIZE } from './world.js';
+import { minimapImage, SIZE, sites } from './world.js';
 import { STREAKS, CALLS, TEAM_NAMES } from './game.js';
 import { vehicleName } from './vehicles.js';
+import { OBJECTIVES } from './modes.js';
+import { addXP } from './rank.js';
 
 const $ = (id) => document.getElementById(id);
 const DEG = Math.PI / 180;
@@ -33,6 +35,160 @@ export class Hud {
     this.vc = $('vcanvas');
     this.vctx = this.vc.getContext('2d');
     this.vKind = null; this.vHitT = 0; this.statT = 0; this.useText = '';
+    this.big = $('bigmap'); this.bigCtx = this.big.getContext('2d'); this.bigOn = false; this.bigT = 0;
+    this.modeT = 0;
+  }
+
+  toggleMap() { this.bigOn = !this.bigOn; this.big.classList.toggle('hidden', !this.bigOn); }
+
+  // the mode's panels: Ground War flags, Undercover objectives and suspicion, Hold-F progress
+  drawMode(game, dt) {
+    const m = game.mode, pl = game.player;
+    const gw = m.kind === 'gw', uc = m.kind === 'uc';
+    this.root.classList.toggle('mode-gw', gw); this.root.classList.toggle('mode-uc', uc);
+    const it = game.interact;
+    $('actbar').classList.toggle('show', !!it && pl.alive);
+    if (it) { $('actText').textContent = it.text; $('actFill').style.width = `${Math.min(1, (game.actT || 0) / it.time) * 100}%`; }
+    if ((this.modeT -= dt) > 0) return;
+    this.modeT = 0.12;
+    if (gw) {
+      $('flagsRow').innerHTML = m.flags.map(f => {
+        const mine = pl.team === 0 ? f.cap : -f.cap;
+        const own = f.owner < 0 ? 'neutral' : f.owner === pl.team ? 'ally' : 'enemy';
+        const fill = `<i class="${mine >= 0 ? 'ally' : 'enemy'}" style="height:${Math.abs(mine) * 100}%"></i>`;
+        const here = Math.hypot(pl.pos.x - f.x, pl.pos.z - f.z) < 10 && pl.alive;
+        return `<span class="fl ${own}${f.contest ? ' contested' : ''}${here ? ' here' : ''}">${fill}<b>${f.id}</b></span>`;
+      }).join('');
+    }
+    if (uc) {
+      const cur = m.current;
+      $('objList').innerHTML = OBJECTIVES.map((o, i) => {
+        let t = o.text;
+        if (o.id === 'sam') t += ` (${['sam1', 'sam2'].filter(k => { const s = sites.find(x => x.kind === k); return s && m.planted?.has(k); }).length}/2 charges)`;
+        if (o.id === 'exfil' && m.exfilT > 0) t += ` · ${Math.ceil(m.exfilT)}s`;
+        return `<li class="${m.done[i] ? 'done' : i === cur ? 'cur' : ''}">${esc(t)}</li>`;
+      }).join('');
+      const v = m.susp.get(pl.id) || 0;
+      let state = 'UNDERCOVER', cls = 'calm';
+      if (m.alarm) { state = 'ALARM: HUNTED'; cls = 'alarm'; } else if (m.radio) { state = `COMPROMISED · RADIO ${Math.ceil(m.radio.t)}s`; cls = 'made'; } else if (v > 1) { state = 'SUSPICIOUS'; cls = 'sus'; } else if (m.caution) state = 'UNDERCOVER · HIGH ALERT';
+      $('suspState').textContent = state;
+      $('susp').className = cls;
+      $('suspBar').style.width = `${m.alarm ? 100 : v}%`;
+    }
+    // Ground War: choose a spawn while dead
+    if (!pl.alive && gw) {
+      const opts = m.spawnOptions(pl.team);
+      $('spawnSel').innerHTML = 'Spawn at: ' + opts.map((o, i) => `<span class="${(game.spawnChoice || 'auto') === o.id ? 'on' : ''}"><kbd>${i + 1}</kbd> ${o.id === 'base' ? 'Base' : o.id}</span>`).join(' ') +
+        `${game.spawnChoice ? '' : ' <em>(auto: front line)</em>'}`;
+    } else $('spawnSel').innerHTML = '';
+  }
+
+  // world markers on the overlay canvas: flags, the objective, suspicious guards
+  drawMarkers(game, ctx, W, H) {
+    const m = game.mode, pl = game.player, cam = game.camera;
+    if (m.kind === 'tdm') return;
+    const proj = (x, y, z, clamp) => {
+      _pv.set(x, y, z).project(cam);
+      let sx = _pv.x, sy = _pv.y;
+      const behind = _pv.z > 1;
+      if (behind) { if (!clamp) return null; sx = -sx; sy = -sy; }
+      const off = behind || Math.abs(sx) > 0.94 || Math.abs(sy) > 0.9;
+      if (off) { if (!clamp) return null; const k = Math.max(Math.abs(sx) / 0.94, Math.abs(sy) / 0.9); sx /= k; sy /= k; }
+      return [(sx + 1) / 2 * W, (1 - sy) / 2 * H, off];
+    };
+    const dist = (x, z) => Math.round(Math.hypot(x - pl.pos.x, z - pl.pos.z));
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    if (m.kind === 'gw') {
+      for (const f of m.flags) {
+        const d = dist(f.x, f.z);
+        if (d < 9) continue;
+        const p = proj(f.x, 3, f.z, false);
+        if (!p) continue;
+        const col = f.owner < 0 ? '#e8e8e8' : f.owner === pl.team ? '#6fb0ff' : '#ff5a4a';
+        const r = Math.max(9, 15 - d / 60);
+        ctx.globalAlpha = 0.9;
+        ctx.fillStyle = 'rgba(10,12,14,0.55)'; ctx.beginPath(); ctx.arc(p[0], p[1], r + 2, 0, 7); ctx.fill();
+        ctx.strokeStyle = col; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(p[0], p[1], r, 0, 7); ctx.stroke();
+        if (f.contest) { ctx.strokeStyle = '#ffd24a'; ctx.beginPath(); ctx.arc(p[0], p[1], r + 4, 0, 7); ctx.stroke(); }
+        ctx.fillStyle = col; ctx.font = `700 ${Math.round(r * 1.2)}px Rajdhani, sans-serif`; ctx.fillText(f.id, p[0], p[1] + 1);
+        ctx.font = '600 12px Rajdhani, sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.8)'; ctx.fillText(`${d}m`, p[0], p[1] + r + 11);
+        ctx.globalAlpha = 1;
+      }
+      return;
+    }
+    // Undercover: the objective, clamped to the screen edge
+    const mk = m.marker();
+    if (mk) {
+      const p = proj(mk.x, mk.y ?? 1.5, mk.z, true);
+      if (p) {
+        const [x, y] = p, s = 11;
+        ctx.fillStyle = 'rgba(10,12,14,0.5)'; ctx.beginPath(); ctx.moveTo(x, y - s - 3); ctx.lineTo(x + s + 3, y); ctx.lineTo(x, y + s + 3); ctx.lineTo(x - s - 3, y); ctx.fill();
+        ctx.strokeStyle = '#ffd24a'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(x, y - s); ctx.lineTo(x + s, y); ctx.lineTo(x, y + s); ctx.lineTo(x - s, y); ctx.closePath(); ctx.stroke();
+        ctx.fillStyle = '#ffd24a'; ctx.font = '700 13px Rajdhani, sans-serif'; ctx.fillText(mk.label, x, y - s - 11);
+        ctx.font = '600 12px Rajdhani, sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fillText(`${dist(mk.x, mk.z)}m`, x, y + s + 11);
+      }
+    }
+    // "?" over guards who are sizing you up, "!" over those who have made you
+    const v = m.susp.get(pl.id) || 0;
+    for (const id of m.watch.get(pl.id) || []) {
+      const b = game.byId.get(id);
+      if (!b?.alive) continue;
+      const p = proj(b.pos.x, b.pos.y + 2.25, b.pos.z, false);
+      if (!p) continue;
+      ctx.globalAlpha = 0.35 + 0.65 * v / 100;
+      ctx.font = '800 24px Rajdhani, sans-serif'; ctx.fillStyle = '#ffd24a'; ctx.strokeStyle = 'rgba(0,0,0,0.7)'; ctx.lineWidth = 3;
+      ctx.strokeText('?', p[0], p[1]); ctx.fillText('?', p[0], p[1]);
+    }
+    ctx.globalAlpha = 1;
+    for (const id of m.hostileIds()) {
+      const b = game.byId.get(id);
+      if (!b?.alive || b.pos.distanceTo(pl.pos) > 70) continue;
+      const p = proj(b.pos.x, b.pos.y + 2.25, b.pos.z, false);
+      if (!p) continue;
+      ctx.font = '800 26px Rajdhani, sans-serif'; ctx.fillStyle = '#ff4a3a'; ctx.strokeStyle = 'rgba(0,0,0,0.7)'; ctx.lineWidth = 3;
+      ctx.strokeText('!', p[0], p[1]); ctx.fillText('!', p[0], p[1]);
+    }
+  }
+
+  // M: the whole map, north up
+  drawBigMap(game) {
+    const c = this.big, g = this.bigCtx, pl = game.player, m = game.mode;
+    const S = Math.floor(Math.min(innerHeight * 0.84, innerWidth * 0.62));
+    if (c.width !== S) { c.width = c.height = S; }
+    const k = S / SIZE;
+    g.fillStyle = '#16171a'; g.fillRect(0, 0, S, S);
+    g.imageSmoothingEnabled = true; g.globalAlpha = 0.95;
+    g.drawImage(minimapImage(), 0, 0, S, S);
+    g.globalAlpha = 1;
+    const P = (x, z) => [x * k, z * k];
+    const label = (x, z, text, col, r = 9) => {
+      const [px, pz] = P(x, z);
+      g.fillStyle = 'rgba(10,12,14,0.7)'; g.beginPath(); g.arc(px, pz, r + 2, 0, 7); g.fill();
+      g.strokeStyle = col; g.lineWidth = 2; g.beginPath(); g.arc(px, pz, r, 0, 7); g.stroke();
+      g.fillStyle = col; g.font = `700 ${r + 3}px Rajdhani, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, px, pz + 1);
+    };
+    if (m.kind === 'gw') for (const f of m.flags) label(f.x, f.z, f.id, f.owner < 0 ? '#e8e8e8' : f.owner === pl.team ? '#6fb0ff' : '#ff5a4a', 11);
+    if (m.kind === 'uc') {
+      const mk = m.marker();
+      if (mk) label(mk.x, mk.z, '◆', '#ffd24a', 10);
+    }
+    const uav = game.uav[pl.team] > 0;
+    for (const e of game.soldiers) {
+      if (!e.alive || e === pl) continue;
+      const [x, z] = P(e.pos.x, e.pos.z);
+      if (e.team === pl.team) { g.fillStyle = '#6fb0ff'; g.beginPath(); g.arc(x, z, 3, 0, 7); g.fill(); } else if (uav || game.time - e.firedT < 1.2) { g.fillStyle = '#ff4a3a'; g.beginPath(); g.arc(x, z, 3, 0, 7); g.fill(); }
+    }
+    for (const v of game.vehicles) {
+      if (!v.alive || (v.team !== pl.team && !uav && v.kind === 'drone')) continue;
+      const [x, z] = P(v.pos.x, v.pos.z);
+      g.fillStyle = v.team === pl.team ? '#6fb0ff' : '#ff4a3a'; g.fillRect(x - 4, z - 4, 8, 8);
+    }
+    const [x, z] = P(pl.pos.x, pl.pos.z), yaw = pl.alive ? pl.yaw : game.deathYaw;
+    g.save(); g.translate(x, z); g.rotate(-yaw);
+    g.fillStyle = '#ffd24a'; g.beginPath(); g.moveTo(0, -9); g.lineTo(6, 6); g.lineTo(0, 3); g.lineTo(-6, 6); g.fill();
+    g.restore();
+    g.fillStyle = 'rgba(255,255,255,0.7)'; g.font = '600 13px Rajdhani, sans-serif'; g.textAlign = 'left';
+    g.fillText(`${SIZE} m  ·  M to close`, 10, S - 12);
   }
 
   vehicleHit() { this.vHitT = 0.25; }
@@ -90,6 +246,7 @@ export class Hud {
 
   reset() {
     this.root.classList.remove('hidden');
+    this.bigOn = false; this.big.classList.add('hidden'); this.modeT = 0;
     $('killfeed').innerHTML = '';
     this.feedItems = [];
     this.dmg.forEach(d => d.el.remove());
@@ -160,16 +317,29 @@ export class Hud {
 
   showEnd(game) {
     const a = game.teamScore[game.player.team], e = game.teamScore[1 - game.player.team];
-    const res = a > e ? 'VICTORY' : a < e ? 'DEFEAT' : 'DRAW';
+    const uc = game.mode.kind === 'uc';
+    const win = uc ? game.mode.result === 'complete' : a > e;
+    const res = uc ? (win ? 'MISSION COMPLETE' : 'MISSION FAILED') : a > e ? 'VICTORY' : a < e ? 'DEFEAT' : 'DRAW';
     const el = $('end');
     el.classList.remove('hidden');
     $('endTitle').textContent = res;
-    $('endTitle').className = a > e ? 'win' : a < e ? 'lose' : '';
-    $('endScore').innerHTML = `<span class="ally">${a}</span> &ndash; <span class="enemy">${e}</span>`;
+    $('endTitle').className = win ? 'win' : (uc || a < e) ? 'lose' : '';
     const pl = game.player;
     const kd = pl.deaths ? (pl.kills / pl.deaths).toFixed(2) : pl.kills.toFixed(2);
-    $('endStats').innerHTML = [['Score', pl.score], ['Kills', pl.kills], ['Deaths', pl.deaths], ['K/D', kd], ['Assists', pl.assists], ['Best streak', pl.bestStreak]]
-      .map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('');
+    if (uc) {
+      const m = game.mode, t = Math.round(game.time);
+      $('endScore').innerHTML = `<span class="ally">${m.done.filter(Boolean).length}</span> / ${m.done.length} objectives`;
+      $('endStats').innerHTML = [['Score', pl.score], ['Kills', pl.kills], ['Deaths', pl.deaths], ['Time', `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`], ['Alarms raised', m.alarms], ['Best streak', pl.bestStreak]]
+        .map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('');
+    } else {
+      $('endScore').innerHTML = `<span class="ally">${a}</span> &ndash; <span class="enemy">${e}</span>`;
+      $('endStats').innerHTML = [['Score', pl.score], ['Kills', pl.kills], ['Deaths', pl.deaths], ['K/D', kd], ['Assists', pl.assists], ['Best streak', pl.bestStreak]]
+        .map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('');
+    }
+    const xp = addXP(pl.score + (win ? (uc ? 3000 : 1000) : 250));
+    $('endXp').innerHTML = `+${xp.gained.toLocaleString()} XP &middot; Rank ${xp.after.level} ${esc(xp.after.title)}` +
+      (xp.promoted ? ` <b class="promo">PROMOTED</b>` : '') +
+      (xp.after.next ? `<span class="xpbar"><i style="width:${Math.round(xp.after.cur / xp.after.next * 100)}%"></i></span>` : '');
     $('endBoard').innerHTML = this.boardHtml(game);
     $('again').classList.toggle('hidden', game.role === 'client');
     $('endNote').textContent = game.role === 'client' ? 'Waiting for the host to start the next match.' : game.role === 'host' ? 'Play again restarts the match for everyone in the lobby.' : '';
@@ -191,7 +361,7 @@ export class Hud {
 
   update(game, dt, aimed) {
     const pl = game.player, ars = game.arsenal;
-    const a = game.teamScore[pl.team], e = game.teamScore[1 - pl.team], lim = game.settings.scoreLimit;
+    const a = game.teamScore[pl.team], e = game.teamScore[1 - pl.team], lim = Math.min(game.settings.scoreLimit, 9999);
     $('scoreA').textContent = a; $('scoreE').textContent = e;
     $('nameA').textContent = TEAM_NAMES[pl.team]; $('nameE').textContent = TEAM_NAMES[1 - pl.team];
     $('barA').style.width = `${a / lim * 100}%`; $('barE').style.width = `${e / lim * 100}%`;
@@ -279,6 +449,9 @@ export class Hud {
     if (this.toastT > 0 && (this.toastT -= dt) <= 0) $('toast').classList.remove('show');
 
     this.drawVehicle(game, dt);
+    this.drawMarkers(game, this.vctx, this.vc.width, this.vc.height);
+    this.drawMode(game, dt);
+    if (this.bigOn && (this.bigT -= dt) <= 0) { this.bigT = 0.1; this.drawBigMap(game); }
     const use = game.useNear ? `Press F to use ${game.useNear.name}` : '';
     if (use !== this.useText) { this.useText = use; $('use').textContent = use; $('use').classList.toggle('show', !!use); }
 
@@ -342,6 +515,16 @@ export class Hud {
       g.fillStyle = v.team === pl.team ? '#6fb0ff' : '#ff4a3a';
       g.fillRect(v.pos.x - 1.8, v.pos.z - 1.8, 3.6, 3.6);
     }
+    const md = game.mode, u = 1 / (s * 1.35);
+    const pin = (x, z, text, col) => {
+      g.save(); g.translate(x, z); g.rotate(-yaw); g.scale(u, u);
+      g.fillStyle = 'rgba(10,12,14,0.75)'; g.beginPath(); g.arc(0, 0, 9, 0, 7); g.fill();
+      g.strokeStyle = col; g.lineWidth = 2; g.beginPath(); g.arc(0, 0, 8, 0, 7); g.stroke();
+      g.fillStyle = col; g.font = '700 11px Rajdhani, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, 0, 1);
+      g.restore();
+    };
+    if (md.kind === 'gw') for (const f of md.flags) pin(f.x, f.z, f.id, f.owner < 0 ? '#e8e8e8' : f.owner === pl.team ? '#6fb0ff' : '#ff5a4a');
+    if (md.kind === 'uc') { const mk = md.marker(); if (mk) pin(mk.x, mk.z, '◆', '#ffd24a'); }
     g.restore();
     g.fillStyle = '#ffd24a';
     g.beginPath(); g.moveTo(W / 2, W / 2 - 8); g.lineTo(W / 2 + 6, W / 2 + 6); g.lineTo(W / 2, W / 2 + 3); g.lineTo(W / 2 - 6, W / 2 + 6); g.fill();
