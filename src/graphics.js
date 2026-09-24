@@ -32,11 +32,11 @@ const RaysShader = {
       for (int i = 0; i < 48; i++) {
         uv -= d;
         vec3 c = texture2D(tDiffuse, clamp(uv, 0.001, 0.999)).rgb;
-        acc += c * max(dot(c, vec3(0.3, 0.59, 0.11)) - 1.1, 0.0) * w;
+        acc += min(c, vec3(3.0)) * max(dot(c, vec3(0.3, 0.59, 0.11)) - 2.2, 0.0) * w;
         w *= 0.965;
       }
       float fall = 1.0 - smoothstep(0.0, 1.1, length((vUv - sunPos) * vec2(aspect, 1.0)));
-      gl_FragColor = vec4(base + min(acc / 48.0, vec3(4.0)) * tint * strength * fall, 1.0);
+      gl_FragColor = vec4(base + min(acc / 48.0, vec3(0.35)) * tint * strength * fall, 1.0);
     }`,
 };
 
