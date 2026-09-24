@@ -261,7 +261,7 @@ export class Net {
         const r = d.r;
         if (!Array.isArray(r) || r.length < 15) break;
         const vid = num(r[0], -1), kind = String(r[1]);
-        if (!['tank', 'jet', 'drone'].includes(kind) || Math.floor((vid - 10000) / 100) !== id || g.deadVehicles.has(vid)) break;
+        if (!['tank', 'jet', 'drone', 'heli'].includes(kind) || Math.floor((vid - 10000) / 100) !== id || g.deadVehicles.has(vid)) break;
         let v = g.vehicles.find(x => x.id === vid);
         if (!v) { v = new VehicleProxy(g, vid, kind, s.team); v.owner = s; g.vehicles.push(v); }
         if (!v.isProxy || v.owner !== s) break;
@@ -288,6 +288,11 @@ export class Net {
       case 'blast': {
         const p = vec(d.p);
         if (!p) break;
+        if (d.w === 'Chopper') {
+          // 25 mm rounds from a chopper this client flies
+          if (g.vehicles.some(x => x.isProxy && x.owner === s && x.kind === 'heli' && x.alive)) g.explode(p, s, 2.6, 80, 'Chopper', { streak: true });
+          break;
+        }
         const w = d.w === 'Jet' ? 'Jet' : 'FPV Drone';
         const e = g.vehicles.find(x => x.id === d.e && x.alive);
         if (e && w === 'FPV Drone') g.damage(e, 850, s, w, false, p, { streak: true });
@@ -324,7 +329,8 @@ export class Net {
         const i = s.rewards.indexOf(d.id);
         if (i < 0 || !s.alive) break;
         s.rewards.splice(i, 1);
-        g.useStreak(s, d.id, vec(d.p), num(d.yaw));
+        if (d.own && d.id === 'chopper') g.announce(s.team, 'Friendly Attack Chopper inbound', 'Enemy Attack Chopper inbound');
+        else g.useStreak(s, d.id, vec(d.p), num(d.yaw));
         break;
       }
       case 'took':

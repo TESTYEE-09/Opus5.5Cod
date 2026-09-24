@@ -32,14 +32,14 @@ export const SPEC = {
   heli: { name: 'Attack Chopper', hp: 1400, armor: 0.6, bounty: 150, seat: 'remote', air: true, size: 2.3, boom: 1.6 },
 };
 // what each side fields
-const MODEL_NAME = { tank: ['M1 Abrams', 'T-80'], jet: ['F-16', 'Su-27'], aa: ['AA Gun', 'AA Gun'] };
+const MODEL_NAME = { tank: ['M1 Abrams', 'T-80'], jet: ['F-16', 'Su-27'], aa: ['AA Gun', 'AA Gun'], heli: ['AH-64 Apache', 'Mi-24 Hind'] };
 export const vehicleName = (kind, team) => MODEL_NAME[kind]?.[team] || SPEC[kind]?.name || kind;
 const HELP = {
   tank: 'WASD drive · Shift boost · Mouse aim turret · LMB cannon · Space coax MG · RMB gunner sight · F exit',
   jet: 'Mouse pitch / roll · A D rudder · W S throttle · Shift afterburner · LMB cannon · RMB bomb · Space flares · F leave',
   drone: 'Mouse pitch / yaw · A D roll · W S throttle · Space full power · Shift hover assist · LMB detonate · F abort',
   aa: 'Mouse aim · LMB fire flak · RMB zoom · watch the heat · F exit',
-  heli: 'Mouse aim · LMB 25 mm cannon · RMB zoom · F leave the gun',
+  heli: 'Mouse aim · LMB 25 mm cannon (fires straight away) · RMB zoom · F leave the gun',
 };
 const EXPLOSIVE = new Set(['Frag', 'Airstrike', 'RPG-7', 'Stinger', 'Tank', 'FPV Drone', 'Bomb', 'Flak', 'Jet', 'Barrel', 'Car']);
 const AP = { 'Jet Cannon': 0.25, Chopper: 0.3, 'Tank MG': 0.06 };
@@ -1381,7 +1381,7 @@ export class Chopper extends Vehicle {
     this.ai = true;
     this.life = owner.isPlayer ? 50 : 45;
     this.angle = this.team === 0 ? -Math.PI / 2 : Math.PI / 2;
-    this.pos.set(SIZE / 2, 35, this.team === 0 ? -60 : SIZE + 60);
+    this.pos.set(SIZE / 2, 35, this.team === 0 ? 10 : SIZE - 10);
     this.heading = this.team === 0 ? Math.PI : 0;
     this.fireT = 0; this.burst = 0; this.scanT = 0; this.target = null;
     this.aimYaw = this.heading; this.aimPitch = -0.7; this.fireWant = false; this.zoomWant = false; this.zoom = 0; this.gunT = 0;
@@ -1403,7 +1403,7 @@ export class Chopper extends Vehicle {
     const r = manned ? 42 : 34, alt = manned ? 34 : 28;
     _c.set(SIZE / 2 + Math.cos(this.angle) * r, alt + Math.sin(this.t * 0.5) * 1.5, SIZE / 2 + Math.sin(this.angle) * r);
     if (this.t > this.life) _c.set(this.pos.x + (this.pos.x - SIZE / 2) * 3, 60, this.pos.z + (this.pos.z - SIZE / 2) * 3);
-    const k = Math.min(1, dt * (this.t < 5 ? 0.9 : 1.6));
+    const k = Math.min(1, dt * (this.t < 3 ? 0.9 : 1.6));
     this.vel.subVectors(_c, this.pos).multiplyScalar(k / Math.max(dt, 1e-4));
     this.pos.lerp(_c, k);
     let want;
@@ -1414,15 +1414,18 @@ export class Chopper extends Vehicle {
     this.yaw = this.heading;
     this.quat.setFromEuler(_e.set(-0.08, this.heading, clamp(-d * 0.4, -0.3, 0.3), 'YXZ'));
     pose('heli', this.m, this.pos, this.quat, 0, 0, dt);
+    // the gunner sits under the nose: hide our own airframe so it never blocks the view
+    this.m.g.visible = !this.controlled;
     this.sound?.set(this.pos);
     if (this.t > this.life && manned) { g.hud.toast('Chopper leaving the area'); g.leftVehicle(this.driver, this); }
     if (this.t > this.life + 6) { this.cleanup(); return; }
-    if (this.t < 5 || this.t > this.life) return;
+    if (this.t > this.life) return;
     if (manned) {
       this.gunT -= dt;
       if (this.fireWant && this.gunT <= 0) this.fireCannon();
       return;
     }
+    if (this.t < 5) return;
     if ((this.scanT -= dt) <= 0) {
       this.scanT = 0.5; this.target = null;
       let best = 75;

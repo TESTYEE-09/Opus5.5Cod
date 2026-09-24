@@ -488,6 +488,7 @@ export class Game {
     let kind = 0, normal = null;
     if (blast) {
       if (this.authority) this.explode(end, shooter, blast, dmg, weapon, { streak: true });
+      else if (v.local) { this.net?.send({ t: 'blast', w: weapon, p: arr(end), e: -1 }); this.predictBoom(end, 0.4); }
     } else if (h.entity) {
       const head = h.zone === 'head';
       const amt = h.entity.isVehicle ? dmg : dmg * (head ? 1.5 : 1);
@@ -624,8 +625,8 @@ export class Game {
   }
 
   // a client shows its own drone or crash blast at once and skips the host's copy
-  predictBoom(p) {
-    this.effects.explosion(p, 0.8);
+  predictBoom(p, scale = 0.8) {
+    this.effects.explosion(p, scale);
     this.audio.explosion(p);
     this.predicted.push({ p: p.clone(), t: this.time });
   }
@@ -809,7 +810,13 @@ export class Game {
     if (i < 0 || !pl.alive) return;
     if (id === 'airstrike' && !point) { this.targeting = true; this.hud.hint('Aim at the ground and click to mark the airstrike. Right-click cancels.'); return; }
     pl.rewards.splice(i, 1);
-    if (this.role === 'client') this.net.send({ t: 'streak', id, p: point ? arr(point) : null, yaw });
+    if (this.role === 'client' && id === 'chopper') {
+      // a client flies its own chopper; the host only books the streak and mirrors it
+      const c = new Chopper(this, pl, this.nextVehicleId());
+      this.vehicles.push(c);
+      this.enterVehicle(pl, c);
+      this.net.send({ t: 'streak', id, own: 1 });
+    } else if (this.role === 'client') this.net.send({ t: 'streak', id, p: point ? arr(point) : null, yaw });
     else this.useStreak(pl, id, point, yaw);
   }
 
