@@ -70,6 +70,11 @@ export class NetSoldier {
     this.vel.set((this.pos.x - px) / Math.max(dt, 1e-3), 0, (this.pos.z - pz) / Math.max(dt, 1e-3));
     this.yaw = wrap(this.yaw + wrap(this.tYaw - this.yaw) * Math.min(1, dt * 16));
     this.crouchAmt += (this.tCrouch - this.crouchAmt) * Math.min(1, dt * 12);
+    const sp = Math.hypot(this.vel.x, this.vel.z);
+    if (sp > 1.5 && sp < 12) {
+      this.stepAcc = (this.stepAcc || 0) + sp * dt;
+      if (this.stepAcc > 2.2) { this.stepAcc = 0; this.game.audio.step(this.pos, this.crouchAmt > 0.5 ? 0.35 : sp > 5 ? 1.3 : 1); }
+    }
     if (this.protect > 0) this.protect -= dt;
     if (this.isRemote && this.game.time - this.lastHurt > 4 && this.health < 100) this.health = Math.min(100, this.health + 40 * dt);
     animateSoldier(this.model, this, dt);
@@ -112,6 +117,7 @@ export class Net {
     this.clients = new Map(); // host: id -> { conn, name, team }
     this.nextId = 1;
     this.mode = 'versus';
+    this.map = 'crossroads';
     this.sendT = 0;
     this.myId = 0;
     this.name = 'Player';
@@ -218,12 +224,13 @@ export class Net {
   }
 
   pushLobby() {
-    const state = { t: 'lobby', code: this.code, mode: this.mode, members: this.members(), playing: this.game.state === 'playing' };
+    const state = { t: 'lobby', code: this.code, mode: this.mode, map: this.map, members: this.members(), playing: this.game.state === 'playing' };
     this.broadcast(state);
     this.ui.lobby(state);
   }
 
   setMode(mode) { this.mode = mode === 'coop' ? 'coop' : 'versus'; this.pushLobby(); }
+  setMap(map) { this.map = map; if (this.isHost && this.peer) this.pushLobby(); }
 
   startGame(settings) {
     const members = this.members();
@@ -237,7 +244,7 @@ export class Net {
   sendStart(id) {
     const g = this.game, c = this.clients.get(id);
     if (!c?.conn.open) return;
-    c.conn.send({ t: 'start', you: id, rules: { scoreLimit: g.settings.scoreLimit, timeLimit: g.settings.timeLimit, timeLeft: g.timeLeft }, roster: g.rosterList(), score: g.teamScore });
+    c.conn.send({ t: 'start', you: id, rules: { map: g.settings.map, scoreLimit: g.settings.scoreLimit, timeLimit: g.settings.timeLimit, timeLeft: g.timeLeft }, roster: g.rosterList(), score: g.teamScore });
   }
 
   broadcast(msg) {

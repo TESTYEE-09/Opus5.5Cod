@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { moveBody, findPath, lineWalkable, overlaps, interest, randomWalkable, lineOfSight, SIZE, STEP } from './world.js';
 import { WEAPONS } from './weapons.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { surface, R } from './textures.js';
 
 export const DIFFICULTY = {
   recruit: { name: 'Recruit', react: 0.8, err: 1.6, min: 0.45, learn: 0.6, turn: 3.5, dmg: 0.6, head: 0.03 },
@@ -8,7 +10,7 @@ export const DIFFICULTY = {
   veteran: { name: 'Veteran', react: 0.3, err: 0.9, min: 0.14, learn: 1.4, turn: 8, dmg: 1, head: 0.25 },
 };
 
-const KITS = [['ar', 0.45], ['smg', 0.25], ['lmg', 0.08], ['shotgun', 0.1], ['sniper', 0.12]];
+const KITS = [['ar', 0.34], ['smg', 0.2], ['burst', 0.12], ['lmg', 0.07], ['shotgun', 0.09], ['dmr', 0.09], ['sniper', 0.09]];
 function pickKit() {
   let r = Math.random();
   for (const [k, w] of KITS) if ((r -= w) <= 0) return k;
@@ -16,16 +18,19 @@ function pickKit() {
 }
 
 const TEAM_LOOK = [
-  { uni: 0x6b6a4a, vest: 0x4d5034, helmet: 0x5a5c3e, accent: 0x3d7fe0, pants: 0x5e5d44 },
-  { uni: 0x505358, vest: 0x383a3e, helmet: 0x2c2e31, accent: 0xd0342a, pants: 0x45474c },
+  { camo: [0x6b6a4a, 0x8a7d58, 0x4a4a34, 0x3a3326], vest: 0x5a5a40, helmet: 0x5f6042, accent: 0x3d7fe0, gear: 0x4a4a36 },
+  { camo: [0x4e5156, 0x6a6c70, 0x35373b, 0x232427], vest: 0x2c2e31, helmet: 0x2a2c2f, accent: 0xd0342a, gear: 0x26282a },
 ];
 
 const geoCache = {};
-const box = (w, h, d) => (geoCache[`${w},${h},${d}`] ||= new THREE.BoxGeometry(w, h, d));
+const box = (w, h, d) => (geoCache[`${w},${h},${d}`] ||= new RoundedBoxGeometry(w, h, d, 2, Math.min(w, h, d) * 0.25));
+const helmetGeo = new THREE.SphereGeometry(0.16, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.55);
+const cupGeo = new THREE.CylinderGeometry(0.045, 0.045, 0.04, 12).rotateZ(Math.PI / 2);
 
-function mesh(parent, geo, mat, x, y, z) {
+function mesh(parent, geo, mat, x, y, z, rx = 0, ry = 0, rz = 0) {
   const m = new THREE.Mesh(geo, mat);
   m.position.set(x, y, z);
+  m.rotation.set(rx, ry, rz);
   m.castShadow = true;
   parent.add(m);
   return m;
@@ -48,50 +53,81 @@ function nameTag(text, color) {
   return s;
 }
 
-export function buildSoldier(team, name) {
+const teamMats = [null, null];
+function matsFor(team) {
+  if (teamMats[team]) return teamMats[team];
   const L = TEAM_LOOK[team];
-  const mat = (c, r = 0.9) => new THREE.MeshStandardMaterial({ color: c, roughness: r });
-  const uni = mat(L.uni), vest = mat(L.vest), helmet = mat(L.helmet, 0.7), pants = mat(L.pants);
-  const skin = mat(new THREE.Color().setHSL(0.07, 0.35, 0.35 + Math.random() * 0.25));
-  const boot = mat(0x1c1a17), gun = mat(0x222324, 0.5);
-  const accent = new THREE.MeshStandardMaterial({ color: L.accent, emissive: L.accent, emissiveIntensity: 0.35 });
+  const camo = surface(`camo:${team}`, R.camo(...L.camo), { size: 256, seed: 60 + team, normal: 1.2 });
+  const fab = surface('fabric:[]', R.fabric(), { size: 256, seed: 43, normal: 1.5 });
+  const cloth = (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.92, normalMap: fab.normalMap, normalScale: new THREE.Vector2(0.8, 0.8) });
+  teamMats[team] = {
+    uni: new THREE.MeshStandardMaterial({ map: camo.map, normalMap: camo.normalMap, roughness: 0.9 }),
+    vest: cloth(L.vest), gear: cloth(L.gear),
+    helmet: new THREE.MeshStandardMaterial({ color: L.helmet, roughness: 0.6, metalness: 0.1 }),
+    boot: new THREE.MeshStandardMaterial({ color: 0x1c1a17, roughness: 0.7 }),
+    glove: new THREE.MeshStandardMaterial({ color: 0x24221f, roughness: 0.8 }),
+    gun: new THREE.MeshStandardMaterial({ color: 0x222324, roughness: 0.4, metalness: 0.7 }),
+    poly: new THREE.MeshStandardMaterial({ color: 0x2c2d2b, roughness: 0.6 }),
+    mask: new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.9 }),
+    lens: new THREE.MeshStandardMaterial({ color: 0x101820, roughness: 0.05, metalness: 0.8 }),
+  };
+  return teamMats[team];
+}
+
+export function buildSoldier(team, name) {
+  const L = TEAM_LOOK[team], T = matsFor(team);
+  const skin = new THREE.MeshStandardMaterial({ color: new THREE.Color().setHSL(0.07, 0.35, 0.3 + Math.random() * 0.25), roughness: 0.7 });
+  const accent = new THREE.MeshStandardMaterial({ color: L.accent, emissive: L.accent, emissiveIntensity: 0.45 });
 
   const root = new THREE.Group();
   const hips = new THREE.Group(); hips.position.y = 0.95; root.add(hips);
+  mesh(hips, box(0.36, 0.14, 0.22), T.uni, 0, 0.02, 0);
+  mesh(hips, box(0.4, 0.05, 0.25), T.gear, 0, 0.07, 0);
   const legs = [];
   for (const side of [-1, 1]) {
     const leg = new THREE.Group(); leg.position.set(0.11 * side, 0, 0); hips.add(leg);
-    mesh(leg, box(0.17, 0.48, 0.19), pants, 0, -0.23, 0);
+    mesh(leg, box(0.17, 0.48, 0.19), T.uni, 0, -0.23, 0);
+    mesh(leg, box(0.09, 0.14, 0.05), T.gear, 0.08 * side, -0.22, 0.02);
     const shin = new THREE.Group(); shin.position.y = -0.46; leg.add(shin);
-    mesh(shin, box(0.15, 0.44, 0.17), pants, 0, -0.2, 0);
-    mesh(shin, box(0.16, 0.1, 0.28), boot, 0, -0.44, -0.04);
+    mesh(shin, box(0.15, 0.44, 0.17), T.uni, 0, -0.2, 0);
+    mesh(shin, box(0.13, 0.12, 0.06), T.vest, 0, -0.02, -0.08);
+    mesh(shin, box(0.16, 0.12, 0.29), T.boot, 0, -0.43, -0.04);
     legs.push({ leg, shin });
   }
   const torso = new THREE.Group(); hips.add(torso);
-  mesh(torso, box(0.42, 0.56, 0.25), uni, 0, 0.3, 0);
-  mesh(torso, box(0.46, 0.38, 0.3), vest, 0, 0.33, 0);
-  mesh(torso, box(0.32, 0.36, 0.14), vest, 0, 0.33, 0.21);
-  mesh(torso, box(0.3, 0.1, 0.06), vest, 0, 0.22, -0.17);
+  mesh(torso, box(0.42, 0.56, 0.25), T.uni, 0, 0.3, 0);
+  mesh(torso, box(0.46, 0.4, 0.31), T.vest, 0, 0.34, 0);
+  for (const x of [-0.12, 0, 0.12]) mesh(torso, box(0.1, 0.13, 0.07), T.gear, x, 0.25, -0.18);
+  mesh(torso, box(0.13, 0.1, 0.06), T.gear, 0.14, 0.42, -0.17);
+  mesh(torso, box(0.3, 0.36, 0.14), T.gear, 0, 0.34, 0.21);
+  mesh(torso, box(0.08, 0.3, 0.06), T.gear, -0.2, 0.38, 0.14);
+  mesh(torso, box(0.3, 0.08, 0.3), T.uni, 0, 0.56, 0);
   const head = new THREE.Group(); head.position.y = 0.62; torso.add(head);
-  mesh(head, box(0.2, 0.24, 0.22), team ? mat(0x151515) : skin, 0, 0.12, 0);
-  if (team) mesh(head, box(0.16, 0.05, 0.02), skin, 0, 0.15, -0.105);
-  mesh(head, box(0.26, 0.12, 0.28), helmet, 0, 0.27, 0);
-  mesh(head, box(0.22, 0.04, 0.24), helmet, 0, 0.34, 0);
-  if (!team) mesh(head, box(0.2, 0.05, 0.03), mat(0x111111, 0.3), 0, 0.2, -0.12);
-  mesh(torso, box(0.24, 0.07, 0.24), accent, 0, 0.58, 0);
+  mesh(head, box(0.19, 0.24, 0.21), team ? T.mask : skin, 0, 0.11, 0);
+  if (team) mesh(head, box(0.15, 0.045, 0.02), skin, 0, 0.15, -0.1);
+  else mesh(head, box(0.17, 0.05, 0.03), T.lens, 0, 0.16, -0.105);
+  mesh(head, helmetGeo, T.helmet, 0, 0.19, 0.005);
+  mesh(head, box(0.28, 0.035, 0.3), T.helmet, 0, 0.2, 0.01);
+  for (const x of [-0.105, 0.105]) mesh(head, cupGeo, T.gear, x, 0.13, 0.01);
+  mesh(head, box(0.05, 0.04, 0.03), T.gun, 0, 0.27, -0.14);
+  mesh(torso, box(0.24, 0.06, 0.24), accent, 0, 0.6, 0);
 
   const arms = new THREE.Group(); arms.position.set(0, 0.5, 0); torso.add(arms);
-  const upR = mesh(arms, box(0.12, 0.12, 0.34), uni, 0.25, -0.06, -0.1); upR.rotation.x = 0.5;
-  mesh(arms, box(0.13, 0.06, 0.13), accent, 0.25, 0.0, -0.02);
-  mesh(arms, box(0.1, 0.1, 0.34), uni, 0.18, -0.18, -0.32);
-  const upL = mesh(arms, box(0.12, 0.12, 0.36), uni, -0.22, -0.08, -0.2); upL.rotation.set(0.3, 0.45, 0);
-  mesh(arms, box(0.1, 0.1, 0.34), uni, -0.07, -0.13, -0.45).rotation.y = 0.3;
+  mesh(arms, box(0.13, 0.13, 0.34), T.uni, 0.25, -0.06, -0.1, 0.5);
+  mesh(arms, box(0.14, 0.06, 0.14), accent, 0.25, 0.0, -0.02);
+  mesh(arms, box(0.11, 0.11, 0.34), T.uni, 0.18, -0.18, -0.32);
+  mesh(arms, box(0.1, 0.1, 0.09), T.glove, 0.14, -0.2, -0.5);
+  mesh(arms, box(0.13, 0.13, 0.36), T.uni, -0.22, -0.08, -0.2, 0.3, 0.45);
+  mesh(arms, box(0.11, 0.11, 0.34), T.uni, -0.07, -0.13, -0.45, 0, 0.3);
+  mesh(arms, box(0.1, 0.1, 0.09), T.glove, 0.02, -0.13, -0.62);
   const rifle = new THREE.Group(); rifle.position.set(0.08, -0.14, -0.4); arms.add(rifle);
-  mesh(rifle, box(0.07, 0.1, 0.6), gun, 0, 0, 0);
-  mesh(rifle, box(0.04, 0.16, 0.07), gun, 0, -0.1, 0.05);
-  mesh(rifle, box(0.04, 0.04, 0.3), gun, 0, 0.01, -0.42);
-  mesh(rifle, box(0.06, 0.1, 0.22), gun, 0, -0.02, 0.38);
-  const muzzle = new THREE.Object3D(); muzzle.position.set(0, 0.01, -0.6); rifle.add(muzzle);
+  mesh(rifle, box(0.065, 0.1, 0.46), T.gun, 0, 0, -0.05);
+  mesh(rifle, box(0.07, 0.08, 0.26), T.poly, 0, 0.0, -0.32);
+  mesh(rifle, box(0.035, 0.16, 0.07), T.poly, 0, -0.11, 0.0, 0.2);
+  mesh(rifle, box(0.03, 0.03, 0.2), T.gun, 0, 0.01, -0.52);
+  mesh(rifle, box(0.05, 0.1, 0.2), T.poly, 0, -0.02, 0.33);
+  mesh(rifle, box(0.04, 0.05, 0.08), T.gun, 0, 0.075, -0.05);
+  const muzzle = new THREE.Object3D(); muzzle.position.set(0, 0.01, -0.63); rifle.add(muzzle);
 
   const tag = nameTag(name, '#7fb4ff');
   tag.position.y = 2.2;
@@ -304,6 +340,7 @@ export class Bot {
     this.crouchAmt += ((this.crouched ? 1 : 0) - this.crouchAmt) * Math.min(1, dt * 8);
     this.body.h = 1.75 - 0.6 * this.crouchAmt;
     moveBody(this.body, dt);
+    this.footsteps(dt);
 
     // stuck detection
     this.stuckT += dt;
@@ -313,6 +350,13 @@ export class Bot {
     }
 
     this.animate(dt);
+  }
+
+  footsteps(dt) {
+    const sp = Math.hypot(this.vel.x, this.vel.z);
+    if (!this.body.onGround || sp < 1.5) return;
+    this.stepAcc = (this.stepAcc || 0) + sp * dt;
+    if (this.stepAcc > 2.2) { this.stepAcc = 0; this.game.audio.step(this.pos, this.crouched ? 0.35 : sp > 5 ? 1.3 : 1); }
   }
 
   faceToward(x, z, dt, rate) {
@@ -341,13 +385,13 @@ export class Bot {
       if (this.fireT <= 0) {
         if (this.burst <= 0) {
           const d = this.def;
-          this.burst = d.auto ? 3 + Math.floor(Math.random() * (dist < 15 ? 8 : 4)) : 1;
+          this.burst = d.auto ? 3 + Math.floor(Math.random() * (dist < 15 ? 8 : 4)) : d.burst || 1;
           this.fireT = d.scope ? 1.1 + Math.random() * 1.2 : d.auto ? 0.15 + Math.random() * 0.45 : 0.25 + Math.random() * 0.5;
           if (d.model === 'pistol' || d.model === 'shotgun') this.fireT = 60 / d.rpm + Math.random() * 0.4;
         } else {
           this.shoot(aim, dist);
           this.burst--;
-          this.fireT = 60 / this.def.rpm;
+          this.fireT = 60 / (this.def.burstRpm || this.def.rpm);
         }
       }
     }

@@ -53,7 +53,9 @@
 <div id="menu" class="screen">
   <div class="panel">
     <h1>FRONTLINE</h1>
-    <p class="sub">Team Deathmatch &middot; Crossroads &middot; 6 v 6</p>
+    <p class="sub">Team Deathmatch &middot; <span id="mapName">Crossroads</span> &middot; 6 v 6</p>
+    <h3>Map</h3>
+    <div id="maps" class="cards maps"></div>
     <h3>Class</h3>
     <div id="classes" class="cards"></div>
     <div class="cols">
@@ -66,6 +68,7 @@
         <label>Sensitivity <input id="sens" type="range" min="0.2" max="3" step="0.05"><output id="sensOut"></output></label>
         <label>Field of view <input id="fov" type="range" min="65" max="105" step="1"><output id="fovOut"></output></label>
         <label>Volume <input id="vol" type="range" min="0" max="1" step="0.05"><output id="volOut"></output></label>
+        <div class="setrow"><span>Graphics</span><div id="quality" class="seg"></div></div>
       </div>
     </div>
     <div class="cols">
@@ -98,6 +101,8 @@
     <p class="note" id="codeNote">Friends open this page, pick Join and type the code.</p>
     <h3>Mode</h3>
     <div id="modes" class="seg"><button data-mode="versus">Versus</button><button data-mode="coop">Co-op vs bots</button></div>
+    <h3>Map</h3>
+    <div id="lobbyMaps" class="seg"></div>
     <h3>Players</h3>
     <ul id="members" class="members"></ul>
     <button id="startMp" class="primary">START MATCH</button>

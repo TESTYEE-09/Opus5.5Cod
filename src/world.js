@@ -1,7 +1,10 @@
 // The map: a 0.5 m collision grid where every cell holds solid vertical spans.
-// Bodies, bullets, grenades and bot navigation all read the same grid.
+// Bodies, bullets, grenades and bot navigation all read the same grid. Maps are
+// described in maps.js and loaded at runtime with loadMap().
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { surface, R, macroNoise, mulberry } from './textures.js';
+import { Kit, kitMaterials, buildProp } from './props.js';
 
 export const SIZE = 80;
 export const CELL = 0.5;
@@ -19,7 +22,7 @@ export const interest = [];
 function addBox(x0, y0, z0, x1, y1, z1, mat, collide = true) {
   if (x0 > x1) [x0, x1] = [x1, x0];
   if (z0 > z1) [z0, z1] = [z1, z0];
-  boxes.push({ x0, y0, z0, x1, y1, z1, mat });
+  boxes.push({ x0, y0, z0, x1, y1, z1, mat, collide });
   if (!collide) return;
   const i0 = Math.max(0, Math.round(x0 / CELL)), i1 = Math.min(N, Math.round(x1 / CELL));
   const k0 = Math.max(0, Math.round(z0 / CELL)), k1 = Math.min(N, Math.round(z1 / CELL));
@@ -319,213 +322,67 @@ export function randomWalkable(zMin = 1, zMax = SIZE - 1) {
   return { x: 40, z: 40 };
 }
 
-// ---------- layout ----------
-function building(B, x0, z0, x1, z1, h, open, mat) {
-  const t = 0.5;
-  const piece = (side, a, b, y0, y1) => {
-    if (b - a <= 0) return;
-    if (side === 's') B(a, y0, z0, b, y1, z0 + t, mat);
-    else if (side === 'n') B(a, y0, z1 - t, b, y1, z1, mat);
-    else if (side === 'w') B(x0, y0, a, x0 + t, y1, b, mat);
-    else B(x1 - t, y0, a, x1, y1, b, mat);
+// ---------- materials ----------
+// World-space variation (breaks up texture tiling) and a darkening band near the ground,
+// injected into the standard material so every surface keeps full PBR lighting.
+export function enhance(mat, { macro = 0.2, groundAO = 0 } = {}) {
+  const tex = macroNoise();
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uMacro = { value: tex };
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;')
+      .replace('#include <project_vertex>', `#include <project_vertex>
+        #ifdef USE_INSTANCING
+          vWPos = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;
+        #else
+          vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
+        #endif`);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;\nuniform sampler2D uMacro;')
+      .replace('#include <map_fragment>', `#include <map_fragment>
+        float mN = texture2D(uMacro, vWPos.xz * 0.012 + vec2(vWPos.y * 0.017)).r * 0.6 + texture2D(uMacro, vWPos.zy * 0.047 + vec2(vWPos.x * 0.013)).r * 0.4;
+        diffuseColor.rgb *= clamp(1.0 + (mN - 0.5) * ${(macro * 4).toFixed(3)}, 0.0, 2.0);
+        ${groundAO ? `diffuseColor.rgb *= mix(${(1 - groundAO).toFixed(3)}, 1.0, smoothstep(0.0, 1.4, vWPos.y));` : ''}`);
   };
-  for (const side of ['s', 'n', 'w', 'e']) {
-    const horiz = side === 's' || side === 'n';
-    let cur = horiz ? x0 : z0 + t;
-    const end = horiz ? x1 : z1 - t;
-    for (const o of open.filter(o => o.s === side).sort((p, q) => p.a - q.a)) {
-      piece(side, cur, o.a, 0, h);
-      if (o.t === 'door') piece(side, o.a, o.a + o.w, 2.5, h);
-      else { piece(side, o.a, o.a + o.w, 0, 1.0); piece(side, o.a, o.a + o.w, 2.2, h); }
-      cur = o.a + o.w;
-    }
-    piece(side, cur, end, 0, h);
-  }
-  B(x0, h, z0, x1, h + 0.3, z1, 'roof');
+  mat.customProgramCacheKey = () => `enh${macro}_${groundAO}`;
+  return mat;
 }
 
-const crate = (B, x, z, stack) => {
-  B(x, 0, z, x + 1.5, 1.3, z + 1.5, 'crate');
-  if (stack) B(x, 1.3, z, x + 1.5, 2.6, z + 1.5, 'crate');
+const MAT_DEFS = {
+  plaster: { recipe: 'plaster', ts: 3, normal: 1.2 },
+  plaster2: { recipe: 'plaster', args: [0xb8b0a2, 0x958c7c], ts: 3, normal: 1.2 },
+  concrete: { recipe: 'concrete', ts: 3, normal: 1.5 },
+  brick: { recipe: 'brick', ts: 2.2, normal: 2.5 },
+  wall: { recipe: 'blocks', ts: 4, normal: 2 },
+  crate: { recipe: 'wood', ts: 1.5, normal: 1.5, rough: 0.85 },
+  containerR: { recipe: 'corrugated', args: [0x7b3325], ts: 2.6, normal: 3, rough: 0.55, metal: 0.35 },
+  containerB: { recipe: 'corrugated', args: [0x2d5870], ts: 2.6, normal: 3, rough: 0.55, metal: 0.35 },
+  containerG: { recipe: 'corrugated', args: [0x3b6a3a], ts: 2.6, normal: 3, rough: 0.55, metal: 0.35 },
+  containerY: { recipe: 'corrugated', args: [0xb08a2a], ts: 2.6, normal: 3, rough: 0.55, metal: 0.35 },
+  containerW: { recipe: 'corrugated', args: [0x9a9ea0, 0.3], ts: 2.6, normal: 3, rough: 0.5, metal: 0.4 },
+  corrugated: { recipe: 'corrugated', args: [0x7e8488, 0.35, 0.05], ts: 3, normal: 3, rough: 0.5, metal: 0.45 },
+  sandbag: { recipe: 'sandbag', ts: 1.2, normal: 3 },
+  hesco: { recipe: 'hesco', ts: 1.4, normal: 2.5 },
+  roof: { recipe: 'roof', ts: 3, normal: 2 },
+  backdrop: { recipe: 'facade', ts: 6, normal: 1.5 },
+  trim: { recipe: 'concrete', args: [0xcfc8b8, 0xb3ab99], ts: 2, normal: 1 },
+  floor: { recipe: 'tile', ts: 2.5, normal: 1, rough: 0.7 },
+  planks: { recipe: 'planks', args: [0x6e5a44, true], ts: 2.5, normal: 2 },
+  deck: { recipe: 'planks', args: [0x7a6a52, false], ts: 2, normal: 2 },
+  metal: { recipe: 'diamond', ts: 1.5, normal: 2, rough: 0.45, metal: 0.6 },
+  snowcap: { recipe: 'snow', ts: 3, normal: 0.6, rough: 0.75 },
 };
-const car = (B, x0, z0, x1, z1) => {
-  B(x0, 0, z0, x1, 1.1, z1, 'car');
-  const ns = z1 - z0 > x1 - x0;
-  if (ns) B(x0 + 0.5, 1.1, z0 + 1, x1 - 0.5, 1.7, z1 - 1.5, 'car');
-  else B(x0 + 1, 1.1, z0 + 0.5, x1 - 1.5, 1.7, z1 - 0.5, 'car');
-};
 
-// South half; mirrored through the centre for the north half.
-function half(B, team) {
-  // Building A: two-room house
-  building(B, 6, 12, 22, 26, 4, [
-    { s: 's', a: 18, w: 2, t: 'door' }, { s: 's', a: 9, w: 2, t: 'win' },
-    { s: 'n', a: 16, w: 2, t: 'door' }, { s: 'n', a: 8, w: 2, t: 'win' },
-    { s: 'e', a: 17, w: 2, t: 'door' }, { s: 'e', a: 21.5, w: 2, t: 'win' },
-    { s: 'w', a: 15, w: 2, t: 'win' },
-  ], 'plaster');
-  B(14, 0, 12.5, 14.5, 4, 18, 'plaster'); B(14, 0, 20, 14.5, 4, 25.5, 'plaster'); B(14, 2.5, 18, 14.5, 4, 20, 'plaster');
-  crate(B, 7, 23, false); crate(B, 19.5, 13, true);
-
-  // Building B: warehouse
-  building(B, 52, 10, 72, 24, 5, [
-    { s: 'w', a: 15, w: 4, t: 'door' }, { s: 'n', a: 60, w: 2, t: 'door' }, { s: 's', a: 64, w: 2, t: 'door' },
-    { s: 'n', a: 54, w: 2, t: 'win' }, { s: 'n', a: 67, w: 2, t: 'win' }, { s: 'e', a: 16, w: 2, t: 'win' },
-  ], 'concrete');
-  B(55, 0, 13, 61, 2.6, 15.5, team ? 'containerB' : 'containerR');
-  crate(B, 64, 18, true); crate(B, 65.5, 18, false); crate(B, 68, 13, false);
-
-  // Tower house with stairs to a roof position
-  building(B, 26, 24, 32, 30, 3.6, [
-    { s: 'n', a: 28, w: 2, t: 'door' }, { s: 'w', a: 26, w: 2, t: 'win' }, { s: 's', a: 28, w: 2, t: 'win' },
-  ], 'brick');
-  for (let i = 0; i < 13; i++) B(32, 0, 23 + 0.5 * i, 33.5, 0.3 * (i + 1), 23.5 + 0.5 * i, 'concrete');
-  B(26, 3.9, 24, 32, 4.9, 24.5, 'brick'); B(26, 3.9, 29.5, 32, 4.9, 30, 'brick');
-  B(26, 3.9, 24.5, 26.5, 4.9, 29.5, 'brick'); B(31.5, 3.9, 24.5, 32, 4.9, 27, 'brick');
-
-  // Courtyard walls, containers, cover
-  B(2, 0, 30, 10, 2.2, 30.5, 'brick'); B(13, 0, 30, 22, 2.2, 30.5, 'brick');
-  B(1, 0, 33, 3.5, 2.6, 39, team ? 'containerR' : 'containerB');
-  B(33, 0, 20, 33.5, 1.0, 24, 'sandbag'); B(46.5, 0, 26, 47, 1.0, 30, 'sandbag');
-  B(33, 0, 37.5, 34, 1.0, 42.5, 'sandbag');
-  B(22, 0, 38.5, 31, 2.8, 41.5, 'bus');
-  B(22, 0, 32, 26, 1.1, 32.5, 'concrete');
-  B(36.5, 0, 30, 39, 1.0, 30.5, 'concrete');
-  B(16, 0, 9, 20, 1.0, 9.5, 'sandbag'); B(56, 0, 6, 60, 1.0, 6.5, 'sandbag');
-  car(B, 37, 16, 39, 20.5); car(B, 41, 27, 43, 31.5); car(B, 10, 41, 14.5, 43);
-  crate(B, 28, 12, true); crate(B, 29.5, 12, false); crate(B, 46, 12, false); crate(B, 46, 13.5, true);
-  crate(B, 24, 34, false); crate(B, 16, 34, false); crate(B, 62, 31, true); crate(B, 63.5, 31, false);
-  crate(B, 70, 33, false); crate(B, 49, 33, false); crate(B, 10, 5, false); crate(B, 66, 4, false); crate(B, 24, 8, false);
-}
-
-function layout() {
-  const P = addBox;
-  const M = (x0, y0, z0, x1, y1, z1, m, c) => addBox(SIZE - x0, y0, SIZE - z0, SIZE - x1, y1, SIZE - z1, m, c);
-  P(0, 0, 0, 80, 6, 1, 'wall'); P(0, 0, 79, 80, 6, 80, 'wall');
-  P(0, 0, 1, 1, 6, 79, 'wall'); P(79, 0, 1, 80, 6, 79, 'wall');
-  P(38, 0, 38, 42, 1.2, 42, 'concrete'); P(39.5, 1.2, 39.5, 40.5, 5.5, 40.5, 'concrete');
-  half(P, 0); half(M, 1);
-
-  const sp = [[8, 4], [18, 4], [28, 4], [40, 4], [50, 4], [62, 4], [72, 4], [31, 8], [48, 8], [4, 10], [76, 10]];
-  for (const [x, z] of sp) { spawns[0].push({ x, z, yaw: Math.PI }); spawns[1].push({ x: SIZE - x, z: SIZE - z, yaw: 0 }); }
-  const pts = [[40, 34], [18, 20], [62, 17], [29, 27], [35, 26], [20, 36], [6, 36], [50, 30], [40, 22], [60, 36], [28, 45], [12, 46], [8, 20], [70, 28]];
-  for (const [x, z] of pts) { interest.push({ x, z }); interest.push({ x: SIZE - x, z: SIZE - z }); }
-}
-
-// Backdrop skyline outside the wall, from a fixed seed so it never changes.
-function skyline() {
-  let s = 1337;
-  const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
-  for (let n = 0; n < 70; n++) {
-    const side = n % 4, along = -30 + rnd() * 140, dist = 6 + rnd() * 30;
-    const w = 6 + rnd() * 12, d = 6 + rnd() * 12, h = 8 + rnd() * 22;
-    let x, z;
-    if (side === 0) { x = along; z = -dist - d; }
-    else if (side === 1) { x = along; z = SIZE + dist; }
-    else if (side === 2) { x = -dist - w; z = along; }
-    else { x = SIZE + dist; z = along; }
-    addBox(x, 0, z, x + w, h, z + d, 'backdrop', false);
-  }
-}
-
-// ---------- textures & meshes ----------
-function tex(size, draw, repeat = 1) {
-  const c = document.createElement('canvas');
-  c.width = c.height = size;
-  const g = c.getContext('2d');
-  draw(g, size);
-  const t = new THREE.CanvasTexture(c);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 8;
-  t.repeat.set(repeat, repeat);
-  return t;
-}
-
-function speckle(g, s, base, n, spread, maxR = 2) {
-  g.fillStyle = base; g.fillRect(0, 0, s, s);
-  for (let i = 0; i < n; i++) {
-    const v = (Math.random() - 0.5) * spread;
-    g.fillStyle = v > 0 ? `rgba(255,255,255,${v})` : `rgba(0,0,0,${-v})`;
-    const r = Math.random() * maxR + 0.5;
-    g.fillRect(Math.random() * s, Math.random() * s, r, r);
-  }
-}
-
-function makeMaterials() {
-  const std = (map, ts, extra = {}) => {
-    const m = new THREE.MeshStandardMaterial({ map, roughness: 0.92, metalness: 0, ...extra });
-    m.userData.ts = ts;
-    return m;
-  };
-  const plaster = tex(256, (g, s) => {
-    speckle(g, s, '#c7b28c', 5000, 0.12, 3);
-    for (let i = 0; i < 14; i++) { g.fillStyle = `rgba(90,70,40,${Math.random() * 0.08})`; g.beginPath(); g.arc(Math.random() * s, Math.random() * s, 10 + Math.random() * 40, 0, 7); g.fill(); }
+function makeMaterial(name, over = {}) {
+  const d = { ...MAT_DEFS[name], ...over };
+  const args = d.args || [];
+  const tex = surface(`${d.recipe}:${JSON.stringify(args)}`, R[d.recipe](...args), { seed: d.seed || (name.length * 131 + 7), normal: d.normal ?? 1.5 });
+  const m = new THREE.MeshStandardMaterial({
+    map: tex.map, normalMap: tex.normalMap, roughness: d.rough ?? 0.9, metalness: d.metal ?? 0,
   });
-  const concrete = tex(256, (g, s) => {
-    speckle(g, s, '#9e9a90', 6000, 0.14, 2);
-    g.strokeStyle = 'rgba(0,0,0,0.18)'; g.lineWidth = 2;
-    for (let y = 0; y <= s; y += s / 2) { g.beginPath(); g.moveTo(0, y); g.lineTo(s, y); g.stroke(); }
-    g.beginPath(); g.moveTo(s / 2, 0); g.lineTo(s / 2, s); g.stroke();
-  });
-  const brick = tex(256, (g, s) => {
-    g.fillStyle = '#b5a48a'; g.fillRect(0, 0, s, s);
-    const rows = 8, bw = s / 4;
-    for (let r = 0; r < rows; r++) for (let c = -1; c < 5; c++) {
-      const x = c * bw + (r % 2) * bw / 2, y = r * s / rows;
-      const l = 38 + Math.random() * 14;
-      g.fillStyle = `hsl(${14 + Math.random() * 10},42%,${l}%)`;
-      g.fillRect(x + 2, y + 2, bw - 4, s / rows - 4);
-    }
-  });
-  const wall = tex(256, (g, s) => {
-    speckle(g, s, '#8d867a', 5000, 0.12, 2);
-    g.strokeStyle = 'rgba(40,35,30,0.35)'; g.lineWidth = 3;
-    for (let y = 0; y <= s; y += s / 4) { g.beginPath(); g.moveTo(0, y); g.lineTo(s, y); g.stroke(); }
-    for (let r = 0; r < 4; r++) for (let x = (r % 2) * s / 4; x < s; x += s / 2) { g.beginPath(); g.moveTo(x, r * s / 4); g.lineTo(x, (r + 1) * s / 4); g.stroke(); }
-  });
-  const crateT = tex(256, (g, s) => {
-    g.fillStyle = '#8a6a3c'; g.fillRect(0, 0, s, s);
-    for (let i = 0; i < 8; i++) { g.fillStyle = `rgba(0,0,0,${0.05 + Math.random() * 0.1})`; g.fillRect(0, i * s / 8, s, 2); }
-    g.fillStyle = '#6a4f2a';
-    g.fillRect(0, 0, s, 22); g.fillRect(0, s - 22, s, 22); g.fillRect(0, 0, 22, s); g.fillRect(s - 22, 0, 22, s);
-    g.save(); g.translate(s / 2, s / 2); g.rotate(Math.PI / 4); g.fillRect(-s * 0.7, -11, s * 1.4, 22); g.restore();
-  });
-  const container = (col) => tex(256, (g, s) => {
-    g.fillStyle = col; g.fillRect(0, 0, s, s);
-    for (let x = 0; x < s; x += 16) { g.fillStyle = 'rgba(0,0,0,0.22)'; g.fillRect(x, 0, 5, s); g.fillStyle = 'rgba(255,255,255,0.07)'; g.fillRect(x + 8, 0, 3, s); }
-    for (let i = 0; i < 40; i++) { g.fillStyle = `rgba(110,60,20,${Math.random() * 0.25})`; g.fillRect(Math.random() * s, Math.random() * s, 4 + Math.random() * 20, 3 + Math.random() * 12); }
-  });
-  const sandbag = tex(128, (g, s) => {
-    g.fillStyle = '#7d6d4c'; g.fillRect(0, 0, s, s);
-    for (let r = 0; r < 4; r++) for (let c = -1; c < 3; c++) {
-      const x = c * s / 2 + (r % 2) * s / 4, y = r * s / 4;
-      g.fillStyle = `hsl(42,${24 + Math.random() * 8}%,${44 + Math.random() * 6}%)`;
-      g.beginPath(); g.ellipse(x + s / 4, y + s / 8, s / 4 - 2, s / 8 - 2, 0, 0, 7); g.fill();
-    }
-  });
-  const metal = tex(128, (g, s) => {
-    speckle(g, s, '#6a625a', 1500, 0.2, 3);
-    for (let i = 0; i < 30; i++) { g.fillStyle = `rgba(120,55,20,${Math.random() * 0.35})`; g.beginPath(); g.arc(Math.random() * s, Math.random() * s, 2 + Math.random() * 10, 0, 7); g.fill(); }
-  });
-  const bus = tex(256, (g, s) => {
-    speckle(g, s, '#8a6a30', 2000, 0.2, 3);
-    g.fillStyle = '#1d1c1a';
-    for (let x = 12; x < s; x += 64) g.fillRect(x, s * 0.12, 48, s * 0.3);
-    for (let i = 0; i < 50; i++) { g.fillStyle = `rgba(20,15,10,${Math.random() * 0.4})`; g.beginPath(); g.arc(Math.random() * s, Math.random() * s, 3 + Math.random() * 18, 0, 7); g.fill(); }
-  });
-  const roof = tex(128, (g, s) => speckle(g, s, '#5a4f45', 1500, 0.2, 2));
-  const backdrop = tex(256, (g, s) => {
-    g.fillStyle = '#a39a8a'; g.fillRect(0, 0, s, s);
-    g.fillStyle = '#4a4540';
-    for (let y = 16; y < s; y += 64) for (let x = 16; x < s; x += 64) g.fillRect(x, y, 30, 36);
-  });
-  return {
-    plaster: std(plaster, 3), concrete: std(concrete, 3), brick: std(brick, 2.5), wall: std(wall, 4),
-    crate: std(crateT, 1.5), containerR: std(container('#7b3325'), 3), containerB: std(container('#2d5870'), 3),
-    sandbag: std(sandbag, 1.2), car: std(metal, 2, { roughness: 0.75, metalness: 0.1 }), bus: std(bus, 3),
-    roof: std(roof, 3), backdrop: std(backdrop, 6, { fog: true }),
-  };
+  m.userData.ts = d.ts;
+  const low = name === 'backdrop' || name === 'snowcap' || name === 'roof';
+  return enhance(m, { macro: 0.18, groundAO: low ? 0 : 0.28 });
 }
 
 function boxGeo(b, ts) {
@@ -541,44 +398,70 @@ function boxGeo(b, ts) {
   return g;
 }
 
-function buildSky(scene) {
-  const geo = new THREE.SphereGeometry(450, 32, 16);
+// Soft dark strips on the ground around every footprint: cheap contact shadow / ambient occlusion.
+function contactShadows(list) {
+  const pos = [], al = [];
+  const Y = 0.02;
+  const quad = (a, b, c, d, aa, ab, ac, ad) => {
+    pos.push(...a, ...b, ...c, ...a, ...c, ...d);
+    al.push(aa, ab, ac, aa, ac, ad);
+  };
+  for (const b of list) {
+    const h = b.y1 - b.y0, m = h > 1.5 ? 0.85 : 0.45, A = h > 1.5 ? 0.5 : 0.38;
+    const { x0, z0, x1, z1 } = b;
+    const P = (x, z) => [x, Y, z];
+    quad(P(x0, z0), P(x1, z0), P(x1, z0 - m), P(x0, z0 - m), A, A, 0, 0);
+    quad(P(x1, z1), P(x0, z1), P(x0, z1 + m), P(x1, z1 + m), A, A, 0, 0);
+    quad(P(x0, z1), P(x0, z0), P(x0 - m, z0), P(x0 - m, z1), A, A, 0, 0);
+    quad(P(x1, z0), P(x1, z1), P(x1 + m, z1), P(x1 + m, z0), A, A, 0, 0);
+    for (const [cx, cz, sx, sz] of [[x0, z0, -1, -1], [x1, z0, 1, -1], [x1, z1, 1, 1], [x0, z1, -1, 1]]) {
+      quad(P(cx, cz), P(cx + sx * m, cz), P(cx + sx * m, cz + sz * m), P(cx, cz + sz * m), A, 0, 0, 0);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('alpha', new THREE.Float32BufferAttribute(al, 1));
   const mat = new THREE.ShaderMaterial({
-    side: THREE.BackSide, depthWrite: false, fog: false,
-    uniforms: { sun: { value: new THREE.Vector3(0.45, 0.55, 0.7).normalize() } },
-    vertexShader: 'varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
-    fragmentShader: `varying vec3 vDir; uniform vec3 sun;
-      void main(){
-        float h = clamp(vDir.y, -0.1, 1.0);
-        vec3 top = vec3(0.36,0.52,0.72), hor = vec3(0.86,0.8,0.68);
-        vec3 c = mix(hor, top, pow(max(h,0.0), 0.55));
-        float s = max(dot(normalize(vDir), sun), 0.0);
-        c += vec3(1.0,0.85,0.6) * (pow(s, 4000.0) * 1.6 + pow(s, 12.0) * 0.18);
-        gl_FragColor = vec4(c, 1.0);
-      }`,
+    transparent: true, depthWrite: false, side: THREE.DoubleSide,
+    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+    vertexShader: 'attribute float alpha; varying float vA; void main(){ vA = alpha; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: 'varying float vA; void main(){ gl_FragColor = vec4(0.0, 0.0, 0.0, vA * vA * 1.4); }',
   });
-  const sky = new THREE.Mesh(geo, mat);
-  sky.position.set(SIZE / 2, 0, SIZE / 2);
-  sky.renderOrder = -1;
-  scene.add(sky);
+  const mesh = new THREE.Mesh(g, mat);
+  mesh.renderOrder = 1;
+  return mesh;
 }
+
+const poolTex = (() => {
+  let t = null;
+  return () => {
+    if (t) return t;
+    const c = document.createElement('canvas'); c.width = c.height = 128;
+    const g = c.getContext('2d'), grd = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+    grd.addColorStop(0, 'rgba(255,255,255,0.9)'); grd.addColorStop(0.4, 'rgba(255,255,255,0.35)'); grd.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = grd; g.fillRect(0, 0, 128, 128);
+    t = new THREE.CanvasTexture(c);
+    return t;
+  };
+})();
 
 let minimapCanvas = null;
 export function minimapImage() { return minimapCanvas; }
 
-function buildMinimap() {
+function buildMinimap(def) {
   const c = document.createElement('canvas');
   c.width = c.height = N;
   const g = c.getContext('2d');
   const img = g.createImageData(N, N);
+  const mm = def.minimap || {};
+  const roadCells = (i, k) => (def.roads || []).some(r => i * CELL >= r.x0 && i * CELL < r.x1 && k * CELL >= r.z0 && k * CELL < r.z1);
   for (let k = 0; k < N; k++) for (let i = 0; i < N; i++) {
     const sp = cells[k * N + i];
-    const road = (i >= 72 && i < 88) || (k >= 72 && k < 88);
-    let col = road ? [70, 70, 68] : [96, 86, 70];
+    let col = roadCells(i, k) ? (mm.road || [70, 70, 68]) : (mm.ground || [96, 86, 70]);
     if (sp) {
       const low = sp.find(s => s[0] < 1.9 && s[1] > 0.05);
-      if (low) col = low[1] > 2 ? [214, 204, 180] : [160, 146, 118];
-      else col = [70, 62, 52];
+      if (low) col = low[1] > 2 ? (mm.high || [214, 204, 180]) : (mm.low || [160, 146, 118]);
+      else col = mm.over || [70, 62, 52];
     }
     const o = (k * N + i) * 4;
     img.data[o] = col[0]; img.data[o + 1] = col[1]; img.data[o + 2] = col[2]; img.data[o + 3] = 255;
@@ -587,45 +470,177 @@ function buildMinimap() {
   minimapCanvas = c;
 }
 
-export function buildWorld(scene) {
-  layout();
-  skyline();
+// Which surface a bullet hit, for impact particles.
+export function materialAt(p, n) {
+  const x = p.x - n.x * 0.05, y = p.y - n.y * 0.05, z = p.z - n.z * 0.05;
+  for (const b of boxes) if (b.collide !== false && x >= b.x0 - 0.01 && x <= b.x1 + 0.01 && y >= b.y0 - 0.01 && y <= b.y1 + 0.01 && z >= b.z0 - 0.01 && z <= b.z1 + 0.01) return b.mat;
+  return y < 0.05 ? 'ground' : null;
+}
+
+// ---------- map loading ----------
+export const props = [];
+let group = null, waterMat = null, materials = [];
+export let mapDef = null;
+
+function makeApi() {
+  return {
+    box: (x0, y0, z0, x1, y1, z1, mat, collide = true) => addBox(x0, y0, z0, x1, y1, z1, mat, collide),
+    prop: (type, x, z, o = {}) => props.push({ type, x, z, ...o }),
+    spawn: (team, x, z, yaw) => spawns[team].push({ x, z, yaw }),
+    interest: (x, z) => interest.push({ x, z }),
+  };
+}
+
+export function mirrorApi(api) {
+  return {
+    box: (x0, y0, z0, x1, y1, z1, m, c) => api.box(SIZE - x0, y0, SIZE - z0, SIZE - x1, y1, SIZE - z1, m, c),
+    prop: (type, x, z, o = {}) => api.prop(type, SIZE - x, SIZE - z, { ...o, rot: (o.rot || 0) + Math.PI }),
+    spawn: (team, x, z, yaw) => api.spawn(1 - team, SIZE - x, SIZE - z, yaw + Math.PI),
+    interest: (x, z) => api.interest(SIZE - x, SIZE - z),
+  };
+}
+
+export function loadMap(scene, def) {
+  if (group) {
+    scene.remove(group);
+    group.traverse(o => { if (o.geometry) o.geometry.dispose(); });
+    for (const m of materials) m.dispose();
+  }
+  cells.fill(null); boxes.length = 0; props.length = 0;
+  spawns[0].length = 0; spawns[1].length = 0; interest.length = 0;
+  mapDef = def;
+
+  const api = makeApi();
+  def.layout(api, mirrorApi(api));
+  const per = def.perimeter || {};
+  const pm = per.mat || 'wall', ph = per.h || 6;
+  addBox(0, 0, 0, 80, ph, 1, pm); addBox(0, 0, 79, 80, ph, 80, pm);
+  if (per.quay) {
+    addBox(0, 0, 1, 1, 1.1, 79, 'concrete'); addBox(79, 0, 1, 80, 1.1, 79, 'concrete');
+    addBox(0, 1.1, 1, 1, 6, 79, 'invis'); addBox(79, 1.1, 1, 80, 6, 79, 'invis');
+  } else { addBox(0, 0, 1, 1, ph, 79, pm); addBox(79, 0, 1, 80, ph, 79, pm); }
+  if (ph < 6) { addBox(0, ph, 0, 80, 6, 1, 'invis'); addBox(0, ph, 79, 80, 6, 80, 'invis'); if (!per.quay) { addBox(0, ph, 1, 1, 6, 79, 'invis'); addBox(79, ph, 1, 80, 6, 79, 'invis'); } }
+  if (def.backdrop) def.backdrop(api, mulberry(def.seed || 7));
+
+  // snow settles on every exposed top
+  if (def.snowCaps) {
+    for (const b of boxes.slice()) {
+      if (b.mat === 'invis' || b.mat === 'backdrop' || b.y1 < 0.3) continue;
+      boxes.push({ x0: b.x0 - 0.02, y0: b.y1, z0: b.z0 - 0.02, x1: b.x1 + 0.02, y1: b.y1 + 0.07, z1: b.z1 + 0.02, mat: 'snowcap' });
+    }
+  }
   mergeSpans();
   computeNav();
-  buildMinimap();
+  buildMinimap(def);
 
-  const mats = makeMaterials();
+  group = new THREE.Group();
+  materials = [];
+  const mats = {};
+  const matFor = (name) => {
+    if (!mats[name]) { mats[name] = makeMaterial(name, def.mats?.[name]); materials.push(mats[name]); }
+    return mats[name];
+  };
   const byMat = {};
-  for (const b of boxes) (byMat[b.mat] ||= []).push(boxGeo(b, mats[b.mat].userData.ts));
+  for (const b of boxes) {
+    if (b.mat === 'invis') continue;
+    (byMat[b.mat] ||= []).push(boxGeo(b, matFor(b.mat).userData.ts));
+  }
   for (const [m, geos] of Object.entries(byMat)) {
     const mesh = new THREE.Mesh(mergeGeometries(geos), mats[m]);
     mesh.castShadow = m !== 'backdrop';
     mesh.receiveShadow = true;
-    scene.add(mesh);
+    group.add(mesh);
+    for (const g of geos) g.dispose();
   }
+  group.add(contactShadows(boxes.filter(b => b.y0 <= 0.01 && b.collide !== false && b.mat !== 'backdrop' && b.x1 - b.x0 < 60 && b.z1 - b.z0 < 60)));
 
-  const dirt = tex(256, (g, s) => {
-    speckle(g, s, '#9c8665', 9000, 0.16, 3);
-    for (let i = 0; i < 20; i++) { g.fillStyle = `rgba(70,55,35,${Math.random() * 0.1})`; g.beginPath(); g.arc(Math.random() * s, Math.random() * s, 10 + Math.random() * 30, 0, 7); g.fill(); }
-  }, 30);
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(240, 240), new THREE.MeshStandardMaterial({ map: dirt, roughness: 1 }));
+  // props
+  const kit = new Kit();
+  const kmats = kitMaterials(enhance);
+  materials.push(...Object.values(kmats));
+  props.forEach((p, i) => buildProp(kit, p.type, p, (def.seed || 7) * 1000 + i));
+  for (const m of kit.build(kmats)) group.add(m);
+
+  // ground
+  const gd = def.ground || { recipe: 'dirt', ts: 8 };
+  const gt = surface(`${gd.recipe}:${JSON.stringify(gd.args || [])}`, R[gd.recipe](...(gd.args || [])), { size: 1024, seed: 5, normal: gd.normal ?? 1.5 });
+  const gw = gd.w || 260, gl = gd.l || 260;
+  const groundGeo = new THREE.PlaneGeometry(gw, gl);
+  groundGeo.attributes.uv.array.forEach((v, i, a) => { a[i] = v * (i % 2 ? gl : gw) / gd.ts; });
+  const groundMat = enhance(new THREE.MeshStandardMaterial({ map: gt.map, normalMap: gt.normalMap, roughness: gd.rough ?? 0.97 }), { macro: 0.3 });
+  materials.push(groundMat);
+  const ground = new THREE.Mesh(groundGeo, groundMat);
   ground.rotation.x = -Math.PI / 2;
   ground.position.set(SIZE / 2, 0, SIZE / 2);
   ground.receiveShadow = true;
-  scene.add(ground);
+  group.add(ground);
 
-  const asphalt = () => tex(256, (g, s) => {
-    speckle(g, s, '#4b4946', 8000, 0.18, 2);
-    g.fillStyle = '#c9b46a';
-    for (let y = 0; y < s; y += 64) g.fillRect(s / 2 - 3, y + 8, 6, 36);
-    g.fillStyle = 'rgba(220,220,210,0.5)';
-    g.fillRect(10, 0, 4, s); g.fillRect(s - 14, 0, 4, s);
-  });
-  const roadMat = (rep) => { const t = asphalt(); t.repeat.set(1, rep); return new THREE.MeshStandardMaterial({ map: t, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -1 }); };
-  const ns = new THREE.Mesh(new THREE.PlaneGeometry(8, 78), roadMat(10));
-  ns.rotation.x = -Math.PI / 2; ns.position.set(40, 0.01, 40); ns.receiveShadow = true; scene.add(ns);
-  const ew = new THREE.Mesh(new THREE.PlaneGeometry(8, 78), roadMat(10));
-  ew.rotation.set(-Math.PI / 2, 0, Math.PI / 2); ew.position.set(40, 0.012, 40); ew.receiveShadow = true; scene.add(ew);
+  // roads: u across, v along the road
+  let ry = 0.008;
+  for (const r of def.roads || []) {
+    const along = r.z1 - r.z0 >= r.x1 - r.x0;
+    const w = along ? r.x1 - r.x0 : r.z1 - r.z0, l = along ? r.z1 - r.z0 : r.x1 - r.x0;
+    const recipe = r.kind || 'road';
+    const t = surface(`${recipe}:[]`, R[recipe](), { seed: 9, normal: 1.2 });
+    const g = new THREE.PlaneGeometry(w, l);
+    const uv = g.attributes.uv;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i), uv.getY(i) * l / w);
+    const m = enhance(new THREE.MeshStandardMaterial({ map: t.map, normalMap: t.normalMap, roughness: 0.92, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }), { macro: 0.25 });
+    materials.push(m);
+    const mesh = new THREE.Mesh(g, m);
+    mesh.rotation.set(-Math.PI / 2, 0, along ? 0 : Math.PI / 2);
+    mesh.position.set((r.x0 + r.x1) / 2, ry, (r.z0 + r.z1) / 2);
+    ry += 0.002;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  }
+  for (const r of def.patches || []) {
+    const t = surface('asphalt:[]', R.asphalt(), { seed: 9, normal: 1.2 });
+    const m = enhance(new THREE.MeshStandardMaterial({ map: t.map, normalMap: t.normalMap, roughness: 0.92, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }), { macro: 0.25 });
+    materials.push(m);
+    const g = new THREE.PlaneGeometry(r.x1 - r.x0, r.z1 - r.z0);
+    g.attributes.uv.array.forEach((v, i, a) => { a[i] = v * (i % 2 ? r.z1 - r.z0 : r.x1 - r.x0) / 8; });
+    const mesh = new THREE.Mesh(g, m);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.set((r.x0 + r.x1) / 2, ry + 0.002, (r.z0 + r.z1) / 2);
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  }
 
-  buildSky(scene);
+  // lamp light pools on the ground (only drawn when the map is dark enough to need them)
+  if (def.look?.pools) {
+    const pm2 = new THREE.MeshBasicMaterial({ map: poolTex(), color: def.look.poolColor || 0xffb060, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3, opacity: def.look.pools });
+    materials.push(pm2);
+    for (const p of props) {
+      if (p.type !== 'lamp' && p.type !== 'flood') continue;
+      const off = p.type === 'lamp' ? 1.5 : 3;
+      const x = p.x - Math.sin(p.rot || 0) * off, z = p.z - Math.cos(p.rot || 0) * off;
+      const q = new THREE.Mesh(new THREE.PlaneGeometry(9, 9), pm2);
+      q.rotation.x = -Math.PI / 2; q.position.set(x, 0.03, z);
+      group.add(q);
+    }
+  }
+
+  // water
+  waterMat = null;
+  if (def.water) {
+    const wt = surface('waves:[]', R.waves(), { size: 512, seed: 3, normal: 3 });
+    wt.normalMap.repeat.set(40, 40);
+    waterMat = new THREE.MeshStandardMaterial({ color: def.water.color || 0x1a3a44, roughness: 0.08, metalness: 0.1, normalMap: wt.normalMap, normalScale: new THREE.Vector2(0.6, 0.6), envMapIntensity: 1.3 });
+    materials.push(waterMat);
+    const w = new THREE.Mesh(new THREE.PlaneGeometry(700, 700), waterMat);
+    w.rotation.x = -Math.PI / 2;
+    w.position.set(SIZE / 2, def.water.y ?? -1.2, SIZE / 2);
+    w.receiveShadow = true;
+    group.add(w);
+  }
+  scene.add(group);
+  return def;
+}
+
+export function updateWorld(dt) {
+  if (waterMat) {
+    const o = waterMat.normalMap.offset;
+    o.x = (o.x + dt * 0.004) % 1; o.y = (o.y + dt * 0.0025) % 1;
+  }
 }

@@ -190,3 +190,14 @@ input.code-in { text-transform: uppercase; letter-spacing: 4px; text-align: cent
 #modes button:disabled { opacity: 0.6; cursor: default; }
 button.wide { width: 100%; margin-top: 10px; }
 button:disabled { opacity: 0.5; cursor: default; }
+
+.setrow { display: grid; grid-template-columns: 110px 1fr; align-items: center; gap: 8px; font-size: 16px; margin: 8px 0 0; }
+.setrow .seg button { padding: 6px 4px; font-size: 14px; letter-spacing: 1px; }
+.cards.maps { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+.cards.maps .card { position: relative; min-height: 78px; overflow: hidden; }
+.cards.maps .card::before { content: ''; position: absolute; inset: 0; opacity: 0.35; z-index: 0; }
+.cards.maps .card > * { position: relative; z-index: 1; }
+.map-crossroads::before { background: linear-gradient(135deg, #b08a52, #5a7fae); }
+.map-harbor::before { background: linear-gradient(135deg, #f2a066, #2c3c70); }
+.map-outpost::before { background: linear-gradient(135deg, #dfe6ee, #5a6878); }
+#lobbyMaps button { font-size: 15px; }

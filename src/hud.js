@@ -140,7 +140,7 @@ export class Hud {
 
     if (pl.alive) {
       const w = ars.w, d = w.def;
-      $('wname').textContent = d.name + (d.auto ? '' : d.action ? '' : ' · SEMI');
+      $('wname').textContent = d.name + (d.auto || d.action ? '' : d.burst ? ' · BURST' : ' · SEMI');
       $('mag').textContent = w.mag;
       $('mag').className = w.mag <= Math.ceil(d.mag * 0.25) ? 'low' : '';
       $('reserve').textContent = w.reserve;

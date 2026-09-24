@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { raycastWorld, lineOfSight, pointSolid, groundAt, spawns, SIZE, GRAVITY } from './world.js';
+import { raycastWorld, lineOfSight, pointSolid, groundAt, spawns, SIZE, GRAVITY, materialAt } from './world.js';
 import { Effects } from './effects.js';
 import { Arsenal, CLASSES, falloff, FUSE } from './weapons.js';
 import { Player } from './player.js';
@@ -70,8 +70,8 @@ const v3 = (a) => new THREE.Vector3(a[0], a[1], a[2]);
 // Game runs in one of three roles: 'solo', 'host' (authoritative, also sends snapshots)
 // or 'client' (moves its own soldier, draws the rest from the host's snapshots).
 export class Game {
-  constructor({ renderer, scene, camera, wscene, audio, hud }) {
-    Object.assign(this, { renderer, scene, camera, wscene, audio, hud });
+  constructor({ renderer, scene, camera, wscene, audio, hud, loadMap }) {
+    Object.assign(this, { renderer, scene, camera, wscene, audio, hud, loadMap });
     this.effects = new Effects(scene);
     this.arsenal = new Arsenal(this, wscene);
     this.player = new Player(this);
@@ -83,13 +83,13 @@ export class Game {
     this.net = null;
     this.role = 'solo';
     this.state = 'menu';
-    this.time = 0; this.shake = 0;
-    this.settings = { sens: 1, fov: 80, difficulty: 'regular', cls: 'assault', scoreLimit: 100, timeLimit: 600 };
+    this.time = 0; this.shake = 0; this.flashT = 0;
+    this.settings = { sens: 1, fov: 80, difficulty: 'regular', cls: 'assault', map: 'crossroads', scoreLimit: 100, timeLimit: 600 };
     this.diff = DIFFICULTY.regular;
     this.nadeGeo = new THREE.SphereGeometry(0.06, 10, 8);
-    this.nadeMat = new THREE.MeshStandardMaterial({ color: 0x3d4a2e, roughness: 0.7 });
+    this.nadeMat = new THREE.MeshStandardMaterial({ color: 0x3d4a2e, roughness: 0.6, metalness: 0.2 });
     this.pickGeo = new THREE.BoxGeometry(0.45, 0.25, 0.3);
-    this.pickMat = new THREE.MeshStandardMaterial({ color: 0x4f5a3a, emissive: 0x2a3a10, roughness: 0.8 });
+    this.pickMat = new THREE.MeshStandardMaterial({ color: 0x4f5a3a, emissive: 0x3a5a10, emissiveIntensity: 0.6, roughness: 0.6, metalness: 0.2 });
   }
 
   get authority() { return this.role !== 'client'; }
@@ -113,6 +113,7 @@ export class Game {
     this.diff = DIFFICULTY[settings.difficulty] || DIFFICULTY.regular;
     this.role = this.net?.active ? (this.net.isHost ? 'host' : 'client') : 'solo';
     this.clear();
+    this.loadMap?.(settings.map);
     roster ||= [{ id: 0, name: settings.name || 'You', team: 0, me: true }];
 
     const pl = this.player, me = roster.find(r => r.me);
@@ -161,7 +162,7 @@ export class Game {
     const roster = (msg.roster || []).map(r => ({ ...r, me: r.id === myId }));
     if (!roster.some(r => r.me)) return;
     const rules = msg.rules || {};
-    this.startMatch({ ...this.settings, scoreLimit: rules.scoreLimit, timeLimit: rules.timeLimit, timeLeft: rules.timeLeft, score: msg.score }, roster);
+    this.startMatch({ ...this.settings, map: typeof rules.map === 'string' ? rules.map : 'crossroads', scoreLimit: rules.scoreLimit, timeLimit: rules.timeLimit, timeLeft: rules.timeLeft, score: msg.score }, roster);
   }
 
   rebuild() {
@@ -405,10 +406,10 @@ export class Game {
     const shooter = this.byId.get(ev.id);
     if (shooter) shooter.firedT = this.time;
     this.effects.tracer(m, end, ev.c || 0xffe0a0);
-    if (ev.i === 1 && Array.isArray(ev.n)) { this.effects.impact(end, v3(ev.n)); this.audio.impact(end); }
-    else if (ev.i === 2) this.effects.blood(end, end.clone().sub(m).normalize());
+    if (ev.i === 1 && Array.isArray(ev.n)) { const n = v3(ev.n); this.effects.impact(end, n, materialAt(end, n)); this.audio.impact(end); }
+    else if (ev.i === 2) this.bleed(end, end.clone().sub(m).normalize());
     if (!shooter?.isVehicle && ev.key !== 'heli') this.effects.flash(m, 0.5);
-    this.audio.shot(ev.key === 'heli' ? 'lmg' : ev.key, m, ev.key === 'heli' ? 0.75 : 1);
+    this.audio.shot(String(ev.key || 'ar'), m);
     const dir = end.clone().sub(m);
     const len = dir.length();
     if (len > 0.01) this.whizz(m, dir.divideScalar(len), { t: len, entity: null });
@@ -441,9 +442,9 @@ export class Game {
         const cur = hits.get(h.entity) || { dmg: 0, head: false };
         cur.dmg += dmg; cur.head ||= h.zone === 'head';
         hits.set(h.entity, cur);
-        if (h.entity.isVehicle) this.effects.impact(end, _d.clone().negate());
-        else { this.effects.blood(end, _d); kind = 2; }
-      } else if (h.world) { this.effects.impact(end, h.world.normal); this.audio.impact(end); kind = 1; normal = h.world.normal; }
+        if (h.entity.isVehicle) this.effects.impact(end, _d.clone().negate(), 'metal');
+        else { this.bleed(end, _d); kind = 2; }
+      } else if (h.world) { this.effects.impact(end, h.world.normal, materialAt(end, h.world.normal)); this.audio.impact(end); kind = 1; normal = h.world.normal; }
       if (i === 0 || i % 3 === 0) {
         this.effects.tracer(muzzle, end);
         sent.push([...arr(end), kind, ...(normal ? arr(normal) : [])]);
@@ -455,7 +456,7 @@ export class Game {
       this.net.send({ t: 'fire', m: arr(muzzle), e: sent, key: def.model });
     } else for (const [e, r] of hits) this.damage(e, r.dmg, pl, def.name, r.head, pl.pos);
     const fx = this.effects;
-    fx.muzzleLight.position.copy(muzzle); fx.muzzleLight.intensity = 5; fx.muzzleT = 0.05;
+    fx.muzzleLight.position.copy(muzzle); fx.muzzleLight.intensity = 6; fx.muzzleT = 0.05;
     this.audio.shot(def.model);
     pl.firedT = this.time;
     if (this.authority) this.noise(pl, pl.pos, 45);
@@ -469,8 +470,8 @@ export class Game {
     if (h.entity) {
       const dmg = h.entity.isVehicle ? 20 : falloff(def, h.t) * zoneMul(def, h.zone);
       this.damage(h.entity, dmg, bot, def.name, h.zone === 'head', bot.pos);
-      if (!h.entity.isVehicle && !h.entity.isPlayer) { this.effects.blood(end, dir); kind = 2; }
-    } else if (h.world && Math.random() < 0.6) { this.effects.impact(end, h.world.normal); this.audio.impact(end); kind = 1; normal = h.world.normal; }
+      if (!h.entity.isVehicle && !h.entity.isPlayer) { this.bleed(end, dir); kind = 2; }
+    } else if (h.world && Math.random() < 0.6) { this.effects.impact(end, h.world.normal, materialAt(end, h.world.normal)); this.audio.impact(end); kind = 1; normal = h.world.normal; }
     const color = bot.team ? 0xffa070 : 0xffe0a0;
     if (tracer) { this.effects.tracer(muzzle, end, color); this.emitShot(bot, muzzle, end, kind, normal, def.model, color); }
     this.whizz(o, dir, h);
@@ -482,12 +483,19 @@ export class Game {
     let kind = 0, normal = null;
     if (h.entity) {
       this.damage(h.entity, h.entity.isVehicle ? 40 : 34, v.owner, 'Chopper', false, v.pos, { streak: true });
-      if (!h.entity.isVehicle) { this.effects.blood(end, dir); kind = 2; }
-    } else if (h.world) { this.effects.impact(end, h.world.normal); kind = 1; normal = h.world.normal; }
+      if (!h.entity.isVehicle) { this.bleed(end, dir); kind = 2; }
+    } else if (h.world) { this.effects.impact(end, h.world.normal, materialAt(end, h.world.normal)); kind = 1; normal = h.world.normal; }
     this.effects.tracer(o, end, 0xff9050);
-    this.audio.shot('lmg', v.pos, 0.75);
+    this.audio.shot('heli', v.pos);
     this.emitShot(v, o, end, kind, normal, 'heli', 0xff9050);
     this.whizz(o, dir, h);
+  }
+
+  // blood mist, plus a splat on whatever is just behind the target
+  bleed(p, dir) {
+    this.effects.blood(p, dir);
+    const h = raycastWorld(p, dir, 2.5);
+    if (h) this.effects.bloodSplat(_e.copy(p).addScaledVector(dir, h.t), h.normal);
   }
 
   whizz(o, dir, h) {
@@ -517,7 +525,7 @@ export class Game {
     }
     if (!best) return;
     this.audio.stab();
-    this.effects.blood(best.aimPoint(_c, false), _fwd);
+    this.bleed(best.aimPoint(_c, false), _fwd);
     pl.vel.x += _fwd.x * 4; pl.vel.z += _fwd.z * 4;
     if (this.role === 'client') this.net.send({ t: 'hit', id: best.id, d: 200, h: false, w: 'Knife' });
     else this.damage(best, 200, pl, 'Knife', false, pl.pos);
@@ -591,6 +599,7 @@ export class Game {
     this.audio.explosion(p);
     const dp = this.camera.position.distanceTo(p);
     this.shake = Math.max(this.shake, 0.09 * Math.max(0, 1 - dp / 30));
+    if (dp < 12 && lineOfSight(this.camera.position, _e.set(p.x, p.y + 0.5, p.z))) this.flashT = Math.max(this.flashT, 0.35 * (1 - dp / 12));
     this.emit({ k: 'boom', p: arr(p), s: scale });
   }
 
@@ -863,6 +872,9 @@ export class Game {
     this.camera.updateMatrixWorld();
     const L = this.audio.listener;
     L.x = this.camera.position.x; L.z = this.camera.position.z; L.yaw = pl.alive ? pl.yaw : this.deathYaw;
+    this.audio.setMuffle(pl.alive ? Math.max(0, (40 - pl.health) / 40) * 0.55 : 0.45);
+    this.audio.update(dt);
+    this.flashT = Math.max(0, this.flashT - dt);
 
     if (pl.alive) ars.animate(dt, pl, inp.dx, inp.dy);
     ars.holder.visible = pl.alive;
