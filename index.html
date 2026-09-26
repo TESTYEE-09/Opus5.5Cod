@@ -2,7 +2,13 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0d10">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Frontline">
+<link rel="manifest" href="./manifest.webmanifest">
 <title>Frontline</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
@@ -108,7 +114,13 @@
         </div>
       </div>
       <button id="deploy" class="primary">PLAY SOLO</button>
-      <div class="controls">
+      <div class="controls touch-only touch-help">
+        <span><b>Left thumb</b> anywhere: move, push to the rim to sprint</span><span><b>Right thumb</b> drag: look (every button also looks while you hold it)</span>
+        <span><b>FIRE</b> right or left side</span><span><b>AIM</b> toggles aim down sights</span><span>hold <b>CROUCH</b> to go prone</span>
+        <span>hold <b>FRAG</b> to cook</span><span><b>SWAP</b> weapons</span><span><b>USE</b> vehicles, flags and objectives</span>
+        <span><b>KIT</b> killstreaks, vehicles, sandbags and loadout</span><span><b>II</b> pause</span><span>Tip: add to your home screen to play full screen</span>
+      </div>
+      <div class="controls kb-only">
         <span><kbd>WASD</kbd> move</span><span><kbd>Shift</kbd> sprint</span><span><kbd>C</kbd> crouch / slide</span>
         <span><kbd>Space</kbd> jump</span><span><kbd>LMB</kbd> fire</span><span><kbd>RMB</kbd> aim</span>
         <span><kbd>R</kbd> reload</span><span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> / wheel swap</span><span><kbd>G</kbd> hold to cook frag</span>

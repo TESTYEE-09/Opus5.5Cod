@@ -1,0 +1,10 @@
+{
+  "name": "Frontline",
+  "short_name": "Frontline",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#0b0d10",
+  "theme_color": "#0b0d10"
+}

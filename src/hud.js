@@ -81,7 +81,7 @@ export class Hud {
     // Ground War: choose a spawn while dead
     if (!pl.alive && gw) {
       const opts = m.spawnOptions(pl.team);
-      $('spawnSel').innerHTML = 'Spawn at: ' + opts.map((o, i) => `<span class="${(game.spawnChoice || 'auto') === o.id ? 'on' : ''}"><kbd>${i + 1}</kbd> ${o.id === 'base' ? 'Base' : o.id}</span>`).join(' ') +
+      $('spawnSel').innerHTML = 'Spawn at: ' + opts.map((o, i) => `<span data-d="${i + 1}" class="${(game.spawnChoice || 'auto') === o.id ? 'on' : ''}"><kbd>${i + 1}</kbd> ${o.id === 'base' ? 'Base' : o.id}</span>`).join(' ') +
         `${game.spawnChoice ? '' : ' <em>(auto: front line)</em>'}`;
     } else $('spawnSel').innerHTML = '';
   }

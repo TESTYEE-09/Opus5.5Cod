@@ -16,6 +16,7 @@ import { loadAssets, setAssetAnisotropy } from './assets.js';
 import { setThermal } from './soldier.js';
 import { loadSceneModel, sceneModel } from './scenes.js';
 import { TREE, NATIONS, RANKS, ICONS, unlocked, researching, progress, validChoice } from './research.js';
+import { isTouch, createTouch } from './touch.js';
 
 const canvas = document.getElementById('game');
 const gfx = new Graphics(canvas);
@@ -81,6 +82,9 @@ if (!MAPS[settings.map]) settings.map = 'crossroads';
 const fixMode = () => { if (!MAPS[settings.map].modes.includes(settings.mode)) settings.mode = MAPS[settings.map].modes[0]; };
 fixMode();
 if (!QUALITY[settings.quality]) settings.quality = 'high';
+// phones and tablets: start on settings a mobile GPU can hold at a steady frame rate
+if (isTouch && !settings.touchV1) { Object.assign(settings, { quality: 'low', blur: 0, scale: 0.8, dynres: true, fov: Math.max(settings.fov, 85), touchV1: true }); }
+if (isTouch) document.body.classList.add('touch');
 const save = () => { try { localStorage.setItem('frontline.settings', JSON.stringify(settings)); } catch { /* storage unavailable */ } };
 audio.setVolume(settings.vol);
 for (const [c, v] of Object.entries(settings.volCats || {})) audio.setCategory(c, v);
@@ -297,6 +301,13 @@ syncVol();
 let locked = false;
 function lock() {
   $('lockMsg').textContent = '';
+  if (isTouch) {
+    // no pointer lock on touch screens: go full screen, hold landscape and take control
+    const el = document.documentElement;
+    if (!document.fullscreenElement && el.requestFullscreen) el.requestFullscreen({ navigationUI: 'hide' }).then(() => screen.orientation?.lock?.('landscape').catch(() => {})).catch(() => {});
+    setLocked(true);
+    return;
+  }
   try {
     const p = canvas.requestPointerLock();
     if (p && p.catch) p.catch(() => { $('lockMsg').textContent = 'The browser refused the mouse lock. Wait a second and press Resume again.'; });
@@ -351,6 +362,7 @@ function toMenu(msg) {
   showTab('menu', tabState.menu);
   renderClassCards();
   if (document.pointerLockElement) document.exitPointerLock();
+  if (isTouch) setLocked(false);
 }
 
 $('deploy').addEventListener('click', deploy);
@@ -450,8 +462,9 @@ $('startMp').addEventListener('click', startMp);
 $('leaveLobby').addEventListener('click', () => toMenu());
 canvas.addEventListener('click', () => { if (game.state === 'playing' && !locked) lock(); });
 
-document.addEventListener('pointerlockchange', () => {
-  locked = document.pointerLockElement === canvas;
+document.addEventListener('pointerlockchange', () => setLocked(document.pointerLockElement === canvas));
+function setLocked(v) {
+  locked = v;
   if (locked) $('pause').classList.add('hidden');
   else if (game.state === 'playing') {
     renderClassCards();
@@ -460,7 +473,8 @@ document.addEventListener('pointerlockchange', () => {
     openPause();
   }
   keys.clear(); mouse.clear();
-});
+  touch?.show(locked && game.state === 'playing');
+}
 
 // ---------- input ----------
 const keys = new Set(), pressed = new Set(), mouse = new Set(), mousePressed = new Set();
@@ -484,6 +498,26 @@ addEventListener('wheel', (e) => { if (locked) wheel += Math.sign(e.deltaY); }, 
 addEventListener('contextmenu', (e) => e.preventDefault());
 addEventListener('blur', () => { keys.clear(); mouse.clear(); });
 
+// touch screens: stick, drag-to-look and thumb buttons feed the same sets as the keyboard and mouse
+const stick = { x: 0, y: 0, sprint: false, sprintPressed: false };
+let touchScores = false;
+const touch = isTouch ? createTouch({
+  keys, pressed, mouse, mousePressed, stick,
+  look(dx, dy) { mdx += dx; mdy += dy; },
+  wheel(n) { wheel += n; },
+  active: () => locked && game.state === 'playing',
+  pause(tab) { if (tab) tabState.pause = tab; setLocked(false); },
+  scores(on) { touchScores = on; },
+  kit(open) { $('hud').classList.toggle('kit', open); },
+}) : null;
+// a phone app has no hover or page to scroll: stop pinch zoom and rubber-banding in a match
+if (isTouch) {
+  document.addEventListener('touchmove', (e) => { if (locked && game.state === 'playing') e.preventDefault(); }, { passive: false });
+  document.addEventListener('gesturestart', (e) => e.preventDefault());
+  // going to the background pauses a solo match
+  document.addEventListener('visibilitychange', () => { if (document.hidden && locked && game.state === 'playing') setLocked(false); });
+}
+
 function readInput() {
   const k = (c) => keys.has(c) ? 1 : 0;
   let switchTo = null;
@@ -498,8 +532,8 @@ function readInput() {
   for (let d = 1; d <= 9 && !digit; d++) if (pressed.has(`Digit${d}`)) digit = d;
   if (pressed.has('KeyM')) hud.toggleMap();
   const inp = {
-    forward: k('KeyW'), back: k('KeyS'), left: k('KeyA'), right: k('KeyD'),
-    sprint: keys.has('ShiftLeft') || keys.has('ShiftRight'), sprintPressed: pressed.has('ShiftLeft') || pressed.has('ShiftRight'),
+    forward: Math.max(k('KeyW'), -stick.y), back: Math.max(k('KeyS'), stick.y), left: Math.max(k('KeyA'), -stick.x), right: Math.max(k('KeyD'), stick.x),
+    sprint: keys.has('ShiftLeft') || keys.has('ShiftRight') || stick.sprint, sprintPressed: pressed.has('ShiftLeft') || pressed.has('ShiftRight') || stick.sprintPressed,
     fire: mouse.has(0), firePressed: mousePressed.has(0),
     ads: mouse.has(2), adsPressed: mousePressed.has(2),
     reload: pressed.has('KeyR'), jumpPressed: pressed.has('Space'), jump: keys.has('Space'), crouchPressed: pressed.has('KeyC'),
@@ -510,7 +544,7 @@ function readInput() {
     switchTo, streak, call, dx: mdx, dy: mdy,
   };
   pressed.clear(); mousePressed.clear();
-  mdx = mdy = 0; wheel = 0;
+  mdx = mdy = 0; wheel = 0; stick.sprintPressed = false;
   return inp;
 }
 
@@ -533,9 +567,13 @@ function frame(ts) {
   timer.update(ts);
   const dt = Math.min(0.05, timer.getDelta());
   if (game.state === 'playing') {
-    hud.showScores = locked && keys.has('Tab');
+    hud.showScores = locked && (keys.has('Tab') || touchScores);
+    touch?.update(game);
     if (locked || net.active) game.update(dt, readInput());
     else { readInput(); game.effects.update(0); }
+  } else if (isTouch && locked) {
+    setLocked(false);
+    game.effects.update(dt);
   } else if (game.state === 'menu') {
     menuT += dt * 0.05;
     const small = SIZE < 100, rad = small ? 30 : 70;
