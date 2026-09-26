@@ -269,7 +269,7 @@ export class Net {
         const r = d.r;
         if (!Array.isArray(r) || r.length < 15) break;
         const vid = num(r[0], -1), kind = String(r[1]);
-        if (!['tank', 'jet', 'drone', 'drone10', 'recon', 'heli'].includes(kind) || Math.floor((vid - 10000) / 100) !== id || g.deadVehicles.has(vid)) break;
+        if (!['tank', 'jet', 'attacker', 'drone', 'drone10', 'recon', 'heli'].includes(kind) || Math.floor((vid - 10000) / 100) !== id || g.deadVehicles.has(vid)) break;
         let v = g.vehicles.find(x => x.id === vid);
         if (!v) { v = new VehicleProxy(g, vid, kind, s.team); v.owner = s; g.vehicles.push(v); }
         if (!v.isProxy || v.owner !== s) break;
@@ -285,12 +285,12 @@ export class Net {
       case 'rocket': {
         const kind = String(d.k), p = vec(d.p), v = vec(d.v);
         if (!PROJ[kind] || !p || !v) break;
-        v.clampLength(0, 320);
-        const target = g.vehicles.find(x => x.id === d.g && x.alive) || null;
+        v.clampLength(0, 800);
+        const target = g.resolveTarget(d.g, d.tp);
         const src = g.vehicles.find(x => x.isProxy && x.owner === s && x.alive) || null;
         g.projectiles.spawn(kind, s, p, v, target, src, false);
         g.warnTarget(target);
-        g.emit({ k: 'proj', pk: kind, o: s.id, tm: s.team, p: [r2(p.x), r2(p.y), r2(p.z)], v: [r2(v.x), r2(v.y), r2(v.z)], g: target ? target.id : -1 });
+        g.emit({ k: 'proj', pk: kind, o: s.id, tm: s.team, p: [r2(p.x), r2(p.y), r2(p.z)], v: [r2(v.x), r2(v.y), r2(v.z)], g: target?.id ?? -1, tp: target?.point ? [r2(target.pos.x), r2(target.pos.y), r2(target.pos.z)] : null });
         break;
       }
       case 'blast': {

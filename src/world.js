@@ -930,7 +930,8 @@ export function loadMap(scene, def) {
   const gd = def.ground || { recipe: 'dirt', ts: 8 };
   const gt = surface(`${gd.recipe}:${JSON.stringify(gd.args || [])}`, R[gd.recipe](...(gd.args || [])), { size: 1024, seed: 5, normal: gd.normal ?? 1.5 });
   // one big sheet out to the horizon: flat under the play area, rolling hills beyond it
-  const gw = gd.w || 4200, gl = gd.l || 4200;
+  // wide enough for jets that arrive from 6 km out
+  const gw = gd.w || 16000, gl = gd.l || 16000;
   const seg = hillAmp || peaks.length ? 280 : 1;
   const groundGeo = new THREE.PlaneGeometry(gw, gl, gd.w ? 1 : seg, gd.l && !gd.w ? 1 : seg);
   groundGeo.attributes.uv.array.forEach((v, i, a) => { a[i] = v * (i % 2 ? gl : gw) / gd.ts; });

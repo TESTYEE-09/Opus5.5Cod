@@ -67,7 +67,7 @@ function loadMapById(id) {
 const game = new Game({ renderer, scene, camera, wscene, audio, hud, loadMap: loadMapById });
 
 // ---------- settings ----------
-const defaults = { sens: 1, fov: 80, vol: 0.7, difficulty: 'regular', cls: 'assault', name: '', map: 'crossroads', mode: 'gw', quality: 'high', camo: 'none', fpv: '5', huntRole: 'hunter', blur: 0.5, scale: 1, dynres: true };
+const defaults = { sens: 1, fov: 80, vol: 0.7, difficulty: 'regular', cls: 'assault', name: '', map: 'crossroads', mode: 'gw', quality: 'high', camo: 'none', fpv: '5', jet: 'fighter', huntRole: 'hunter', blur: 0.5, scale: 1, dynres: true };
 const matchRules = () => ({ scoreLimit: MODES[settings.mode].scoreLimit, timeLimit: MODES[settings.mode].timeLimit });
 let settings = { ...defaults };
 try { Object.assign(settings, JSON.parse(localStorage.getItem('frontline.settings') || '{}')); } catch { /* storage unavailable */ }
@@ -124,6 +124,7 @@ function renderClassCards() {
     `<b>${c.name}</b><span>${c.rank > pr.level ? `Rank ${c.rank}` : c.id === settings.camo ? 'Equipped' : 'Unlocked'}</span></button>`).join('');
   applyCamo(settings.camo, CAMO_MATS);
   $('fpvSize').innerHTML = [['5', '5-inch'], ['10', '10-inch']].map(([k, n]) => `<button class="${settings.fpv === k ? 'on' : ''}" data-fpv="${k}">${n}</button>`).join('');
+  $('jetType').innerHTML = [['fighter', 'Fighter (F-16 / Su-27)'], ['attack', 'Attack (A-10 / Su-25)']].map(([k, n]) => `<button class="${settings.jet === k ? 'on' : ''}" data-jet="${k}">${n}</button>`).join('');
   $('huntRole').innerHTML = [['hunter', 'Hunter'], ['hider', 'Hider']].map(([k, n]) => `<button class="${settings.huntRole === k ? 'on' : ''}" data-role="${k}">${n}</button>`).join('');
   $('huntRow').style.opacity = settings.mode === 'hunt' ? 1 : 0.45;
   const dl = daily();
@@ -136,6 +137,11 @@ $('fpvSize').addEventListener('click', (e) => {
   const b = e.target.closest('[data-fpv]');
   if (!b) return;
   settings.fpv = b.dataset.fpv; save(); audio.init(); audio.ui(); renderClassCards();
+});
+$('jetType').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-jet]');
+  if (!b) return;
+  settings.jet = b.dataset.jet; save(); audio.init(); audio.ui(); renderClassCards();
 });
 $('huntRole').addEventListener('click', (e) => {
   const b = e.target.closest('[data-role]');
@@ -463,6 +469,9 @@ function frame(ts) {
   const scoped = playing && pl.alive && !veh && d && (d.scope || d.overlay) && game.arsenal.adsEase() > 0.92;
   gfx.override = veh ? veh.grade() : scoped ? { vignette: 0.1, fringe: 0, grain: 0.02 } : null;
   setThermal(!!gfx.override?.thermal);
+  // jets see much further than soldiers
+  const far = veh?.spec?.fixed ? 12000 : 3000;
+  if (camera.far !== far) { camera.far = far; camera.near = far > 3000 ? 0.5 : 0.1; camera.updateProjectionMatrix(); }
   gfx.render(playing && pl.alive && !veh, dt, veh ? hurt * 0.3 : hurt, Math.min(0.8, game.flashT * 2.2));
 }
 requestAnimationFrame(frame);

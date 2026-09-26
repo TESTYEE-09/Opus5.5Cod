@@ -890,7 +890,7 @@ export class Game {
     } else if (kind === 'tank') {
       const s = tankSpot(this, owner.team);
       v = new Tank(this, owner, id, s.x, s.z, s.yaw);
-    } else if (kind === 'jet') v = new FighterJet(this, owner, id);
+    } else if (kind === 'jet') v = new FighterJet(this, owner, id, (owner.isPlayer ? this.settings.jet === 'attack' : Math.random() < 0.5) ? 'attacker' : 'jet');
     else return null;
     this.vehicles.push(v);
     if (owner.isPlayer) this.enterVehicle(owner, v);
@@ -939,7 +939,7 @@ export class Game {
     if (v.driver === s) v.driver = null;
     if (!s.isPlayer) return;
     if (v.seat === 'inside' && s.alive) this.placeBeside(s, v);
-    if (v.kind === 'jet' && v.local && this.role === 'client' && v.alive) v.cleanup();
+    if (v.spec?.fixed && v.local && this.role === 'client' && v.alive) v.cleanup();
     s.vel.set(0, 0, 0);
     s.yaw = v.aimYaw ?? s.yaw;
     s.pitch = 0;
@@ -981,7 +981,7 @@ export class Game {
       const bots = this.bots.filter(b => b.team === team && b.alive && !b.vehicle);
       if (!bots.length) continue;
       const owner = bots[Math.floor(Math.random() * bots.length)];
-      const has = (k) => this.vehicles.some(v => v.alive && v.kind === k && v.team === team);
+      const has = (k) => this.vehicles.some(v => v.alive && (v.kind === k || (k === 'jet' && v.spec?.fixed)) && v.team === team);
       const r = Math.random();
       if (r < 0.45) this.callVehicle(owner, 'drone');
       else if (r < 0.75 && !has('tank')) this.callVehicle(owner, 'tank');
@@ -993,12 +993,18 @@ export class Game {
   fireProjectile(kind, owner, pos, vel, target, src) {
     if (this.role === 'client') {
       this.projectiles.spawn(kind, owner, pos, vel, target, src, true);
-      this.net.send({ t: 'rocket', k: kind, p: arr(pos), v: arr(vel), g: target ? target.id : -1 });
+      this.net.send({ t: 'rocket', k: kind, p: arr(pos), v: arr(vel), g: target?.id ?? -1, tp: target?.point ? arr(target.pos) : null });
       return;
     }
     this.projectiles.spawn(kind, owner, pos, vel, target, src, false);
     this.warnTarget(target);
-    this.emit({ k: 'proj', pk: kind, o: owner?.id ?? -1, tm: owner?.team ?? -1, p: arr(pos), v: arr(vel), g: target ? target.id : -1 });
+    this.emit({ k: 'proj', pk: kind, o: owner?.id ?? -1, tm: owner?.team ?? -1, p: arr(pos), v: arr(vel), g: target?.id ?? -1, tp: target?.point ? arr(target.pos) : null });
+  }
+
+  // a missile's target from the network: a vehicle or soldier by id, or a ground point
+  resolveTarget(id, tp) {
+    if (Array.isArray(tp) && tp.length === 3 && tp.every(Number.isFinite)) return { alive: true, point: true, pos: v3(tp), vel: new THREE.Vector3() };
+    return this.vehicles.find(v => v.id === id && v.alive) || (this.byId.get(id)?.alive ? this.byId.get(id) : null) || null;
   }
 
   warnTarget(target) {
@@ -1120,7 +1126,7 @@ export class Game {
       case 'boom': if (Array.isArray(ev.p)) { const p = v3(ev.p); if (!this.wasPredicted(p)) this.explodeFx(p, ev.s || 1, !!ev.a); } break;
       case 'proj': {
         if (ev.o === pl.id || !PROJ[ev.pk] || !Array.isArray(ev.p) || !Array.isArray(ev.v)) break;
-        const tgt = this.vehicles.find(v => v.id === ev.g && v.alive) || null;
+        const tgt = this.resolveTarget(ev.g, ev.tp);
         this.projectiles.spawn(ev.pk, { team: ev.tm, id: ev.o }, v3(ev.p), v3(ev.v), tgt, null, true);
         break;
       }

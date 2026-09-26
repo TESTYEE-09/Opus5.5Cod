@@ -226,7 +226,7 @@ export class Hud {
         ctx.fillStyle = `rgba(255,60,30,${this.vHitT})`;
         ctx.fillRect(0, 0, W, H);
       }
-      const warn = v.missileWarn > 0 && v.kind !== 'jet';
+      const warn = v.missileWarn > 0 && !v.spec?.fixed;
       $('vwarn').classList.toggle('show', warn);
       if (warn && (this.warnT = (this.warnT || 0) - dt) <= 0) { this.warnT = 0.18; this.audio.tone(1500, 0.08, 0.1); }
       return;
