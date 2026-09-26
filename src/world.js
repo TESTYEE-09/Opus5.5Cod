@@ -973,7 +973,8 @@ function buildStatic(ch) {
 
 // a chunk's breakable part, rebuilt whenever something in it breaks
 function buildChunk(ch) {
-  for (const m of [...ch.dyn.children, ...ch.dynNear.children]) m.geometry.dispose();
+  // instanced props share their geometry with every other chunk, so only their instance buffers go
+  for (const m of [...ch.dyn.children, ...ch.dynNear.children]) { if (m.isInstancedMesh) m.dispose(); else m.geometry.dispose(); }
   ch.dyn.clear(); ch.dynNear.clear();
   if (!ch.objs.length) return;
   const byMat = {}, kit = new Kit();

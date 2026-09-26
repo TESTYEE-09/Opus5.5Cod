@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { SIZE, loadMap, updateWorld, wetFloor, sites } from './world.js';
+import { loadModels } from './models.js';
 import { MAPS, MODES } from './maps.js';
 import { profile } from './rank.js';
 import { Graphics, QUALITY } from './graphics.js';
@@ -81,7 +82,12 @@ audio.setVolume(settings.vol);
 
 function $(id) { return document.getElementById(id); }
 
+let lastYaw = 0, lastPitch = 0;
+
 gfx.setQuality(settings.quality, atmo);
+// The scanned props have to be in memory before the first map builds its instanced meshes.
+// If they fail we still boot — every recipe falls back to its built-from-boxes version.
+await loadModels(import.meta.env.BASE_URL, gfx.renderer.capabilities.getMaxAnisotropy());
 loadMapById(settings.map);
 
 // Every pickable kit: the fixed classes, then the five saved loadouts.
@@ -510,6 +516,15 @@ function frame(ts) {
   }
   const pl = game.player, playing = game.state === 'playing';
   const veh = playing && pl.alive ? pl.vehicle : null;
+  // Camera blur: how far the view swung this frame as a fraction of the screen, plus the
+  // tunnel blur that closes in around the sights.
+  camera.getWorldDirection(_cd);
+  const yaw = Math.atan2(-_cd.x, -_cd.z), pitch = Math.asin(Math.max(-1, Math.min(1, _cd.y)));
+  const vfov = camera.fov * Math.PI / 180, hfov = 2 * Math.atan(Math.tan(vfov / 2) * camera.aspect);
+  let dYaw = yaw - lastYaw; if (dYaw > Math.PI) dYaw -= 2 * Math.PI; else if (dYaw < -Math.PI) dYaw += 2 * Math.PI;
+  gfx.setLens(playing ? (dYaw / hfov) * 0.5 : 0, playing ? -((pitch - lastPitch) / vfov) * 0.5 : 0,
+    playing && !veh ? game.arsenal.adsEase() * 0.012 : 0);
+  lastYaw = yaw; lastPitch = pitch;
   const hurt = playing ? (pl.alive ? Math.max(0, (45 - pl.health) / 45) * 0.8 : 0.7) : 0;
   const d = game.arsenal.w?.def;
   const scoped = playing && pl.alive && !veh && d && (d.scope || d.overlay) && game.arsenal.adsEase() > 0.92;

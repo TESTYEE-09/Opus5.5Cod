@@ -118,6 +118,7 @@ export class Atmosphere {
     this.sun = new THREE.DirectionalLight(0xffffff, 3);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
+    this.shadowHalf = 62;
     Object.assign(this.sun.shadow.camera, { left: -62, right: 62, top: 62, bottom: -62, near: 10, far: 260 });
     this.sun.shadow.bias = -0.0003;
     this.sun.shadow.normalBias = 0.035;
@@ -231,6 +232,15 @@ export class Atmosphere {
     this.wscene.environmentIntensity = this.look.envIntensity * 1.2;
   }
 
+  // Half-width of the sun's shadow box in metres. Smaller means finer texels for the same map
+  // size — crisper shadows near the player, at the cost of how far they reach.
+  setShadowExtent(half) {
+    if (this.shadowHalf === half) return;
+    this.shadowHalf = half;
+    Object.assign(this.sun.shadow.camera, { left: -half, right: half, top: half, bottom: -half });
+    this.sun.shadow.camera.updateProjectionMatrix();
+  }
+
   setShadowSize(s) {
     if (this.sun.shadow.mapSize.x === s) return;
     this.sun.shadow.mapSize.set(s, s);
@@ -242,7 +252,7 @@ export class Atmosphere {
     // the shadow map follows the camera, snapped to whole texels so edges don't crawl
     if (this.sunDir) {
       const z = this.sunDir, x = _sx.crossVectors(_up, z).normalize(), y = _sy.crossVectors(z, x);
-      const c = camera.position, texel = 124 / this.sun.shadow.mapSize.x;
+      const c = camera.position, texel = this.shadowHalf * 2 / this.sun.shadow.mapSize.x;
       const a = Math.round(c.dot(x) / texel) * texel, b = Math.round(c.dot(y) / texel) * texel, d = c.dot(z);
       _sc.copy(x).multiplyScalar(a).addScaledVector(y, b).addScaledVector(z, d);
       this.sun.target.position.copy(_sc);
