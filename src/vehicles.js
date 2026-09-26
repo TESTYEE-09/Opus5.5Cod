@@ -1145,8 +1145,9 @@ export class FighterJet extends Vehicle {
     if (Math.hypot(this.pos.x - c, this.pos.z - c) > 5000) this.aimYaw += wrap(Math.atan2(-(c - this.pos.x), -(c - this.pos.z)) - this.aimYaw) * Math.min(1, dt * 0.8);
     const want = aimDir(this.aimYaw, this.aimPitch, _v);
     const agl = this.pos.y - Math.max(0, terrainY(this.pos.x, this.pos.z));
-    this.ground = agl < 140 && want.y < (140 - agl) / 350 - 0.05;
-    if (this.ground) { want.y = Math.max(want.y, (140 - agl) / 350); want.normalize(); }
+    // no automatic pull-up: fly into the ground and you crash
+    const f0 = fwdOf(this.quat, _f);
+    this.ground = f0.y < -0.1 && agl < 60 + this.speed * -f0.y * 3;
     const l = _w.copy(want).applyQuaternion(_q2.copy(this.quat).invert());
     const pitchErr = Math.atan2(l.y, -l.z), yawErr = Math.atan2(l.x, -l.z);
     const off = Math.acos(clamp(-l.z, -1, 1)), perf = af.g / 9;
@@ -1549,7 +1550,7 @@ export class FighterJet extends Vehicle {
     text(ctx, `GUN ${this.rounds}   ${af.agm.name} x${this.agm}   ${af.aam.name} x${this.aam}   FLARES ${this.flares}`, cx, H - 36, 'center', green, 18);
     let warn = '';
     if (this.missileWarn > 0) warn = 'MISSILE LAUNCH · SPACE FLARES';
-    else if (this.ground) warn = 'TERRAIN · PULLING UP';
+    else if (this.ground) warn = 'PULL UP';
     else if (this.outside) warn = 'TURNING BACK TO THE BATTLE';
     if (warn && Math.floor(game.time * 4) % 2 === 0) text(ctx, warn, cx, H * 0.24, 'center', '#ff6a50', 26);
   }
