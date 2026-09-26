@@ -479,7 +479,7 @@ export class Bot {
 
     // launchers against vehicles: RPG at anything slow, Stinger at aircraft
     if (t.isVehicle && this.rockets > 0 && this.rocketCd <= 0 && this.reactT <= 0 && facing < 0.2 &&
-        ((this.launcher === 'stinger' && t.air && !t.spec?.drone && Math.random() < 0.5) || (this.launcher === 'rpg' && (t.kind === 'tank' || t.kind === 'aa' || t.kind === 'heli') && dist < 90))) {
+        ((this.launcher === 'stinger' && t.air && !t.spec?.drone && Math.random() < 0.5) || (this.launcher === 'rpg' && (t.spec?.ground || t.kind === 'aa' || t.kind === 'heli') && dist < 90))) {
       this.rockets--; this.rocketCd = this.launcher === 'stinger' ? 14 : 5;
       g.botLaunch(this, t, this.launcher);
       return false;

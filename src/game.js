@@ -143,6 +143,7 @@ export class Game {
     this.vehicleSeq = 0;
     pl.vcool = { drone: 0, recon: 0, tank: 0, jet: 0 };
     pl.fpv = settings.fpv === '10' ? 'drone10' : 'drone';
+    pl.jetKind = settings.jet === 'attack' ? 'attacker' : 'jet';
 
     this.teamScore = settings.score ? settings.score.slice() : [0, 0];
     this.timeLeft = settings.timeLeft ?? settings.timeLimit;
@@ -889,12 +890,14 @@ export class Game {
       v = new Drone(this, owner, id, eye.add(_e.set(fx * k, 0, fz * k)), yaw, kind);
     } else if (kind === 'tank') {
       const s = tankSpot(this, owner.team);
-      v = new Tank(this, owner, id, s.x, s.z, s.yaw);
-    } else if (kind === 'jet') v = new FighterJet(this, owner, id, (owner.isPlayer ? this.settings.jet === 'attack' : Math.random() < 0.5) ? 'attacker' : 'jet');
+      // the player's pick from the tech tree; bots field the whole range
+      const gk = owner.isPlayer ? (this.settings.ground || 'apc') : ['apc', 'ifv', 'ifv', 'tank', 'tank', 'mbt'][Math.floor(Math.random() * 6)];
+      v = new Tank(this, owner, id, s.x, s.z, s.yaw, gk);
+    } else if (kind === 'jet') v = new FighterJet(this, owner, id, owner.isPlayer ? owner.jetKind || 'attacker' : Math.random() < 0.5 ? 'attacker' : 'jet');
     else return null;
     this.vehicles.push(v);
     if (owner.isPlayer) this.enterVehicle(owner, v);
-    if (kind === 'tank') this.announce(owner.team, 'Friendly tank deployed', 'Enemy tank deployed!');
+    if (kind === 'tank') this.announce(owner.team, `Friendly ${v.name} deployed`, `Enemy ${v.name} deployed!`);
     else if (kind === 'jet') this.announce(owner.team, 'Friendly jet inbound', 'Enemy jet inbound!');
     return v;
   }
@@ -911,8 +914,8 @@ export class Game {
     if (!this.callAllowed(kind)) { this.hud.toast(this.mode.kind === 'uc' ? 'No support while undercover' : 'No room for that here'); return; }
     if (pl.vcool[kind] > 0) { this.hud.toast(`${c.name} ready in ${Math.ceil(pl.vcool[kind])}s`); return; }
     if (kind === 'tank') {
-      const mine = this.vehicles.find(v => v.alive && v.kind === 'tank' && v.owner === pl && !v.driver);
-      if (mine) { this.hud.toast('Your tank is still out there: walk up to it and press F'); return; }
+      const mine = this.vehicles.find(v => v.alive && v.spec?.ground && v.owner === pl && !v.driver);
+      if (mine) { this.hud.toast(`Your ${mine.name} is still out there: walk up to it and press F`); return; }
     }
     pl.vcool[kind] = c.cd;
     this.callVehicle(pl, kind);
@@ -925,7 +928,7 @@ export class Game {
     if (!s.isPlayer) return;
     const a = this.arsenal;
     a.ads = 0; a.reload = null; a.cook = null; a.burstLeft = 0; a.lockTarget = null;
-    if (v.kind === 'tank') { v.aimYaw = v.yaw + v.a; v.aimPitch = 0; }
+    if (v.spec?.ground) { v.aimYaw = v.yaw + v.a; v.aimPitch = 0; }
     if (v.kind === 'aa') { v.aimYaw = v.a; v.aimPitch = v.b; }
     if (v.kind === 'heli') v.aimYaw = v.heading;
     this.targeting = false;
@@ -966,7 +969,7 @@ export class Game {
     for (const v of this.vehicles) {
       if (!v.alive || v.driver || v.seat !== 'inside' || v.team !== pl.team || v.isProxy) continue;
       if (this.role === 'client' && !v.local) continue;
-      if (Math.hypot(v.pos.x - pl.pos.x, v.pos.z - pl.pos.z) < (v.kind === 'tank' ? 4.5 : 2.8) && Math.abs(v.pos.y - pl.pos.y) < 3) return v;
+      if (Math.hypot(v.pos.x - pl.pos.x, v.pos.z - pl.pos.z) < (v.spec?.ground ? 4.5 : 2.8) && Math.abs(v.pos.y - pl.pos.y) < 3) return v;
     }
     return null;
   }
@@ -981,7 +984,7 @@ export class Game {
       const bots = this.bots.filter(b => b.team === team && b.alive && !b.vehicle);
       if (!bots.length) continue;
       const owner = bots[Math.floor(Math.random() * bots.length)];
-      const has = (k) => this.vehicles.some(v => v.alive && (v.kind === k || (k === 'jet' && v.spec?.fixed)) && v.team === team);
+      const has = (k) => this.vehicles.some(v => v.alive && (v.kind === k || (k === 'jet' && v.spec?.fixed) || (k === 'tank' && v.spec?.ground)) && v.team === team);
       const r = Math.random();
       if (r < 0.45) this.callVehicle(owner, 'drone');
       else if (r < 0.75 && !has('tank')) this.callVehicle(owner, 'tank');
@@ -1059,7 +1062,7 @@ export class Game {
   // tanks shove soldiers out of their way, and run over enemies at speed
   tankContacts() {
     for (const v of this.vehicles) {
-      if (!v.alive || v.kind !== 'tank') continue;
+      if (!v.alive || !v.spec?.ground) continue;
       const c = Math.cos(v.yaw), sn = Math.sin(v.yaw), speed = v.speed ?? v.vel.length();
       for (const s of this.soldiers) {
         if (!s.alive || s.inVehicle || s.isNet) continue;

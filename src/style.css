@@ -301,3 +301,14 @@ label.check { display: flex; align-items: center; gap: 8px; }
 .camo-woodland { border-left-color: #4a5a32; } .camo-desert { border-left-color: #b8a27a; } .camo-urban { border-left-color: #6a6c70; }
 .camo-arctic { border-left-color: #e4e8ec; } .camo-tiger { border-left-color: #6a7a44; } .camo-crimson { border-left-color: #8a2a22; }
 .camo-gold { border-left-color: #d4a640; } .camo-diamond { border-left-color: #bfe8ff; } .camo-obsidian { border-left-color: #7a2aff; }
+
+.tree { display: flex; flex-direction: column; gap: 8px; }
+.tline { display: flex; align-items: stretch; gap: 6px; flex-wrap: wrap; }
+.tlabel { width: 78px; display: flex; align-items: center; gap: 6px; font-weight: 700; letter-spacing: 1px; opacity: 0.8; }
+.tarrow { display: flex; align-items: center; font-style: normal; opacity: 0.5; font-size: 20px; }
+.tnode { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 8px 10px; min-width: 150px; text-align: left; overflow: hidden; }
+.tnode span { font-size: 11px; opacity: 0.7; }
+.tnode em { font-style: normal; font-size: 12px; color: var(--gold); }
+.tnode.locked { opacity: 0.55; cursor: default; }
+.tnode u { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--gold); text-decoration: none; }
+#endXp .rp { color: #9fd0ff; }

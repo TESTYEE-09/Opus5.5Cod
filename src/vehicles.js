@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { raycastWorld, overlaps, groundAt, floorAt, lineOfSight, findPath, interest, spawns, objectsTouching, SIZE, terrainY } from './world.js';
-import { AIRFRAMES, airframeFor, buildAircraft } from './aircraft.js';
+import { AIRFRAMES, airframeFor, buildAircraft, paint } from './aircraft.js';
 import { buildChopper, chopperHit } from './streaks.js';
 import { flashTexture } from './effects.js';
 
@@ -26,7 +26,10 @@ const aimDir = (yaw, pitch, out) => { const c = Math.cos(pitch); return out.set(
 
 // ---------- specs and damage ----------
 export const SPEC = {
-  tank: { name: 'Tank', hp: 1500, armor: 0.03, bounty: 300, seat: 'inside', air: false, size: 2.6, boom: 2 },
+  apc: { name: 'APC', hp: 900, armor: 0.2, bounty: 150, seat: 'inside', air: false, size: 2.4, boom: 1.6, ground: true },
+  ifv: { name: 'IFV', hp: 1150, armor: 0.1, bounty: 200, seat: 'inside', air: false, size: 2.5, boom: 1.8, ground: true },
+  tank: { name: 'Tank', hp: 1500, armor: 0.03, bounty: 300, seat: 'inside', air: false, size: 2.6, boom: 2, ground: true },
+  mbt: { name: 'MBT', hp: 1900, armor: 0.025, bounty: 400, seat: 'inside', air: false, size: 2.7, boom: 2.2, ground: true },
   jet: { name: 'Jet', hp: 1250, armor: 0.18, bounty: 250, seat: 'remote', air: true, size: 3, boom: 1.8, splash: { Flak: 0.4 }, fixed: true },
   attacker: { name: 'Attack jet', hp: 2200, armor: 0.3, bounty: 300, seat: 'remote', air: true, size: 3.5, boom: 2, splash: { Flak: 0.35 }, fixed: true },
   drone: { name: 'FPV Drone', hp: 45, armor: 0.75, bounty: 50, seat: 'remote', air: true, size: 0.4, boom: 0.4, splash: { Flak: 0.5 }, drone: true },
@@ -36,6 +39,28 @@ export const SPEC = {
   heli: { name: 'Attack Chopper', hp: 1400, armor: 0.6, bounty: 150, seat: 'remote', air: true, size: 2.3, boom: 1.6 },
 };
 // what each side fields
+// Ground vehicles by kind, [USA, Russia]. main: cannon (tank shells), auto (autocannon) or
+// hmg (heavy machine gun); atgm: wire-guided missiles fired with R.
+export const ARMOR = {
+  apc: [
+    { name: 'M113', hp: 800, speed: 11, boost: 14, turn: 1.1, main: { type: 'hmg', name: 'M2 .50', rate: 0.11, dmg: 48 } },
+    { name: 'BTR-80', hp: 900, speed: 13, boost: 16, turn: 0.8, main: { type: 'hmg', name: 'KPVT 14.5mm', rate: 0.1, dmg: 55 } },
+  ],
+  ifv: [
+    { name: 'M2 Bradley', hp: 1150, speed: 10, boost: 12.5, turn: 1, main: { type: 'auto', name: '25mm', rate: 0.3, dmg: 110 }, atgm: { n: 2, name: 'TOW' } },
+    { name: 'BMP-2', hp: 1000, speed: 11, boost: 13.5, turn: 1, main: { type: 'auto', name: '30mm', rate: 0.25, dmg: 115 }, atgm: { n: 2, name: 'Konkurs' } },
+  ],
+  tank: [
+    { name: 'M1 Abrams', hp: 1500, speed: 8, boost: 10.5, turn: 0.85, main: { type: 'cannon', reload: 3.2 } },
+    { name: 'T-80', hp: 1450, speed: 8.5, boost: 11, turn: 0.85, main: { type: 'cannon', reload: 3.4 } },
+  ],
+  mbt: [
+    { name: 'M1A2 SEPv3', hp: 1900, speed: 8.5, boost: 11, turn: 0.9, main: { type: 'cannon', reload: 2.7 } },
+    { name: 'T-90M', hp: 1850, speed: 8, boost: 10.5, turn: 0.85, main: { type: 'cannon', reload: 2.9 } },
+  ],
+};
+export const isGround = (kind) => !!SPEC[kind]?.ground;
+
 // FPV frames: a 5-inch racer (fast, small charge that does little to armour) and a 10-inch
 // heavy lifter (slower, a big charge that kills tanks)
 export const FPV = {
@@ -43,7 +68,7 @@ export const FPV = {
   drone10: { thrust: 21.5, drag: 0.3, battery: 75, radius: 9, dmg: 320, direct: 1700, weapon: 'Heavy FPV', scale: 1.9, pitch: 0.6 },
 };
 export const isDrone = (kind) => !!SPEC[kind]?.drone;
-const MODEL_NAME = { tank: ['M1 Abrams', 'T-80'], jet: ['F-16C', 'Su-27'], attacker: ['A-10C', 'Su-25'], aa: ['AA Gun', 'AA Gun'], heli: ['AH-64 Apache', 'Mi-24 Hind'] };
+const MODEL_NAME = { apc: ['M113', 'BTR-80'], ifv: ['M2 Bradley', 'BMP-2'], mbt: ['M1A2 SEPv3', 'T-90M'], tank: ['M1 Abrams', 'T-80'], jet: ['F-16C', 'Su-27'], attacker: ['A-10C', 'Su-25'], aa: ['AA Gun', 'AA Gun'], heli: ['AH-64 Apache', 'Mi-24 Hind'] };
 export const vehicleName = (kind, team) => MODEL_NAME[kind]?.[team] || SPEC[kind]?.name || kind;
 const HELP = {
   tank: 'WASD drive · Shift boost · Mouse aim turret · LMB cannon · Space coax MG · RMB gunner sight · F exit',
@@ -55,9 +80,9 @@ const HELP = {
   heli: 'Mouse aim · LMB 25 mm cannon (fires straight away) · RMB zoom · F leave the gun',
 };
 // the 5-inch FPV is left out on purpose: armour shrugs its small charge off
-const EXPLOSIVE = new Set(['Frag', 'Airstrike', 'RPG-7', 'Stinger', 'Tank', 'Heavy FPV', 'Bomb', 'Flak', 'Jet', 'Barrel', 'Car', 'AGM-65', 'Kh-29', 'Kh-25', 'AIM-9', 'R-73']);
-const AP = { 'Jet Cannon': 0.25, 'GAU-8': 0.75, Chopper: 0.3, 'Tank MG': 0.06 };
-export const VEHICLE_WEAPONS = new Set([...EXPLOSIVE, 'FPV Drone', 'Jet Cannon', 'GAU-8', 'Chopper', 'Tank MG']);
+const EXPLOSIVE = new Set(['TOW', 'Konkurs', 'Frag', 'Airstrike', 'RPG-7', 'Stinger', 'Tank', 'Heavy FPV', 'Bomb', 'Flak', 'Jet', 'Barrel', 'Car', 'AGM-65', 'Kh-29', 'Kh-25', 'AIM-9', 'R-73']);
+const AP = { '25mm': 0.35, '30mm': 0.38, 'M2 .50': 0.12, 'KPVT 14.5mm': 0.15, 'Jet Cannon': 0.25, 'GAU-8': 0.75, Chopper: 0.3, 'Tank MG': 0.06 };
+export const VEHICLE_WEAPONS = new Set([...EXPLOSIVE, '25mm', '30mm', 'M2 .50', 'KPVT 14.5mm', 'FPV Drone', 'Jet Cannon', 'GAU-8', 'Chopper', 'Tank MG']);
 export function armorMul(spec, weapon) { return EXPLOSIVE.has(weapon) ? 1 : Math.max(spec.armor, AP[weapon] || 0); }
 
 export const PROJ = {
@@ -65,6 +90,7 @@ export const PROJ = {
   stinger: { name: 'Stinger', speed: 40, accel: 80, max: 165, grav: 0, radius: 5, dmg: 100, direct: 480, life: 7, trail: true, homing: 2.2, prox: 4.5, mesh: 'missile' },
   shell: { name: 'Tank', speed: 230, grav: 4, radius: 5, dmg: 190, direct: 600, life: 3, mesh: 'shell' },
   bomb: { name: 'Bomb', speed: 0, grav: 14, radius: 9, dmg: 260, direct: 600, life: 14, mesh: 'bomb' },
+  atgm: { name: 'TOW', speed: 30, accel: 60, max: 190, grav: 0, radius: 4, dmg: 160, direct: 1900, life: 12, trail: true, homing: 1.6, mesh: 'rocket', ground: true },
   agm: { name: 'AGM-65', speed: 0, accel: 70, max: 320, grav: 0, radius: 7, dmg: 260, direct: 2300, life: 40, trail: true, homing: 1.3, mesh: 'agm', ground: true },
   kh: { name: 'Kh-29', speed: 0, accel: 70, max: 330, grav: 0, radius: 8, dmg: 280, direct: 2400, life: 40, trail: true, homing: 1.3, mesh: 'agm', ground: true },
   aam: { name: 'AIM-9', speed: 0, accel: 200, max: 750, grav: 0, radius: 9, dmg: 220, direct: 1600, life: 14, trail: true, homing: 3.4, prox: 12, mesh: 'missile' },
@@ -127,7 +153,7 @@ export function hitSoldier(e, o, d, maxT) {
 
 function hitKind(kind, v, o, d, maxT) {
   let t = Infinity;
-  if (kind === 'tank') t = rayYawBox(o, d, v.pos, v.yaw || 0, 1.75, 0.05, 2.4, 3.4, maxT);
+  if (SPEC[kind]?.ground) t = rayYawBox(o, d, v.pos, v.yaw || 0, 1.75, 0.05, 2.4, 3.4, maxT);
   else if (kind === 'jet' || kind === 'attacker') {
     t = raySphere(o, d, v.pos, 2.2, maxT);
     fwdOf(v.quat, _h2);
@@ -167,8 +193,9 @@ function mats(team, ally) {
   if (matCache.has(key)) return matCache.get(key);
   const std = (color, roughness, metalness) => new THREE.MeshStandardMaterial({ color, roughness, metalness });
   const M = {
-    body: std(team ? 0x4f5b38 : 0xa8966c, 0.72, 0.3),
-    hull2: std(team ? 0x3e4830 : 0x8f7e5a, 0.75, 0.3),
+    // painted steel: US desert tan, Russian three-tone green, with panel lines and grime
+    body: new THREE.MeshStandardMaterial({ map: team ? paint('armorRU', ['#56613c', '#3f482b', '#6b6a44', '#2f3322'], 'blotch') : paint('armorUS', ['#b09c72', '#9c8a62'], 'twotone'), roughness: 0.75, metalness: 0.3 }),
+    hull2: new THREE.MeshStandardMaterial({ map: team ? paint('armorRU2', ['#46502f', '#363e26'], 'twotone') : paint('armorUS2', ['#978660', '#877756'], 'twotone'), roughness: 0.78, metalness: 0.3 }),
     rubber: std(0x1e1f1c, 0.95, 0),
     dark: std(0x1d1e1f, 0.6, 0.5),
     track: std(0x161616, 0.95, 0.15),
@@ -330,6 +357,141 @@ function buildT80(ally) {
   return { g, hull, turret, gun, muzzle, coax, gunZ: gun.position.z };
 }
 
+// ---------- APCs, IFVs and late main battle tanks ----------
+// shared return shape: { g, hull, turret, gun, muzzle, coax, gunZ }
+function wheelsX(hull, M, xs, zs, r, w) {
+  for (const x of xs) for (const z of zs) {
+    mk(hull, cylX(r, w, 18), M.rubber, x, r, z);
+    mk(hull, cylX(r * 0.55, w + 0.04, 12), M.hull2, x, r, z);
+    mk(hull, cylX(r * 0.18, w + 0.08, 8), M.dark, x, r, z);
+  }
+}
+function smallTurret(g, M, y, z, gunLen, gunR, opts = {}) {
+  const turret = new THREE.Group(); turret.position.set(opts.x || 0, y, z); g.add(turret);
+  const gun = new THREE.Group(); gun.position.set(0, opts.gy ?? 0.25, opts.gz ?? -0.6); turret.add(gun);
+  mk(gun, cylZ(gunR, gunR, gunLen, 10), M.metal, 0, 0, -gunLen / 2);
+  mk(gun, cylZ(gunR * 1.7, gunR * 1.7, 0.4, 10), M.dark, 0, 0, -0.1);
+  const muzzle = new THREE.Object3D(); muzzle.position.set(0, 0, -gunLen - 0.05); gun.add(muzzle);
+  const coax = new THREE.Object3D(); coax.position.set(0.2, 0.05, -0.3); gun.add(coax);
+  return { turret, gun, muzzle, coax, gunZ: gun.position.z };
+}
+
+function buildM113(ally) {
+  const M = mats(0, ally), g = new THREE.Group(), hull = new THREE.Group(); g.add(hull);
+  // the aluminium box: sloped nose plate, flat sides, ramp at the back
+  mk(hull, rb(2.68, 1.2, 4.3, 0.05), M.body, 0, 1.25, 0.25);
+  mk(hull, rb(2.68, 0.1, 1.3, 0.03), M.body, 0, 1.6, -2.15, -0.6);
+  mk(hull, rb(2.68, 0.7, 0.9, 0.04), M.body, 0, 0.85, -2.25, 0.5);
+  mk(hull, rb(2.3, 0.9, 0.08, 0.02), M.hull2, 0, 1.25, 2.43);
+  mk(hull, rb(2.0, 0.06, 1.1, 0.02), M.hull2, 0, 1.87, 0.9);
+  mk(hull, rb(2.4, 0.5, 0.06, 0.02), M.hull2, 0, 1.45, -2.72, -0.3);
+  tracks(hull, M, 5, 0.3, 4.8, 1.15, (s) => {
+    mk(hull, rb(0.05, 0.4, 4.4, 0.01), M.rubber, 1.4 * s, 0.9, 0.2);
+    mk(hull, cylZ(0.08, 0.08, 0.06, 10), M.lamp, 0.95 * s, 1.55, -2.62);
+    mk(hull, rb(0.3, 0.45, 0.3, 0.03), M.dark, 1.15 * s, 1.95, 2.1);
+  });
+  mk(hull, cylZ(0.07, 0.07, 1.6, 8), M.dark, -1.0, 1.95, 0.2);
+  const T = smallTurret(g, M, 1.9, -0.6, 1.6, 0.045, { x: 0.35, gy: 0.35, gz: -0.3 });
+  mk(T.turret, cylY(0.42, 0.3, 14), M.hull2, 0, 0.1, 0);
+  mk(T.turret, rb(0.9, 0.55, 0.06, 0.02), M.hull2, 0, 0.45, -0.45);
+  mk(T.gun, rb(0.14, 0.2, 0.9, 0.02), M.dark, 0, 0, 0.1);
+  return { g, hull, ...T };
+}
+
+function buildBTR80(ally) {
+  const M = mats(1, ally), g = new THREE.Group(), hull = new THREE.Group(); g.add(hull);
+  // long boat hull: sharp lower bow, sloped upper sides, eight big wheels
+  mk(hull, rb(2.6, 1.05, 5.8, 0.08), M.body, 0, 1.45, 0.3);
+  mk(hull, G.btrNose ||= plate([[-1.3, 0], [-0.4, -1.4], [0.4, -1.4], [1.3, 0]], 1.0), M.body, 0, 0.95, -2.55);
+  mk(hull, rb(2.3, 0.1, 1.5, 0.03), M.body, 0, 2.05, -2.3, -0.45);
+  for (const s of [-1, 1]) {
+    mk(hull, rb(0.1, 0.62, 5.6, 0.03), M.hull2, 1.28 * s, 1.95, 0.35, 0, 0, 0.35 * s);
+    mk(hull, rb(0.06, 0.55, 0.9, 0.02), M.hull2, 1.36 * s, 1.35, 0.1);
+    for (const z of [-1.2, 1.6]) mk(hull, rb(0.08, 0.2, 0.2, 0.02), M.glass, 1.4 * s, 2.0, z);
+    mk(hull, cylZ(0.09, 0.09, 0.06, 10), M.lamp, 0.9 * s, 1.7, -3.1);
+  }
+  mk(hull, rb(2.1, 0.12, 2.2, 0.03), M.hull2, 0, 2.28, 1.5);
+  wheelsX(hull, M, [-1.35, 1.35], [-2.2, -0.9, 0.7, 2.0], 0.55, 0.36);
+  for (const s of [-1, 1]) mk(hull, rb(0.3, 0.2, 5.4, 0.03), M.dark, 1.2 * s, 1.15, 0);
+  const T = smallTurret(g, M, 2.3, -0.9, 2.2, 0.06, { gy: 0.35, gz: -0.4 });
+  mk(T.turret, G.btrT ||= new THREE.ConeGeometry(0.62, 0.55, 12), M.body, 0, 0.3, 0);
+  mk(T.gun, rb(0.2, 0.26, 0.6, 0.03), M.hull2, 0, 0, 0.15);
+  mk(T.turret, rb(0.12, 0.1, 0.2, 0.02), M.glass, 0.3, 0.45, -0.3);
+  return { g, hull, ...T };
+}
+
+function buildBradley(ally) {
+  const M = mats(0, ally), g = new THREE.Group(), hull = new THREE.Group(); g.add(hull);
+  mk(hull, rb(3.2, 1.25, 6.1, 0.08), M.body, 0, 1.25, 0.2);
+  mk(hull, rb(3.2, 0.12, 1.9, 0.03), M.body, 0, 1.55, -2.55, -0.62);
+  mk(hull, rb(3.2, 0.62, 0.7, 0.04), M.body, 0, 0.9, -3.0, 0.55);
+  mk(hull, rb(2.6, 1.0, 0.1, 0.02), M.hull2, 0, 1.3, 3.27);
+  // add-on armour tiles down the sides
+  for (const s of [-1, 1]) for (let i = 0; i < 6; i++) mk(hull, rb(0.14, 0.6, 0.95, 0.02), M.hull2, 1.72 * s, 1.35, -2.3 + i * 0.98);
+  tracks(hull, M, 6, 0.32, 6.3, 1.38, (s) => {
+    mk(hull, rb(0.08, 0.5, 6.0, 0.02), M.rubber, 1.68 * s, 0.85, 0.2);
+    mk(hull, cylZ(0.08, 0.08, 0.06, 10), M.lamp, 1.1 * s, 1.75, -3.3);
+  });
+  mk(hull, rb(2.6, 0.08, 2.4, 0.02), M.hull2, 0, 1.9, 1.7);
+  // turret offset right: 25 mm Bushmaster, TOW launcher box on the left side
+  const T = smallTurret(g, M, 1.95, -0.4, 2.5, 0.055, { x: 0.35, gy: 0.35, gz: -0.8 });
+  mk(T.turret, G.bradT ||= plate([[-0.95, 1.0], [-1.05, -0.4], [-0.6, -1.0], [0.6, -1.0], [1.05, -0.4], [0.95, 1.0]], 0.72), M.body, 0, 0.36, 0);
+  mk(T.turret, rb(1.8, 0.35, 0.6, 0.04), M.hull2, 0, 0.25, 1.1);
+  mk(T.turret, rb(0.5, 0.45, 1.4, 0.04), M.olive, -1.25, 0.55, 0.2);
+  for (const y of [0.42, 0.68]) mk(T.turret, disc(0.14), M.dark, -1.25, y, -0.51).rotation.set(Math.PI / 2, 0, 0);
+  mk(T.turret, rb(0.4, 0.35, 0.4, 0.03), M.hull2, 0.55, 0.92, -0.35);
+  mk(T.turret, rb(0.28, 0.16, 0.04, 0.01), M.glass, 0.55, 0.95, -0.56);
+  mk(T.gun, rb(0.3, 0.28, 0.7, 0.03), M.hull2, 0, 0, 0.2);
+  mk(T.gun, cylZ(0.08, 0.07, 0.35, 10), M.dark, 0, 0, -2.45);
+  mk(T.turret, rb(0.7, 0.03, 0.7, 0.01), M.mark, 0, 0.73, 0.3);
+  return { g, hull, ...T };
+}
+
+function buildBMP2(ally) {
+  const M = mats(1, ally), g = new THREE.Group(), hull = new THREE.Group(); g.add(hull);
+  // low hull with the ribbed, sharply pointed bow
+  mk(hull, rb(3.0, 0.95, 4.6, 0.08), M.body, 0, 1.15, 0.8);
+  mk(hull, G.bmpNose ||= plate([[-1.5, 0], [-0.3, -2.1], [0.3, -2.1], [1.5, 0]], 0.9), M.body, 0, 0.72, -1.5, -0.12);
+  for (let i = 0; i < 5; i++) mk(hull, rb(2.6 - i * 0.45, 0.04, 0.05, 0.01), M.hull2, 0, 1.25 - i * 0.02, -1.65 - i * 0.35, -0.25);
+  mk(hull, rb(2.8, 0.1, 1.5, 0.03), M.body, 0, 1.52, -1.2, -0.2);
+  tracks(hull, M, 6, 0.36, 6.4, 1.35, (s) => {
+    mk(hull, rb(0.06, 0.35, 5.8, 0.02), M.hull2, 1.66 * s, 1.1, 0.2);
+    mk(hull, cylZ(0.08, 0.08, 0.06, 10), M.lamp, 1.1 * s, 1.5, -2.6);
+    for (const z of [0.5, 1.6, 2.6]) mk(hull, rb(0.3, 0.12, 0.35, 0.02), M.hull2, 0.8 * s, 1.68, z);
+  });
+  const T = smallTurret(g, M, 1.6, -0.2, 2.9, 0.05, { gy: 0.35, gz: -0.6 });
+  mk(T.turret, G.bmpT ||= new THREE.CylinderGeometry(0.75, 0.95, 0.55, 14), M.body, 0, 0.28, 0);
+  mk(T.turret, cylZ(0.08, 0.08, 1.2, 8), M.olive, 0.15, 0.78, 0.1);
+  mk(T.turret, rb(0.25, 0.25, 0.3, 0.03), M.hull2, -0.45, 0.65, -0.25);
+  mk(T.gun, cylZ(0.08, 0.08, 0.8, 10), M.hull2, 0, 0, -0.3);
+  mk(T.gun, cylZ(0.065, 0.065, 0.25, 10), M.dark, 0, 0, -2.85);
+  mk(T.turret, rb(0.5, 0.03, 0.5, 0.01), M.mark, 0, 0.56, 0.3);
+  return { g, hull, ...T };
+}
+
+// M1A2 SEPv3: the Abrams with the commander's independent viewer, TUSK tiles and a loader shield
+function buildM1A2(ally) {
+  const m = buildAbrams(ally), M = mats(0, ally);
+  mk(m.turret, rb(0.45, 0.5, 0.45, 0.05), M.hull2, -0.35, 1.25, -0.2);
+  mk(m.turret, rb(0.34, 0.22, 0.05, 0.02), M.glass, -0.35, 1.3, -0.43);
+  mk(m.turret, rb(0.6, 0.45, 0.06, 0.02), M.hull2, -0.65, 1.2, 0.1);
+  for (const s of [-1, 1]) for (let i = 0; i < 7; i++) mk(m.hull, rb(0.16, 0.42, 0.7, 0.02), M.hull2, 1.86 * s, 1.1, -2.6 + i * 0.78);
+  for (let i = 0; i < 4; i++) mk(m.hull, rb(0.55, 0.28, 0.4, 0.03), M.olive, -0.8 + i * 0.55, 1.62, 3.3);
+  return m;
+}
+
+// T-90M: T-80-style hull, Relikt wedges on the turret front and a slat cage round the bustle
+function buildT90M(ally) {
+  const m = buildT80(ally), M = mats(1, ally);
+  for (const s of [-1, 1]) {
+    mk(m.turret, G.relikt ||= plate([[-0.55, 0.6], [-0.55, -0.2], [0.55, -0.9], [0.55, 0.6]], 0.42), M.hull2, 0.72 * s, 0.4, -1.05, 0, s > 0 ? 0 : Math.PI, 0);
+  }
+  for (let i = 0; i < 9; i++) mk(m.turret, rb(0.03, 0.55, 0.03, 0.005), M.dark, -1.1 + i * 0.275, 0.4, 2.35);
+  mk(m.turret, rb(2.3, 0.03, 0.03, 0.005), M.dark, 0, 0.66, 2.35);
+  mk(m.turret, rb(0.5, 0.4, 0.5, 0.05), M.hull2, 0.4, 1.0, -0.2);
+  return m;
+}
+
 // Team 0 flies the F-16, team 1 the Su-27.
 export function buildJet(team, ally) {
   return team ? buildSu27(ally) : buildF16(ally);
@@ -483,12 +645,12 @@ export function buildAA(team, ally) {
   return { g, mount, guns, muzzles };
 }
 
-const MODELS = { tank: buildTank, jet: (t, a) => buildAircraft(airframeFor('jet', t), a), attacker: (t, a) => buildAircraft(airframeFor('attacker', t), a), drone: buildDrone, drone10: (t, a) => buildDrone(t, a, 1.9), recon: buildRecon, aa: buildAA, heli: (team) => buildChopper(team) };
+const MODELS = { tank: buildTank, apc: (t, a) => t ? buildBTR80(a) : buildM113(a), ifv: (t, a) => t ? buildBMP2(a) : buildBradley(a), mbt: (t, a) => t ? buildT90M(a) : buildM1A2(a), jet: (t, a) => buildAircraft(airframeFor('jet', t), a), attacker: (t, a) => buildAircraft(airframeFor('attacker', t), a), drone: buildDrone, drone10: (t, a) => buildDrone(t, a, 1.9), recon: buildRecon, aa: buildAA, heli: (team) => buildChopper(team) };
 
 function pose(kind, m, pos, quat, a, b, dt) {
   m.g.position.copy(pos);
   m.g.quaternion.copy(quat);
-  if (kind === 'tank') { m.turret.rotation.y = a; m.gun.rotation.x = b; }
+  if (SPEC[kind]?.ground) { m.turret.rotation.y = a; m.gun.rotation.x = b; }
   else if (kind === 'aa') { m.mount.rotation.y = a; m.guns.rotation.x = b; }
   else if (kind === 'heli') { m.rotor.rotation.y += dt * 28; m.tail.rotation.x += dt * 35; }
   else if (m.props) for (const p of m.props) p.material.opacity = 0.22 + Math.random() * 0.2;
@@ -571,7 +733,7 @@ class Vehicle {
 
   get controlled() { return !!this.driver?.isPlayer; }
   addModel() { this.m = MODELS[this.kind](this.team, this.team === this.game.player.team); this.game.scene.add(this.m.g); }
-  aimPoint(out) { return out.set(this.pos.x, this.pos.y + (this.kind === 'tank' ? 1.3 : this.kind === 'aa' ? 1.2 : 0), this.pos.z); }
+  aimPoint(out) { return out.set(this.pos.x, this.pos.y + (this.spec?.ground ? 1.3 : this.kind === 'aa' ? 1.2 : 0), this.pos.z); }
   hit(o, d, maxT) { return hitKind(this.kind, this, o, d, maxT); }
   control() {}
   grade() { return null; }
@@ -595,7 +757,7 @@ class Vehicle {
       attacker.score += this.spec.bounty;
       g.popupFor(attacker, [[`${this.name} destroyed`, this.spec.bounty]]);
     }
-    if (this.kind === 'tank' || this.spec.fixed) g.announce(this.team, `${this.name} destroyed`, `Enemy ${this.name} destroyed`);
+    if (this.spec.ground || this.spec.fixed) g.announce(this.team, `${this.name} destroyed`, `Enemy ${this.name} destroyed`);
     const d = this.driver;
     if (d) {
       g.leftVehicle(d, this);
@@ -635,8 +797,12 @@ class Vehicle {
 
 // ---------- tank ----------
 export class Tank extends Vehicle {
-  constructor(game, owner, id, x, z, yaw) {
-    super(game, 'tank', owner, id);
+  constructor(game, owner, id, x, z, yaw, kind = 'tank') {
+    super(game, kind, owner, id);
+    this.A = ARMOR[kind][this.team] || ARMOR.tank[0];
+    this.name = this.A.name; this.maxHealth = this.health = this.A.hp;
+    this.atgm = this.A.atgm?.n || 0; this.atgmWant = false;
+    this.help = HELP.tank + (this.atgm ? ' · R guided missile' : '');
     this.addModel();
     this.pos.set(x, groundAt(x, z, 1.5, 1), z);
     this.yaw = yaw; this.speed = 0; this.aimYaw = yaw; this.aimPitch = 0; this.tYaw = yaw; this.tPitch = 0;
@@ -654,6 +820,7 @@ export class Tank extends Vehicle {
     this.aimPitch = clamp(this.aimPitch - inp.dy * s, -0.3, 0.45);
     this.throttle = inp.forward - inp.back; this.steer = inp.left - inp.right; this.boost = inp.sprint;
     this.fireWant = inp.fire; this.mgWant = inp.jump; this.zoomWant = inp.ads;
+    if (inp.reload) this.atgmWant = true;
   }
 
   // drive straight through crates, fences, barrels, sandbags and thin walls
@@ -674,7 +841,7 @@ export class Tank extends Vehicle {
     const fx = -Math.sin(yaw), fz = -Math.cos(yaw), lo = this.pos.y + 0.8, hi = this.pos.y + 2.4;
     for (const k of [-1.9, 0, 1.9]) if (overlaps(x + fx * k, z + fz * k, 1.45, lo, hi)) return false;
     for (const v of this.game.vehicles) {
-      if (v === this || !v.alive || v.kind !== 'tank') continue;
+      if (v === this || !v.alive || !v.spec?.ground) continue;
       const nd = Math.hypot(v.pos.x - x, v.pos.z - z);
       if (nd < 4.5 && nd < Math.hypot(v.pos.x - this.pos.x, v.pos.z - this.pos.z)) return false;
     }
@@ -687,10 +854,10 @@ export class Tank extends Vehicle {
     if (this.ai && !this.driver) this.think(dt);
     else if (!this.driver) { this.throttle = 0; this.steer = 0; this.fireWant = false; this.mgWant = false; }
     // tracks: accelerate to the throttle's speed, neutral steer on A/D
-    const want = this.throttle > 0 ? (this.boost ? 10.5 : 8) * this.throttle : this.throttle * 4.5;
+    const want = this.throttle > 0 ? (this.boost ? this.A.boost : this.A.speed) * this.throttle : this.throttle * 4.5;
     const acc = Math.abs(want) > Math.abs(this.speed) && want * this.speed >= 0 ? 3.2 : 7;
     this.speed += clamp(want - this.speed, -acc * dt, acc * dt);
-    const turn = this.steer * 0.85 * dt;
+    const turn = this.steer * this.A.turn * dt;
     const fx = -Math.sin(this.yaw), fz = -Math.cos(this.yaw);
     const nx = this.pos.x + fx * this.speed * dt, nz = this.pos.z + fz * this.speed * dt, ny = this.yaw + turn;
     if (Math.abs(this.speed) > 1.2 && (this.crushT -= dt) <= 0) this.crush(nx + fx * Math.sign(this.speed) * 0.4, nz + fz * Math.sign(this.speed) * 0.4, ny);
@@ -718,7 +885,8 @@ export class Tank extends Vehicle {
     this.recoil = Math.max(0, this.recoil - dt * 2.5);
     this.reload = Math.max(0, this.reload - dt);
     this.pose(dt);
-    if (this.fireWant && this.reload <= 0) this.fireCannon();
+    if (this.fireWant && this.reload <= 0) this.fireMain();
+    if (this.atgmWant) { this.atgmWant = false; this.fireAtgm(); }
     if (this.mgWant && (this.mgT -= dt) <= 0) this.fireMG();
     this.vel.set(fx * this.speed, 0, fz * this.speed);
     this.sound?.set(this.controlled ? null : this.pos, 0.25 + Math.min(1, Math.abs(this.speed) / 9) * 0.65 + (this.throttle ? 0.1 : 0));
@@ -739,10 +907,43 @@ export class Tank extends Vehicle {
     return d.set(0, 0, -1).applyQuaternion(_q2);
   }
 
+  fireMain() {
+    const M = this.A.main;
+    if (M.type === 'cannon') { this.fireCannon(); return; }
+    const g = this.game, o = new THREE.Vector3(), d = new THREE.Vector3();
+    this.gunRay(o, d);
+    d.x += (Math.random() - 0.5) * 0.01; d.y += (Math.random() - 0.5) * 0.01; d.z += (Math.random() - 0.5) * 0.01;
+    this.reload = M.rate; this.recoil = M.type === 'auto' ? 0.35 : 0.1;
+    g.vehicleGun(this, o, d.normalize(), M.name, M.dmg, 0xffb070, M.type === 'auto' ? 'jetgun' : 'lmg', true);
+    g.effects.flash(o, M.type === 'auto' ? 1.4 : 0.8);
+    if (M.type === 'auto') g.explode(this.aimHit(o, d), this.driver || this.owner, 1.5, 30, M.name, { streak: true });
+    g.noise(this, this.pos, 60);
+  }
+
+  // where the gun ray meets the world (autocannon HE splash lands there)
+  aimHit(o, d) {
+    const h = raycastWorld(o, d, 400);
+    return o.clone().addScaledVector(d, h ? h.t : 400);
+  }
+
+  fireAtgm() {
+    if (this.atgm <= 0) { if (this.controlled) this.game.hud.toast('No guided missiles left'); return; }
+    this.atgm--;
+    const g = this.game, o = new THREE.Vector3(), d = new THREE.Vector3();
+    this.gunRay(o, d);
+    o.addScaledVector(_u.set(0, 0.6, 0), 1);
+    // guided onto whatever is under the sight, or the ground point there
+    const hit = sweepHit(g, o, d, 1500, this.team, this);
+    const p = o.clone().addScaledVector(d, hit ? hit.t : 1500);
+    const tgt = hit?.entity || { alive: true, point: true, pos: p, vel: new THREE.Vector3() };
+    g.fireProjectile('atgm', this.driver || this.owner, o, d.clone().multiplyScalar(30), tgt, this);
+    g.audio.rpg?.(this.controlled ? null : o);
+  }
+
   fireCannon() {
     const g = this.game, o = new THREE.Vector3(), d = new THREE.Vector3();
     this.gunRay(o, d);
-    this.reload = 3.2; this.recoil = 1;
+    this.reload = this.A.main.reload; this.recoil = 1;
     g.fireProjectile('shell', this.driver || this.owner, o, d.clone().multiplyScalar(PROJ.shell.speed), null, this);
     g.effects.flash(o, 3.2);
     g.effects.cannonBlast(o, d);
@@ -779,11 +980,12 @@ export class Tank extends Vehicle {
       const p = t.aimPoint(_w, false);
       this.m.gun.getWorldPosition(_v);
       const dx = p.x - _v.x, dz = p.z - _v.z, h = Math.hypot(dx, dz);
-      const drop = 0.5 * PROJ.shell.grav * (h / PROJ.shell.speed) ** 2;
+      const drop = this.A.main.type === 'cannon' ? 0.5 * PROJ.shell.grav * (h / PROJ.shell.speed) ** 2 : 0;
       if (t !== this.aimT) { this.aimT = t; this.aimOff = (Math.random() - 0.5) * 0.08; this.aimOffP = (Math.random() - 0.5) * 0.04; }
       this.tYaw = Math.atan2(-dx, -dz) + this.aimOff; this.tPitch = Math.atan2(p.y + drop - _v.y, h) + this.aimOffP;
       const err = Math.abs(wrap(this.yaw + this.a - this.tYaw)) + Math.abs(this.b + this.tiltX - this.tPitch);
-      if (err < 0.05 && (this.aiFire -= dt) <= 0) {
+      if (this.A.main.type !== 'cannon') { if (err < 0.06) this.fireWant = true; if (t.isVehicle && this.atgm > 0 && err < 0.03 && h > 60 && Math.random() < dt * 0.3) this.atgmWant = true; }
+      else if (err < 0.05 && (this.aiFire -= dt) <= 0) {
         this.fireWant = true; this.aiFire = 2.5 + Math.random() * 3;
         // the gunner corrects after each shot, but never perfectly
         this.aimOff *= 0.4; this.aimOff += (Math.random() - 0.5) * 0.03; this.aimOffP = (Math.random() - 0.5) * 0.02;
@@ -871,13 +1073,14 @@ export class Tank extends Vehicle {
       ring(ctx, s[0], s[1], 13, this.reload > 0 ? 'rgba(255,190,90,0.9)' : 'rgba(150,255,150,0.95)');
       if (this.reload > 0) {
         ctx.strokeStyle = 'rgba(150,255,150,0.95)'; ctx.lineWidth = 3;
-        ctx.beginPath(); ctx.arc(s[0], s[1], 18, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - this.reload / 3.2)); ctx.stroke();
+        ctx.beginPath(); ctx.arc(s[0], s[1], 18, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - this.reload / (this.A.main.reload || this.A.main.rate))); ctx.stroke();
       }
     }
   }
 
   stats() {
-    return `<div>CANNON <b>${this.reload > 0 ? `${this.reload.toFixed(1)}s` : 'READY'}</b></div><div>SPEED <b>${Math.round(Math.abs(this.speed) * 3.6)}</b> km/h</div>`;
+    const M = this.A.main;
+    return `<div>${this.A.name}</div><div>${M.type === 'cannon' ? 'CANNON' : M.name} <b>${M.type === 'cannon' ? (this.reload > 0 ? `${this.reload.toFixed(1)}s` : 'READY') : 'LMB'}</b>${this.A.atgm ? ` · ${this.A.atgm.name} <b>${this.atgm}</b>` : ''}</div><div>SPEED <b>${Math.round(Math.abs(this.speed) * 3.6)}</b> km/h</div>`;
   }
 }
 
@@ -1948,7 +2151,7 @@ export class VehicleProxy {
     this.lastRx = this.game.time;
   }
 
-  aimPoint(out) { return out.set(this.pos.x, this.pos.y + (this.kind === 'tank' ? 1.3 : this.kind === 'aa' ? 1.2 : 0), this.pos.z); }
+  aimPoint(out) { return out.set(this.pos.x, this.pos.y + (this.spec?.ground ? 1.3 : this.kind === 'aa' ? 1.2 : 0), this.pos.z); }
   hit(o, d, maxT) { return hitKind(this.kind, this, o, d, maxT); }
 
   // host only: the client driving it is told its health; at zero it is destroyed here
@@ -2036,7 +2239,7 @@ export function tankSpot(game, team) {
     for (const dx of [0, -6, 6, -12, 12, -18, 18, -24, 24, -30, 30]) {
       const x = SIZE / 2 + dx, z = team === 0 ? zz : SIZE - zz;
       if ([-1.9, 0, 1.9].some(k => overlaps(x, z + k, 1.5, 0.8, 2.4))) continue;
-      if (game.vehicles.some(v => v.alive && (v.kind === 'tank' || v.kind === 'aa') && Math.hypot(v.pos.x - x, v.pos.z - z) < 6.5)) continue;
+      if (game.vehicles.some(v => v.alive && (v.spec?.ground || v.kind === 'aa') && Math.hypot(v.pos.x - x, v.pos.z - z) < 6.5)) continue;
       return { x, z, yaw };
     }
   }

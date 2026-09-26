@@ -14,6 +14,7 @@ import { Net, cleanName } from './net.js';
 import { daily, describe } from './challenges.js';
 import { loadAssets, setAssetAnisotropy } from './assets.js';
 import { setThermal } from './soldier.js';
+import { TREE, unlocked, researching, progress, validChoice } from './research.js';
 
 const canvas = document.getElementById('game');
 const gfx = new Graphics(canvas);
@@ -67,7 +68,7 @@ function loadMapById(id) {
 const game = new Game({ renderer, scene, camera, wscene, audio, hud, loadMap: loadMapById });
 
 // ---------- settings ----------
-const defaults = { sens: 1, fov: 80, vol: 0.7, difficulty: 'regular', cls: 'assault', name: '', map: 'crossroads', mode: 'gw', quality: 'high', camo: 'none', fpv: '5', jet: 'fighter', huntRole: 'hunter', blur: 0.5, scale: 1, dynres: true };
+const defaults = { sens: 1, fov: 80, vol: 0.7, difficulty: 'regular', cls: 'assault', name: '', map: 'crossroads', mode: 'gw', quality: 'high', camo: 'none', fpv: '5', jet: 'attack', ground: 'apc', huntRole: 'hunter', blur: 0.5, scale: 1, dynres: true };
 const matchRules = () => ({ scoreLimit: MODES[settings.mode].scoreLimit, timeLimit: MODES[settings.mode].timeLimit });
 let settings = { ...defaults };
 try { Object.assign(settings, JSON.parse(localStorage.getItem('frontline.settings') || '{}')); } catch { /* storage unavailable */ }
@@ -123,8 +124,15 @@ function renderClassCards() {
   $('camos').innerHTML = CAMOS.map(c => `<button class="camo camo-${c.id}${c.id === settings.camo ? ' on' : ''}${c.rank > pr.level ? ' locked' : ''}" data-camo="${c.id}"${c.rank > pr.level ? ' disabled' : ''}>` +
     `<b>${c.name}</b><span>${c.rank > pr.level ? `Rank ${c.rank}` : c.id === settings.camo ? 'Equipped' : 'Unlocked'}</span></button>`).join('');
   applyCamo(settings.camo, CAMO_MATS);
-  $('fpvSize').innerHTML = [['5', '5-inch'], ['10', '10-inch']].map(([k, n]) => `<button class="${settings.fpv === k ? 'on' : ''}" data-fpv="${k}">${n}</button>`).join('');
-  $('jetType').innerHTML = [['fighter', 'Fighter (F-16 / Su-27)'], ['attack', 'Attack (A-10 / Su-25)']].map(([k, n]) => `<button class="${settings.jet === k ? 'on' : ''}" data-jet="${k}">${n}</button>`).join('');
+  // tech tree: lines of vehicles, the selected one per line, research progress
+  for (const l of TREE) settings[l.setting] = validChoice(l, settings[l.setting]);
+  $('tree').innerHTML = TREE.map(l => `<div class="tline"><span class="tlabel">${l.line} <kbd>${l.key}</kbd></span>` + l.nodes.map((n, i) => {
+    const un = unlocked(n.id), sel = settings[l.setting] === n.id, cur = researching(l) === n, rp = progress(n.id);
+    const state = sel ? 'Selected' : un ? 'Unlocked' : cur ? `Researching ${Math.floor(rp / n.cost * 100)}%` : `${n.cost.toLocaleString()} RP`;
+    return `${i ? '<i class="tarrow">›</i>' : ''}<button class="tnode${sel ? ' on' : ''}${un ? '' : ' locked'}" data-line="${l.setting}" data-node="${n.id}"${un ? '' : ' disabled'}>` +
+      `<b>${n.names[0]}${n.names[1] !== n.names[0] ? ` / ${n.names[1]}` : ''}</b><span>${n.role}</span><em>${state}</em>` +
+      (un ? '' : `<u style="width:${Math.floor(rp / n.cost * 100)}%"></u>`) + '</button>';
+  }).join('') + '</div>').join('');
   $('huntRole').innerHTML = [['hunter', 'Hunter'], ['hider', 'Hider']].map(([k, n]) => `<button class="${settings.huntRole === k ? 'on' : ''}" data-role="${k}">${n}</button>`).join('');
   $('huntRow').style.opacity = settings.mode === 'hunt' ? 1 : 0.45;
   const dl = daily();
@@ -133,15 +141,10 @@ function renderClassCards() {
   $('deploy').textContent = MODES[settings.mode].coop ? 'PLAY SOLO MISSION' : 'PLAY SOLO';
 }
 
-$('fpvSize').addEventListener('click', (e) => {
-  const b = e.target.closest('[data-fpv]');
-  if (!b) return;
-  settings.fpv = b.dataset.fpv; save(); audio.init(); audio.ui(); renderClassCards();
-});
-$('jetType').addEventListener('click', (e) => {
-  const b = e.target.closest('[data-jet]');
-  if (!b) return;
-  settings.jet = b.dataset.jet; save(); audio.init(); audio.ui(); renderClassCards();
+$('tree').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-node]');
+  if (!b || b.disabled) return;
+  settings[b.dataset.line] = b.dataset.node; save(); audio.init(); audio.ui(); renderClassCards();
 });
 $('huntRole').addEventListener('click', (e) => {
   const b = e.target.closest('[data-role]');

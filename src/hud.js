@@ -6,6 +6,7 @@ import { OBJECTIVES } from './modes.js';
 import { addXP } from './rank.js';
 import { finishMatch, describe } from './challenges.js';
 import { CAMOS } from './camo.js';
+import { addResearch } from './research.js';
 
 const $ = (id) => document.getElementById(id);
 const DEG = Math.PI / 180;
@@ -346,6 +347,7 @@ export class Hud {
     $('endXp').innerHTML = `+${xp.gained.toLocaleString()} XP &middot; Rank ${xp.after.level} ${esc(xp.after.title)}` +
       (bonus.length ? `<small class="bonus">${bonus.join(' &middot; ')}</small>` : '') +
       (xp.promoted ? ` <b class="promo">PROMOTED</b>` : '') +
+      (() => { const u = addResearch(xp.gained); return ` <span class="rp">+${xp.gained.toLocaleString()} RP</span>` + u.map(n => ` <b class="promo">${esc(n.names[0].toUpperCase())} / ${esc(n.names[1].toUpperCase())} UNLOCKED</b>`).join(''); })() +
       CAMOS.filter(c => c.rank > xp.before.level && c.rank <= xp.after.level).map(c => ` <b class="promo">${c.name.toUpperCase()} CAMO UNLOCKED</b>`).join('') +
       (xp.after.next ? `<span class="xpbar"><i style="width:${Math.round(xp.after.cur / xp.after.next * 100)}%"></i></span>` : '');
     $('endBoard').innerHTML = this.boardHtml(game);

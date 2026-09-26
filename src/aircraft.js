@@ -114,7 +114,7 @@ function fin(stations, x = 0, cant = 0) {
 
 // ---------- paint ----------
 const paintCache = {};
-function paint(key, cols, pattern) {
+export function paint(key, cols, pattern) {
   if (paintCache[key]) return paintCache[key];
   const S = 512, c = document.createElement('canvas'); c.width = c.height = S;
   const g = c.getContext('2d');
