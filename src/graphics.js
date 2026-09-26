@@ -40,6 +40,32 @@ const RaysShader = {
     }`,
 };
 
+// Camera motion blur: each pixel's view ray is reprojected with last frame's camera rotation,
+// and the image is smeared along the difference. Rotation drives almost all the blur you see
+// in a shooter, and this needs no depth or velocity buffer. The viewmodel is drawn after it.
+const BlurShader = {
+  uniforms: { tDiffuse: { value: null }, reproj: { value: new THREE.Matrix4() }, scale: { value: 0 } },
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: `uniform sampler2D tDiffuse; uniform mat4 reproj; uniform float scale; varying vec2 vUv;
+    void main() {
+      vec3 base = texture2D(tDiffuse, vUv).rgb;
+      if (scale <= 0.0) { gl_FragColor = vec4(base, 1.0); return; }
+      vec4 ndc = vec4(vUv * 2.0 - 1.0, 1.0, 1.0);
+      vec4 prev = reproj * ndc;
+      vec2 vel = (ndc.xy - prev.xy / prev.w) * 0.5 * scale;
+      float len = length(vel);
+      if (len < 0.0005) { gl_FragColor = vec4(base, 1.0); return; }
+      vel *= min(1.0, 0.05 / len);
+      vec3 acc = base; float w = 1.0;
+      for (int i = 1; i <= 10; i++) {
+        float t = float(i) / 10.0 - 0.5;
+        acc += texture2D(tDiffuse, clamp(vUv + vel * t, 0.001, 0.999)).rgb;
+        w += 1.0;
+      }
+      gl_FragColor = vec4(acc / w, 1.0);
+    }`,
+};
+
 const GradeShader = {
   uniforms: {
     tDiffuse: { value: null }, time: { value: 0 }, sat: { value: 1 }, contrast: { value: 1 },
@@ -74,6 +100,8 @@ const GradeShader = {
     }`,
 };
 
+const _m1 = new THREE.Matrix4(), _m2 = new THREE.Matrix4(), _m3 = new THREE.Matrix4();
+
 export class Graphics {
   constructor(canvas) {
     this.canvas = canvas;
@@ -87,6 +115,13 @@ export class Graphics {
     setAnisotropy(Math.min(8, r.capabilities.getMaxAnisotropy()));
     this.q = null;
     this.override = null;
+    this.blurAmount = 0.5; // 0..1 from settings
+    this.renderScale = 1; // user render scale, 0.5..1
+    this.dynamic = true; // lower the resolution when frames run long
+    this.dynScale = 1;
+    this.frameMs = 16;
+    this.dynT = 0;
+    this.prevRot = null;
     this.composer = null;
     this.grade = null;
   }
@@ -123,6 +158,8 @@ export class Graphics {
       c.addPass(ao);
       this.ao = ao;
     } else this.ao = null;
+    this.blur = new ShaderPass(BlurShader);
+    c.addPass(this.blur);
     const vm = new RenderPass(this.wscene, this.wcamera);
     vm.clear = false; vm.clearDepth = true;
     c.addPass(vm);
@@ -155,7 +192,7 @@ export class Graphics {
 
   resize() {
     const q = this.q || QUALITY.high;
-    const ratio = Math.min(devicePixelRatio, q.ratio);
+    const ratio = Math.max(0.5, Math.min(devicePixelRatio, q.ratio) * this.renderScale * this.dynScale);
     this.renderer.setPixelRatio(ratio);
     this.renderer.setSize(innerWidth, innerHeight);
     if (this.grade) {
@@ -169,10 +206,40 @@ export class Graphics {
     }
   }
 
+  // Dynamic resolution: average the frame time and step the scale down when it runs over
+  // ~60 fps budget, back up when there is headroom. Checked twice a second.
+  dynamicRes(dt) {
+    this.frameMs += (dt * 1000 - this.frameMs) * 0.1;
+    if ((this.dynT += dt) < 0.5) return;
+    this.dynT = 0;
+    let s = this.dynScale;
+    if (!this.dynamic) s = 1;
+    else if (this.frameMs > 19) s = Math.max(0.6, s - 0.1);
+    else if (this.frameMs < 13) s = Math.min(1, s + 0.05);
+    if (s !== this.dynScale) { this.dynScale = s; this.resize(); }
+  }
+
+  updateBlur(dt) {
+    const cam = this.camera, u = this.blur.uniforms;
+    const rot = _m1.extractRotation(cam.matrixWorld);
+    if (!this.prevRot || this.blurAmount <= 0 || dt <= 0) {
+      u.scale.value = 0;
+    } else {
+      // current NDC ray -> world direction -> last frame's NDC
+      _m2.copy(cam.projectionMatrix).multiply(_m3.copy(this.prevRot).invert()).multiply(rot).multiply(cam.projectionMatrixInverse);
+      u.reproj.value.copy(_m2);
+      // blur as if the shutter were open for amount x 1/50 s, whatever the frame rate
+      u.scale.value = Math.min(3, this.blurAmount * (1 / 50) / dt);
+    }
+    (this.prevRot ||= new THREE.Matrix4()).copy(rot);
+  }
+
   // hurt: 0..1 desaturation; flash: 0..1 white-out (stun)
   render(showViewmodel, dt, hurt = 0, flash = 0) {
     const r = this.renderer;
+    this.dynamicRes(dt);
     if (this.composer) {
+      this.updateBlur(dt);
       this.vmPass.enabled = showViewmodel;
       const u = this.grade.uniforms;
       u.time.value += dt; u.hurt.value = hurt; u.flash.value = flash;

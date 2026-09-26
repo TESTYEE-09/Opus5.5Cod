@@ -1,3 +1,4 @@
+import { track, describe } from './challenges.js';
 import * as THREE from 'three';
 import { raycastWorld, lineOfSight, pointSolid, groundAt, overlaps, spawns, SIZE, GRAVITY, STEP, materialAt, objectAt, objectsNear, breakObject } from './world.js';
 import { Effects } from './effects.js';
@@ -374,6 +375,7 @@ export class Game {
         this.checkStreak(killer);
       }
       if (killer.isPlayer || killer.isRemote) this.medals(killer, victim, weapon, headshot);
+      if (killer.isPlayer) this.challenge(killer, victim, weapon, headshot, extra);
       else this.firstBlood = true;
     }
     victim.nemesis = valid ? killer : null;
@@ -414,6 +416,13 @@ export class Game {
     if (weapon === 'Knife') lines.push(['Knifed', 50]);
     for (const [, s] of lines.slice(1)) killer.score += s;
     this.popupFor(killer, lines);
+  }
+
+  // daily challenge progress for the local player's kills
+  challenge(killer, victim, weapon, headshot, extra) {
+    const d = { weapon, headshot, dist: killer.pos.distanceTo(victim.pos), vehicle: VEHICLE_WEAPONS.has(weapon) || !!extra.streak };
+    const done = [...track('kill', d), ...(killer.multi === 2 ? track('multi') : []), ...track('streak', { streak: killer.streak })];
+    for (const c of done) this.hud.popup([[`Challenge complete: ${describe(c)}`, c.xp]]);
   }
 
   popupFor(s, lines) {

@@ -4,6 +4,7 @@ import { STREAKS, CALLS, TEAM_NAMES } from './game.js';
 import { vehicleName } from './vehicles.js';
 import { OBJECTIVES } from './modes.js';
 import { addXP } from './rank.js';
+import { finishMatch, describe } from './challenges.js';
 
 const $ = (id) => document.getElementById(id);
 const DEG = Math.PI / 180;
@@ -336,8 +337,12 @@ export class Hud {
       $('endStats').innerHTML = [['Score', pl.score], ['Kills', pl.kills], ['Deaths', pl.deaths], ['K/D', kd], ['Assists', pl.assists], ['Best streak', pl.bestStreak]]
         .map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('');
     }
-    const xp = addXP(pl.score + (win ? (uc ? 3000 : 1000) : 250));
+    const day = finishMatch({ win, score: pl.score });
+    const xp = addXP((pl.score + (win ? (uc ? 3000 : 1000) : 250)) * day.mult + day.challengeXp);
+    const bonus = [day.mult > 1 ? `&times;${day.mult.toFixed(1)} (first match today${day.streak > 1 ? `, ${day.streak}-day streak` : ''})` : '',
+      ...day.earned.map(c => `${esc(describe(c))} +${c.xp.toLocaleString()}`)].filter(Boolean);
     $('endXp').innerHTML = `+${xp.gained.toLocaleString()} XP &middot; Rank ${xp.after.level} ${esc(xp.after.title)}` +
+      (bonus.length ? `<small class="bonus">${bonus.join(' &middot; ')}</small>` : '') +
       (xp.promoted ? ` <b class="promo">PROMOTED</b>` : '') +
       (xp.after.next ? `<span class="xpbar"><i style="width:${Math.round(xp.after.cur / xp.after.next * 100)}%"></i></span>` : '');
     $('endBoard').innerHTML = this.boardHtml(game);

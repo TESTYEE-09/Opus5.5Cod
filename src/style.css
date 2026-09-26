@@ -276,3 +276,20 @@ button:disabled { opacity: 0.5; cursor: default; }
 .xpbar { display: block; width: 260px; height: 5px; margin: 6px auto 0; background: rgba(255,255,255,0.12); }
 .xpbar i { display: block; height: 100%; background: var(--gold); }
 #hud.mode-uc #streaks { display: none; }
+
+.daily { margin: 10px 0 4px; }
+.daily h3 { margin-bottom: 6px; }
+.daily h3 b { color: var(--gold); }
+.chal { position: relative; display: flex; justify-content: space-between; gap: 12px; padding: 6px 10px; margin: 3px 0; background: rgba(255,255,255,0.06); border-radius: 3px; font-size: 13px; overflow: hidden; }
+.chal i { position: absolute; left: 0; bottom: 0; height: 2px; background: var(--gold); }
+.chal b { font-weight: 600; opacity: 0.8; white-space: nowrap; }
+.chal.done { opacity: 0.55; }
+.chal.done b { color: var(--gold); opacity: 1; }
+#endXp .bonus { display: block; font-size: 13px; opacity: 0.8; margin-top: 4px; }
+
+#loading { position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: #0b0d10; color: #e8e6e0; letter-spacing: 2px; }
+#loading b { font-size: 42px; letter-spacing: 8px; }
+#loading span { font-size: 13px; opacity: 0.6; }
+#loading .bar { width: min(320px, 70vw); height: 3px; background: rgba(255,255,255,0.12); }
+#loading .bar i { display: block; height: 100%; width: 0; background: var(--gold); transition: width 0.2s; }
+label.check { display: flex; align-items: center; gap: 8px; }

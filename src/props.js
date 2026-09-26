@@ -532,3 +532,28 @@ export function buildProp(kit, type, o, seed) {
   fn(kit, o, R);
   kit.pop();
 }
+
+// Props that have a scanned model (assets.js) are placed as model instances instead of being
+// built from primitives. Returns world placements for instanceProps(), or null to fall back.
+const SCANNED = {
+  barrel: (o) => [{ type: 'barrel' }],
+  tires: (o, R, md) => Array.from({ length: o.n || 3 }, (_, i) => ({ type: 'tires', x: R() * 0.08, z: R() * 0.08, y: i * md.tires.size.y, rot: R() * 6 })),
+  jersey: (o, R, md) => {
+    const l = o.len || 3, n = Math.max(1, Math.round(l / md.jersey.size.x)), piece = l / n;
+    return Array.from({ length: n }, (_, i) => ({ type: 'jersey', z: -l / 2 + piece * (i + 0.5), rot: Math.PI / 2, sx: piece / md.jersey.size.x }));
+  },
+  rock: (o, R, md) => o.snow ? null : [{ type: 'rock', rot: R() * 6, s: (o.r || 1.5) * 1.9 / md.rock.size.z }],
+  pallets: (o, R, md) => Array.from({ length: Math.max(1, Math.ceil((o.n || 4) / 2)) }, (_, i) => ({ type: 'pallets', y: i * md.pallets.size.y, rot: Math.PI / 2 + (R() - 0.5) * 0.15 })),
+};
+
+export function scannedProp(p, seed, md) {
+  const fn = SCANNED[p.type];
+  if (!fn || !md[p.type]) return null;
+  const parts = fn(p, mulberry(seed), md);
+  if (!parts) return null;
+  const c = Math.cos(p.rot || 0), s = Math.sin(p.rot || 0);
+  return parts.map(q => {
+    const lx = q.x || 0, lz = q.z || 0;
+    return { ...q, x: p.x + lx * c + lz * s, z: p.z - lx * s + lz * c, y: (p.y || 0) + (q.y || 0), rot: (p.rot || 0) + (q.rot || 0) };
+  });
+}

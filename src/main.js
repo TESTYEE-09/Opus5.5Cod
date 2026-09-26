@@ -10,6 +10,8 @@ import { Game } from './game.js';
 import { CLASSES } from './weapons.js';
 import { DIFFICULTY } from './bots.js';
 import { Net, cleanName } from './net.js';
+import { daily, describe } from './challenges.js';
+import { loadAssets, setAssetAnisotropy } from './assets.js';
 
 const canvas = document.getElementById('game');
 const gfx = new Graphics(canvas);
@@ -63,7 +65,7 @@ function loadMapById(id) {
 const game = new Game({ renderer, scene, camera, wscene, audio, hud, loadMap: loadMapById });
 
 // ---------- settings ----------
-const defaults = { sens: 1, fov: 80, vol: 0.7, difficulty: 'regular', cls: 'assault', name: '', map: 'crossroads', mode: 'gw', quality: 'high' };
+const defaults = { sens: 1, fov: 80, vol: 0.7, difficulty: 'regular', cls: 'assault', name: '', map: 'crossroads', mode: 'gw', quality: 'high', blur: 0.5, scale: 1, dynres: true };
 const matchRules = () => ({ scoreLimit: MODES[settings.mode].scoreLimit, timeLimit: MODES[settings.mode].timeLimit });
 let settings = { ...defaults };
 try { Object.assign(settings, JSON.parse(localStorage.getItem('frontline.settings') || '{}')); } catch { /* storage unavailable */ }
@@ -78,6 +80,17 @@ audio.setVolume(settings.vol);
 
 function $(id) { return document.getElementById(id); }
 
+// scanned textures and models first, so the first map is built with them
+setAssetAnisotropy(Math.min(8, renderer.capabilities.getMaxAnisotropy()));
+await loadAssets((f) => { $('loadingBar').style.width = `${Math.round(f * 100)}%`; });
+$('loading').remove();
+
+function applyGfx() {
+  gfx.blurAmount = settings.blur;
+  gfx.dynamic = settings.dynres;
+  if (gfx.renderScale !== settings.scale) { gfx.renderScale = settings.scale; gfx.resize(); }
+}
+applyGfx();
 gfx.setQuality(settings.quality, atmo);
 loadMapById(settings.map);
 
@@ -102,6 +115,9 @@ function renderClassCards() {
   $('modeName').textContent = MODES[settings.mode].name;
   const pr = profile();
   $('rankLine').innerHTML = `Rank <b>${pr.level}</b> &middot; ${pr.title}` + (pr.next ? ` &middot; ${pr.cur.toLocaleString()} / ${pr.next.toLocaleString()} XP` : ' &middot; max rank');
+  const dl = daily();
+  $('daily').innerHTML = `<h3>Daily challenges${dl.streak > 1 ? ` &middot; ${dl.streak}-day streak` : ''}${dl.bonusReady ? ' &middot; <b>first match today: double XP</b>' : ''}</h3>` +
+    dl.list.map(c => `<div class="chal${c.done ? ' done' : ''}"><span>${describe(c)}</span><i style="width:${Math.round(c.have / c.goal * 100)}%"></i><b>${c.done ? 'DONE' : `${c.have}/${c.goal}`} &middot; ${c.xp.toLocaleString()} XP</b></div>`).join('');
   $('deploy').textContent = MODES[settings.mode].coop ? 'PLAY SOLO MISSION' : 'PLAY SOLO';
 }
 
@@ -154,6 +170,7 @@ function bindRange(id, key, fmt) {
     settings[key] = parseFloat(input.value);
     out.textContent = fmt(settings[key]);
     if (key === 'vol') audio.setVolume(settings.vol);
+    applyGfx();
     if (id === 'sens2') { $('sens').value = settings.sens; $('sensOut').textContent = fmt(settings.sens); }
     if (id === 'sens') { $('sens2').value = settings.sens; $('sens2Out').textContent = fmt(settings.sens); }
     save();
@@ -162,6 +179,10 @@ function bindRange(id, key, fmt) {
 bindRange('sens', 'sens', v => v.toFixed(2));
 bindRange('sens2', 'sens', v => v.toFixed(2));
 bindRange('fov', 'fov', v => String(v));
+bindRange('blur', 'blur', v => v ? `${Math.round(v * 100)}%` : 'Off');
+bindRange('scale', 'scale', v => `${Math.round(v * 100)}%`);
+$('dynres').checked = settings.dynres;
+$('dynres').addEventListener('change', () => { settings.dynres = $('dynres').checked; save(); applyGfx(); });
 bindRange('vol', 'vol', v => `${Math.round(v * 100)}`);
 
 // ---------- pointer lock & screens ----------

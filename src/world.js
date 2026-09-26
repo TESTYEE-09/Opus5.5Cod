@@ -5,7 +5,8 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { surface, R, macroNoise, mulberry, logoAtlas } from './textures.js';
 import { PlanarReflection } from './reflect.js';
-import { Kit, kitMaterials, buildProp } from './props.js';
+import { Kit, kitMaterials, buildProp, scannedProp } from './props.js';
+import { pbrSet, applyPbr, models, instanceProps } from './assets.js';
 
 // The map size changes per map (Shipment is tiny, the Ground War maps are huge), so SIZE, N
 // and NAV are live bindings that loadMap() resets.
@@ -508,6 +509,8 @@ function makeMaterial(name, over = {}) {
   const m = new THREE.MeshStandardMaterial({
     map: tex.map, normalMap: tex.normalMap, roughness: d.rough ?? 0.9, metalness: d.metal ?? 0, vertexColors: !!d.vcol,
   });
+  const scan = pbrSet(name);
+  if (scan) applyPbr(m, scan, { metal: d.metal });
   m.userData.ts = d.ts;
   const low = name === 'backdrop' || name === 'snowcap' || name === 'roof';
   return enhance(m, { macro: 0.18, groundAO: low ? 0 : 0.28 });
@@ -666,7 +669,7 @@ function chunkFor(x, z, always = false) {
   const key = always ? 'always' : `${far ? 'f' : 'n'}${cx},${cz}`;
   let ch = chunks.get(key);
   if (!ch) {
-    ch = { far: far || always, x: (cx + 0.5) * s, z: (cz + 0.5) * s, group: new THREE.Group(), stat: new THREE.Group(), near: new THREE.Group(), dyn: new THREE.Group(), dynNear: new THREE.Group(), objs: [], boxes: [], props: [] };
+    ch = { far: far || always, x: (cx + 0.5) * s, z: (cz + 0.5) * s, group: new THREE.Group(), stat: new THREE.Group(), near: new THREE.Group(), dyn: new THREE.Group(), dynNear: new THREE.Group(), objs: [], boxes: [], props: [], clutter: [] };
     ch.group.add(ch.stat, ch.near, ch.dyn, ch.dynNear);
     chunks.set(key, ch); chunkList.push(ch); group.add(ch.group);
   }
@@ -782,7 +785,7 @@ function buildBeam(p) {
 export function loadMap(scene, def) {
   if (group) {
     scene.remove(group);
-    group.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.isLight) o.dispose?.(); });
+    group.traverse(o => { if (o.geometry && !o.isInstancedMesh) o.geometry.dispose(); if (o.isLight) o.dispose?.(); });
     for (const m of materials) m.dispose();
   }
   reflection?.dispose(); reflection = null;
@@ -842,6 +845,7 @@ export function loadMap(scene, def) {
     const ch = chunkFor((o.x0 + o.x1) / 2, (o.z0 + o.z1) / 2);
     ch.objs.push(o); o.chunk = ch;
   }
+  scatterClutter(def);
   for (const ch of chunkList) { buildStatic(ch); buildChunk(ch); }
   if (decals.length) group.add(buildDecals(decals));
 
@@ -861,6 +865,8 @@ export function loadMap(scene, def) {
   if (def.wet) reflection = new PlanarReflection(def.wet);
   const floors = [];
   const groundMat = enhance(new THREE.MeshStandardMaterial({ map: gt.map, normalMap: gt.normalMap, roughness: gd.rough ?? 0.97, metalness: gd.metal ?? 0 }), { macro: 0.3, wet: reflection });
+  const gscan = pbrSet(`ground:${gd.recipe}`);
+  if (gscan) applyPbr(groundMat, gscan);
   materials.push(groundMat);
   const ground = new THREE.Mesh(groundGeo, groundMat);
   ground.rotation.x = -Math.PI / 2;
@@ -947,6 +953,33 @@ export function loadMap(scene, def) {
   return def;
 }
 
+// Small scanned clutter (crates, jerrycans, bags, boxes) along the foot of walls, so streets
+// and rooms look lived in. Visual only: it is too low to block movement or bullets.
+const CLUTTER = [['crate', 3], ['jerrycan', 3], ['cardboard', 4], ['trashbag', 3], ['cement', 2], ['ammo', 1], ['barrel', 2]];
+function scatterClutter(def) {
+  const types = CLUTTER.filter(([t]) => models[t]);
+  if (!types.length || def.clutter === 0) return;
+  const R = mulberry((def.seed || 7) * 31 + 5), total = types.reduce((a, [, w]) => a + w, 0);
+  const want = Math.min(400, Math.round(SIZE * SIZE / 220 * (def.clutter ?? 1)));
+  for (let tries = 0, n = 0; n < want && tries < want * 30; tries++) {
+    const i = 2 + Math.floor(R() * (NAV - 4)), k = 2 + Math.floor(R() * (NAV - 4));
+    if (!walkable(i, k)) continue;
+    // a wall on one side, open on the opposite side
+    const dir = [[1, 0], [-1, 0], [0, 1], [0, -1]].find(([di, dk]) => !walkable(i + di, k + dk) && walkable(i - di, k - dk));
+    if (!dir) continue;
+    const x = i + 0.5 + dir[0] * 0.25, z = k + 0.5 + dir[1] * 0.25;
+    if (!overlaps(x + dir[0] * 0.7, z + dir[1] * 0.7, 0.1, 0.1, 1.2)) continue;
+    let r = R() * total, type = types[0][0];
+    for (const [t, w] of types) if ((r -= w) < 0) { type = t; break; }
+    const y = terrainY(x, z), rot = Math.atan2(dir[0], dir[1]) + (R() - 0.5) * 0.6;
+    const ch = chunkFor(x, z);
+    ch.clutter.push({ type, x, y, z, rot });
+    // sometimes a small pile
+    if ((type === 'cardboard' || type === 'cement' || type === 'crate') && R() < 0.4) ch.clutter.push({ type, x: x + (R() - 0.5) * 0.1, y: y + models[type].size.y, z: z + (R() - 0.5) * 0.1, rot: rot + (R() - 0.5) * 0.5 });
+    n++;
+  }
+}
+
 // a chunk's permanent part: its static boxes by material, their contact shadows, and its props
 function buildStatic(ch) {
   const byMat = {};
@@ -963,24 +996,32 @@ function buildStatic(ch) {
     if (cs.length) ch.near.add(contactShadows(cs));
   }
   // small props (and the contact shadows) are only drawn within a couple of hundred metres
-  if (ch.props.length) {
-    const kit = new Kit();
-    for (const p of ch.props) buildProp(kit, p.type, p, p.seed);
-    for (const m of kit.build(kmats)) (ch.far ? ch.stat : ch.near).add(m);
+  if (ch.props.length || ch.clutter.length) {
+    const kit = new Kit(), scan = [...ch.clutter];
+    for (const p of ch.props) {
+      const sp = scannedProp(p, p.seed, models);
+      if (sp) scan.push(...sp); else buildProp(kit, p.type, p, p.seed);
+    }
+    for (const m of [...kit.build(kmats), ...instanceProps(scan)]) (ch.far ? ch.stat : ch.near).add(m);
   }
-  ch.boxes = []; ch.props = [];
+  ch.boxes = []; ch.props = []; ch.clutter = [];
 }
 
 // a chunk's breakable part, rebuilt whenever something in it breaks
 function buildChunk(ch) {
-  for (const m of [...ch.dyn.children, ...ch.dynNear.children]) m.geometry.dispose();
+  // instanced scans share their geometry with the loaded model, so only merged meshes are freed
+  for (const m of [...ch.dyn.children, ...ch.dynNear.children]) if (!m.isInstancedMesh) m.geometry.dispose();
   ch.dyn.clear(); ch.dynNear.clear();
   if (!ch.objs.length) return;
-  const byMat = {}, kit = new Kit();
+  const byMat = {}, kit = new Kit(), scan = [];
   for (const o of ch.objs) {
     if (!o.gone) for (const b of o.boxes) if (b.mat !== 'invis') (byMat[drawMat(b.mat)] ||= []).push(boxGeo(b, matFor(drawMat(b.mat)).userData.ts));
-    if (o.alive || o.spec.wreck) for (const p of o.props) buildProp(kit, p.type, p, p.seed);
+    if (o.alive || o.spec.wreck) for (const p of o.props) {
+      const sp = o.alive && scannedProp(p, p.seed, models);
+      if (sp) scan.push(...sp); else buildProp(kit, p.type, p, p.seed);
+    }
   }
+  for (const m of instanceProps(scan)) ch.dynNear.add(m);
   for (const [m, geos] of Object.entries(byMat)) {
     const mesh = new THREE.Mesh(mergeGeometries(geos), matFor(m));
     mesh.castShadow = true; mesh.receiveShadow = true;

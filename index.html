@@ -79,11 +79,14 @@
   <p id="spawnSel"></p>
 </div>
 
+<div id="loading"><b>FRONTLINE</b><span>Loading scanned assets</span><div class="bar"><i id="loadingBar"></i></div></div>
+
 <div id="menu" class="screen">
   <div class="panel">
     <h1>FRONTLINE</h1>
     <p class="sub"><span id="modeName">Ground War</span> &middot; <span id="mapName">Crossroads</span> &middot; USA vs Russia</p>
     <p id="rankLine" class="rank"></p>
+    <div id="daily" class="daily"></div>
     <h3>Map</h3>
     <div id="maps" class="cards maps"></div>
     <h3>Mode</h3>
@@ -101,6 +104,9 @@
         <label>Field of view <input id="fov" type="range" min="65" max="105" step="1"><output id="fovOut"></output></label>
         <label>Volume <input id="vol" type="range" min="0" max="1" step="0.05"><output id="volOut"></output></label>
         <div class="setrow"><span>Graphics</span><div id="quality" class="seg"></div></div>
+        <label>Motion blur <input id="blur" type="range" min="0" max="1" step="0.05"><output id="blurOut"></output></label>
+        <label>Render scale <input id="scale" type="range" min="0.5" max="1" step="0.05"><output id="scaleOut"></output></label>
+        <label class="check"><input id="dynres" type="checkbox"> Dynamic resolution (holds 60 fps)</label>
       </div>
     </div>
     <div class="cols">
