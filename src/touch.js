@@ -145,7 +145,7 @@ export function createTouch(api) {
     if (k === 'pause') api.pause();
     else if (k === 'map') press('KeyM'), release('KeyM');
     else if (k === 'scores') { b.classList.toggle('latched'); api.scores(b.classList.contains('latched')); }
-    else if (k === 'kit') { const open = b.classList.toggle('latched'); $('.tkit').classList.toggle('hidden', !open); api.kit(open); }
+    else if (k === 'kit') { const open = b.classList.toggle('latched'); root.classList.toggle('kitopen', open); $('.tkit').classList.toggle('hidden', !open); api.kit(open); }
   });
   root.querySelector('.tkit').addEventListener('click', (e) => {
     const b = e.target.closest('[data-k]');

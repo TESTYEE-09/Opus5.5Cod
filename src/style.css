@@ -516,3 +516,4 @@ body.touch input.text { font-size: 18px; min-height: 44px; }
   .pbtns { width: 100%; }
   .pbtns button { flex: 1; }
 }
+#touch.kitopen .tb-fire2 { display: none; }
