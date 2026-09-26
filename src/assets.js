@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { TEXTURES, MODELS } from './assetlist.js';
-import { addWind } from './nature.js';
+import { addWind, buildPalms } from './nature.js';
 import { loadSoldierModel } from './soldier.js';
 
 const base = import.meta.env.BASE_URL;
@@ -114,6 +114,7 @@ export async function loadAssets(onProgress = () => {}) {
   ];
   let done = 0;
   await Promise.all(jobs.map(j => j().catch((e) => console.warn('asset failed', e)).finally(() => onProgress(++done / jobs.length))));
+  buildPalms(models);
 }
 
 // Places scanned props: one InstancedMesh per model part for a list of placements

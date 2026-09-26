@@ -547,6 +547,7 @@ const SCANNED = {
   // the procedural pines and olives become scanned conifers and olive trees
   pine: (o, R, md) => md.conifer ? [{ type: `conifer:${Math.floor(R() * md.conifer.n)}`, rot: R() * 6.28, s: (o.h || 7 + R() * 5) / md.conifer.size.y * 1.3 }] : null,
   olive: (o, R, md) => md.olive1 ? [{ type: R() < 0.5 ? 'olive1' : 'olive2', rot: R() * 6.28, s: (o.s || 0.9 + R() * 0.5) * 0.9 }] : null,
+  palm: (o, R, md) => md.palm ? [{ type: `palm:${Math.floor(R() * 3)}`, rot: R() * 6.28, s: (o.h || 6 + R() * 2.5) / 8 }] : null,
   // the far woods use the lightest conifer
   farTree: (o, R, md) => o.snow && md.conifer ? [{ type: 'conifer:0', rot: R() * 6.28, s: 0.9 + R() * 0.7 }]
     : md.olive1 ? [{ type: R() < 0.5 ? 'olive1' : 'olive2', rot: R() * 6.28, s: 1.2 + R() * 0.5 }] : null,

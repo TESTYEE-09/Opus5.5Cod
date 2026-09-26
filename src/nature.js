@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { playH, vnoise } from './terrain.js';
 import { models } from './assets.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // per map: counts of each thing; `forest` clusters trees where the noise is high
 const LANDS = {
@@ -149,7 +150,9 @@ function material() {
   }
   if (!cardMat) cardMat = addWind(new THREE.MeshStandardMaterial({ map: atlas, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.9 }), 0.09);
   // scans are rendered darker than game lighting; each land tints its grass
-  cardMat.color.copy(lastTint).multiplyScalar(1.5);
+  cardMat.color.copy(lastTint).multiplyScalar(2.3);
+  // light passing through the blades: the shaded side never goes black
+  cardMat.emissive.copy(lastTint).multiplyScalar(0.12);
   return cardMat;
 }
 
@@ -165,4 +168,112 @@ export function buildFoliage(list) {
     g.add(im);
   }
   return g;
+}
+
+// ---------- date palms, generated ----------
+// No scan exists, so they are built the way game palms are: a curved trunk with a ringed
+// bark texture and fronds as bent, V-folded alpha cards with painted leaflets.
+function canvasTex(w, h, draw, srgb = true) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  draw(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+function rnd(seed) { return () => ((seed = (seed * 16807) % 2147483647) / 2147483647); }
+
+function frondTexture() {
+  return canvasTex(256, 512, (g, w, h) => {
+    const R = rnd(71);
+    g.clearRect(0, 0, w, h);
+    // leaflets both sides of the rachis, longest in the middle, a few dry ones
+    for (let i = 0; i < 70; i++) {
+      const t = i / 70, y = h * (0.04 + t * 0.94), len = w * 0.46 * Math.sin(Math.PI * (0.15 + t * 0.85)) * (0.8 + R() * 0.3);
+      for (const s of [-1, 1]) {
+        const dry = R() < 0.08;
+        g.strokeStyle = dry ? `rgb(${150 + R() * 30},${130 + R() * 20},${70})` : `rgb(${50 + R() * 30},${85 + R() * 40},${30 + R() * 20})`;
+        g.lineWidth = 3 + R() * 2;
+        g.beginPath(); g.moveTo(w / 2, y);
+        g.quadraticCurveTo(w / 2 + s * len * 0.5, y - 10, w / 2 + s * len, y - 22 - R() * 10);
+        g.stroke();
+      }
+    }
+    g.strokeStyle = '#7a6a3a'; g.lineWidth = 5;
+    g.beginPath(); g.moveTo(w / 2, 0); g.lineTo(w / 2, h); g.stroke();
+  });
+}
+function barkTexture() {
+  return canvasTex(128, 256, (g, w, h) => {
+    const R = rnd(5);
+    g.fillStyle = '#6a5840'; g.fillRect(0, 0, w, h);
+    // diamond leaf-base pattern of a date palm trunk
+    for (let y = 0; y < h; y += 16) for (let x = (y / 16) % 2 ? 8 : 0; x < w; x += 16) {
+      g.fillStyle = `rgb(${95 + R() * 30},${78 + R() * 20},${52 + R() * 15})`;
+      g.beginPath(); g.moveTo(x, y); g.lineTo(x + 8, y + 8); g.lineTo(x, y + 16); g.lineTo(x - 8, y + 8); g.fill();
+      g.strokeStyle = 'rgba(30,22,14,0.6)'; g.lineWidth = 1.5; g.stroke();
+    }
+  });
+}
+
+// one frond: a strip bent down along its length, folded into a shallow V
+function frondGeo(len, width, droop, R) {
+  const segs = 8, pos = [], uv = [], idx = [];
+  for (let i = 0; i <= segs; i++) {
+    const t = i / segs, a = droop * t * t;
+    const z = -Math.sin(Math.PI / 2 - a) * 0 - t * len * Math.cos(a * 0.6), y = -t * t * len * Math.sin(droop * 0.7);
+    const w = width * Math.sin(Math.PI * (0.1 + t * 0.9));
+    for (const [s, u] of [[-1, 0], [0, 0.5], [1, 1]]) { pos.push(s * w / 2, y + (s ? -w * 0.18 : 0), z); uv.push(u, 1 - t); }
+  }
+  for (let i = 0; i < segs; i++) for (let k = 0; k < 2; k++) {
+    const a = i * 3 + k, b = a + 1, c = a + 3, d = c + 1;
+    idx.push(a, c, b, b, c, d);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g.toNonIndexed();
+}
+
+export function buildPalms(models) {
+  const frondMat = addWind(new THREE.MeshStandardMaterial({ map: frondTexture(), alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.8 }), 0.0035, 4);
+  const barkMat = new THREE.MeshStandardMaterial({ map: barkTexture(), roughness: 0.95 });
+  barkMat.map.wrapS = barkMat.map.wrapT = THREE.RepeatWrapping;
+  const nutMat = new THREE.MeshStandardMaterial({ color: 0x5a3f1e, roughness: 0.7 });
+  [7, 9.5, 12].forEach((h, vi) => {
+    const R = rnd(33 + vi * 17), lean = 0.08 + R() * 0.12, dir = R() * 6.28;
+    const pts = [];
+    for (let i = 0; i <= 6; i++) { const t = i / 6; pts.push(new THREE.Vector3(Math.cos(dir) * lean * h * t * t, h * t, Math.sin(dir) * lean * h * t * t)); }
+    const curve = new THREE.CatmullRomCurve3(pts);
+    const trunk = new THREE.TubeGeometry(curve, 24, 0.2, 10, false);
+    // taper toward the crown, and bark repeats up the trunk
+    const p = trunk.attributes.position, uvs = trunk.attributes.uv;
+    for (let i = 0; i < p.count; i++) {
+      const t = p.getY(i) / h, c = curve.getPoint(Math.min(1, Math.max(0, t)));
+      const k = 1.25 - 0.45 * t;
+      p.setXYZ(i, c.x + (p.getX(i) - c.x) * k, p.getY(i), c.z + (p.getZ(i) - c.z) * k);
+      uvs.setXY(i, uvs.getX(i) * 2, uvs.getY(i) * h / 1.2);
+    }
+    trunk.computeVertexNormals();
+    const top = curve.getPoint(1);
+    const fronds = [];
+    for (let f = 0; f < 16; f++) {
+      const up = f < 5, g = frondGeo(up ? 2.6 + R() : 3.4 + R() * 1.2, 0.9 + R() * 0.3, up ? 0.4 : 1.2 + R() * 0.6, R);
+      g.rotateX(up ? -0.9 - R() * 0.3 : -0.25 + R() * 0.2);
+      g.rotateY(f / 16 * 6.28 * 3 + R() * 0.4);
+      g.translate(top.x, top.y, top.z);
+      fronds.push(g);
+    }
+    const nuts = [];
+    for (let i = 0; i < 6; i++) { const s = new THREE.SphereGeometry(0.1, 8, 6); s.translate(top.x + Math.cos(i) * 0.25, top.y - 0.35 - (i % 2) * 0.1, top.z + Math.sin(i) * 0.25); nuts.push(s); }
+    const merged = mergeGeometries(fronds.map(g => { for (const a of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(a)) g.deleteAttribute(a); return g; }));
+    const nutG = mergeGeometries(nuts.map(g => g.toNonIndexed()));
+    const parts = [{ geometry: trunk, material: barkMat }, { geometry: merged, material: frondMat }, { geometry: nutG, material: nutMat }];
+    for (const q of parts) q.geometry.computeBoundingSphere();
+    const md = { parts, size: new THREE.Vector3(8, h + 1, 8), n: 3 };
+    if (vi === 0) models.palm = md;
+    models[`palm:${vi}`] = md;
+  });
 }
