@@ -119,7 +119,7 @@ export const WEAPONS = {
 
 // what each class can pick instead of its default (the default is always allowed)
 export const OPTIONS = {
-  primary: { assault: ['ak', 'scar'], rusher: ['mp5'], support: ['pkm'], marksman: ['barrett'], breacher: ['aa12'], tactician: ['scar'], recon: ['svd'], antitank: ['mp5', 'ak'], operator: [], antiair: ['ak', 'scar'] },
+  primary: { assault: ['ak', 'scar'], rusher: ['mp5'], support: ['pkm'], marksman: ['barrett'], breacher: ['aa12'], tactician: ['scar'], recon: ['svd'], antitank: ['mp5', 'ak'], operator: [], antiair: ['ak', 'scar'], engineer: ['smg', 'shotgun'] },
   secondary: ['deagle'],
 };
 // the class with the player's picks applied (only unlocked picks count)
@@ -139,6 +139,7 @@ export const CLASSES = {
   recon: { name: 'Recon', desc: 'SVX-10 marksman rifle, 4x scope, and an R-44 Magnum.', primary: 'dmr', secondary: 'revolver', frags: 1 },
   antitank: { name: 'Anti-Tank', desc: 'VX-9 SMG plus an RPG-7 (key 3) for tanks and helicopters.', primary: 'smg', secondary: 'pistol', launcher: 'rpg', frags: 1 },
   operator: { name: 'Operator', desc: 'Suppressed VX-9 SD and P-12 SD. Quiet: made for Undercover.', primary: 'ssmg', secondary: 'spistol', frags: 1 },
+  engineer: { name: 'Engineer', desc: 'AR-4 and a builder kit: T puts down a sandbag wall, X a spawn beacon. Supplies refill over time.', primary: 'ar', secondary: 'pistol', frags: 1, engineer: true },
   antiair: { name: 'Anti-Air', desc: 'AR-4 plus a Stinger (key 3). Aim at aircraft until it locks.', primary: 'ar', secondary: 'pistol', launcher: 'stinger', frags: 1 },
 };
 
@@ -861,6 +862,7 @@ export class Arsenal {
       return { id, def, mag: def.mag, reserve: def.reserve, model };
     });
     this.frags = cls.frags;
+    this.engineer = !!cls.engineer;
     this.cur = 0;
     this.slots[0].model.root.visible = true;
     this.sw = { t: 0, phase: 'up', to: 0 };

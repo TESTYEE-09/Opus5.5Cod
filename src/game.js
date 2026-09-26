@@ -1,6 +1,6 @@
 import { track, describe } from './challenges.js';
 import * as THREE from 'three';
-import { raycastWorld, lineOfSight, pointSolid, groundAt, overlaps, spawns, SIZE, GRAVITY, STEP, materialAt, objectAt, objectsNear, breakObject } from './world.js';
+import { raycastWorld, lineOfSight, pointSolid, groundAt, overlaps, spawns, SIZE, GRAVITY, STEP, materialAt, objectAt, objectsNear, breakObject, buildSandbags } from './world.js';
 import { Effects } from './effects.js';
 import { Arsenal, CLASSES, loadoutFor, falloff, FUSE, WEAPONS } from './weapons.js';
 import { profile } from './rank.js';
@@ -8,7 +8,7 @@ import { Player } from './player.js';
 import { Bot, DIFFICULTY } from './bots.js';
 import { Jet } from './streaks.js';
 import { NetSoldier } from './net.js';
-import { Chopper, Tank, FighterJet, AttackHeli, Drone, ReconDrone, isDrone, VehicleProxy, Projectiles, PROJ, VEHICLE_WEAPONS, hitSoldier, placeEmplacements, tankSpot } from './vehicles.js';
+import { Chopper, Tank, FighterJet, AttackHeli, Drone, ReconDrone, isDrone, VehicleProxy, Projectiles, PROJ, VEHICLE_WEAPONS, hitSoldier, placeEmplacements, tankSpot, jeepSpot, beaconMesh } from './vehicles.js';
 import { createMode } from './modes.js';
 
 const DEG = Math.PI / 180;
@@ -144,6 +144,10 @@ export class Game {
     this.aiCallT = [50 + Math.random() * 25, 50 + Math.random() * 25];
     this.vehicleSeq = 0;
     pl.vcool = { drone: 0, recon: 0, tank: 0, jet: 0, heli: 0 };
+    pl.supplies = 4; pl.supplyT = 0;
+    for (const b of this.beacons || []) this.scene.remove(b.mesh);
+    this.beacons = [];
+    this.motorT = 0;
     pl.fpv = settings.fpv === '10' ? 'drone10' : 'drone';
     pl.jetKind = settings.jet === 'attack' ? 'attacker' : 'jet';
 
@@ -261,6 +265,8 @@ export class Game {
   }
 
   pickSpawn(team, who = null) {
+    const bc = who && this.beacons?.find(b => b.owner === who && b.alive);
+    if (bc && !this.soldiers.some(s => s.alive && s.team !== team && Math.hypot(s.pos.x - bc.pos.x, s.pos.z - bc.pos.z) < 12)) return { x: bc.pos.x + 0.8, z: bc.pos.z + 0.8, yaw: bc.yaw };
     const m = this.mode.pickSpawn(team, who);
     if (m) return m;
     let best = spawns[team].find(s => !s.fwd) || spawns[team][0], bestScore = -Infinity;
@@ -294,7 +300,7 @@ export class Game {
   targetsFor(team, who = null) {
     const out = [];
     for (const s of this.soldiers) if (s.alive && s.team !== team && !s.inVehicle && (!who || this.mode.canTarget(who, s))) out.push(s);
-    for (const v of this.vehicles) if (v.alive && v.team !== team && v.t > 5 && !(v.kind === 'aa' && !v.driver && !(v.driverId >= 0))) out.push(v);
+    for (const v of this.vehicles) if (v.alive && v.team !== team && v.t > 5 && !((v.kind === 'aa' || v.kind === 'jeep') && !v.driver && !(v.driverId >= 0))) out.push(v);
     return out;
   }
 
@@ -763,6 +769,7 @@ export class Game {
       if (d > radius || !lineOfSight(src, c)) continue;
       this.damage(s, maxDmg * Math.pow(1 - d / radius, 0.7), owner, weapon, false, p, extra);
     }
+    for (const b of this.beacons) if (b.alive && b.pos.distanceTo(src) < radius * 0.6) this.killBeacon(b);
     for (const v of this.vehicles) {
       if (!v.alive) continue;
       const d = Math.max(0, v.pos.distanceTo(src) - (v.size || 2));
@@ -937,6 +944,83 @@ export class Game {
     else this.useStreak(pl, id, point, yaw);
   }
 
+  // ---------- engineer ----------
+  // T: a sandbag wall two metres ahead; X: a spawn beacon at the feet (one each, the old one
+  // is taken down). Each costs a supply; the engineer holds four and gets one back every 15 s.
+  playerBuild(what) {
+    const pl = this.player;
+    if (pl.supplies <= 0) { this.hud.toast('No supplies: one comes back every 15 s'); return; }
+    const k = what === 'bag' ? 2.2 : 0.9, fx = -Math.sin(pl.yaw), fz = -Math.cos(pl.yaw);
+    const x = pl.pos.x + fx * k, z = pl.pos.z + fz * k, y = groundAt(x, z, 0.3, pl.pos.y + 0.6);
+    if (Math.abs(y - pl.pos.y) > 0.7 || overlaps(x, z, what === 'bag' ? 0.9 : 0.3, y + 0.1, y + 1.0)) { this.hud.toast('No room here'); return; }
+    if (what === 'bag' && this.soldiers.some(s => s.alive && Math.hypot(s.pos.x - x, s.pos.z - z) < 1.4)) { this.hud.toast('Someone is standing there'); return; }
+    pl.supplies--;
+    this.audio.ui();
+    if (this.role === 'client') this.net.send({ t: 'build', w: what, x: r2(x), z: r2(z), yaw: r2(pl.yaw) });
+    else this.build(pl, what, x, z, pl.yaw);
+    this.hud.toast(what === 'bag' ? `Sandbags down · ${pl.supplies} supplies left` : `Spawn beacon placed: you respawn here · ${pl.supplies} supplies left`);
+  }
+
+  // host / solo: make it and tell the clients
+  build(who, what, x, z, yaw) {
+    const y = groundAt(x, z, 0.3, who.pos.y + 0.6);
+    if (what === 'bag') {
+      if (overlaps(x, z, 0.9, y + 0.1, y + 1.0)) return;
+      buildSandbags(x, z, yaw, y);
+    } else this.placeBeacon(who, x, y, z, yaw);
+    this.emit({ k: 'build', w: what, x: r2(x), y: r2(y), z: r2(z), yaw: r2(yaw), o: who.id, team: who.team });
+  }
+
+  placeBeacon(owner, x, y, z, yaw) {
+    for (const b of this.beacons) if (b.owner === owner || b.ownerId === owner?.id) this.killBeacon(b, false);
+    const mesh = beaconMesh(owner.team === this.player.team);
+    mesh.position.set(x, y, z); mesh.rotation.y = yaw;
+    this.scene.add(mesh);
+    this.beacons.push({ owner, ownerId: owner.id, team: owner.team, pos: new THREE.Vector3(x, y + 0.4, z), yaw, mesh, alive: true, t: 0 });
+  }
+
+  killBeacon(b, fx = true) {
+    if (!b.alive) return;
+    b.alive = false; this.scene.remove(b.mesh);
+    if (fx) this.effects.sparks?.(b.pos, new THREE.Vector3(0, 1, 0));
+    if (b.owner === this.player && fx) this.hud.toast('Your spawn beacon was destroyed');
+  }
+
+  // enemies who walk up to a beacon kick it over; the light blinks
+  updateBeacons(dt) {
+    for (const b of this.beacons) {
+      if (!b.alive) continue;
+      b.t += dt;
+      b.mesh.userData.lamp.visible = (b.t % 1.2) < 0.25;
+      if (this.soldiers.some(s => s.alive && s.team !== b.team && Math.hypot(s.pos.x - b.pos.x, s.pos.z - b.pos.z) < 1.3 && Math.abs(s.pos.y - b.pos.y) < 2)) this.killBeacon(b);
+    }
+    this.beacons = this.beacons.filter(b => b.alive);
+  }
+
+  // Two jeeps wait at each base for anyone who wants a quick ride to the fight. A parked one
+  // is topped up when both have driven off; empty jeeps left in the field for a minute are
+  // cleared away.
+  motorPool(dt) {
+    if ((this.motorT -= dt) > 0) return;
+    this.motorT = 3;
+    if (this.mapDef?.noVehicles || this.mode.kind === 'hunt' || this.mode.kind === 'uc') return;
+    for (const team of [0, 1]) {
+      const jeeps = this.vehicles.filter(v => v.alive && v.kind === 'jeep' && v.team === team);
+      for (const j of jeeps) {
+        const home = Math.hypot(j.pos.x - j.home.x, j.pos.z - j.home.z) < 25;
+        j.idle = j.driver || home ? 0 : (j.idle || 0) + 3;
+        if (j.idle > 60) j.destroy(null, null, false);
+      }
+      const parked = jeeps.filter(j => !j.driver && Math.hypot(j.pos.x - j.home.x, j.pos.z - j.home.z) < 25).length;
+      if (parked < 2 && jeeps.length < 5) {
+        const s = jeepSpot(this, team);
+        const v = new Tank(this, { team, isPlayer: false, isNet: true, id: -1 }, this.nextVehicleId(), s.x, s.z, s.yaw, 'jeep');
+        v.ai = false; v.owner = null; v.home = { x: s.x, z: s.z };
+        this.vehicles.push(v);
+      }
+    }
+  }
+
   // ---------- vehicles ----------
   nextVehicleId() {
     this.vehicleSeq = (this.vehicleSeq || 0) + 1;
@@ -1054,7 +1138,7 @@ export class Game {
       const bots = this.bots.filter(b => b.team === team && b.alive && !b.vehicle);
       if (!bots.length) continue;
       const owner = bots[Math.floor(Math.random() * bots.length)];
-      const has = (k) => this.vehicles.some(v => v.alive && (v.kind === k || (k === 'jet' && v.spec?.fixed) || (k === 'tank' && v.spec?.ground)) && v.team === team);
+      const has = (k) => this.vehicles.some(v => v.alive && (v.kind === k || (k === 'jet' && v.spec?.fixed) || (k === 'tank' && v.spec?.ground && v.kind !== 'jeep')) && v.team === team);
       const r = Math.random();
       if (r < 0.45) this.callVehicle(owner, 'drone');
       else if (r < 0.75 && !has('tank')) this.callVehicle(owner, 'tank');
@@ -1232,6 +1316,11 @@ export class Game {
         if (own) this.audio.beep(); else this.audio.alarm();
         break;
       }
+      case 'build': {
+        if (ev.w === 'bag') buildSandbags(ev.x, ev.z, ev.yaw, ev.y);
+        else this.placeBeacon(this.soldiers.find(x => x.id === ev.o) || { id: ev.o, team: ev.team }, ev.x, ev.y, ev.z, ev.yaw);
+        break;
+      }
       case 'spawn': if (mine) { pl.spawn({ x: ev.x, z: ev.z }, ev.yaw, this.kit(this.pendingCls)); this.hud.hideDeath(); } break;
       case 'drop': if (Array.isArray(ev.p)) this.dropPickup(v3(ev.p), ev.id); break;
       case 'took': this.removePickup(ev.id); break;
@@ -1279,6 +1368,9 @@ export class Game {
     }
 
     for (const k in pl.vcool) pl.vcool[k] = Math.max(0, pl.vcool[k] - dt);
+    if (ars.engineer && pl.supplies < 4 && (pl.supplyT += dt) > 15) { pl.supplyT = 0; pl.supplies++; }
+    this.updateBeacons(dt);
+    if (this.authority) this.motorPool(dt);
     if (pl.alive) {
       if (inp.streak) this.playerStreak(inp.streak);
       if (inp.call) this.playerCall(inp.call);
@@ -1314,6 +1406,7 @@ export class Game {
             this.audio.ui();
           }
         } else { this.actT = 0; this.actId = null; }
+        if (inp.build && ars.engineer) this.playerBuild(inp.build);
         if (!pl.vehicle) {
           pl.update(dt, inp);
           ars.update(dt, inp, pl);

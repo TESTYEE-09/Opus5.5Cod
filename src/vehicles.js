@@ -26,6 +26,7 @@ const aimDir = (yaw, pitch, out) => { const c = Math.cos(pitch); return out.set(
 
 // ---------- specs and damage ----------
 export const SPEC = {
+  jeep: { name: 'Jeep', hp: 450, armor: 0.45, bounty: 75, seat: 'inside', air: false, size: 2.2, boom: 1.3, ground: true, wheeled: true },
   apc: { name: 'APC', hp: 900, armor: 0.2, bounty: 150, seat: 'inside', air: false, size: 2.4, boom: 1.6, ground: true },
   ifv: { name: 'IFV', hp: 1150, armor: 0.1, bounty: 200, seat: 'inside', air: false, size: 2.5, boom: 1.8, ground: true },
   tank: { name: 'Tank', hp: 1500, armor: 0.03, bounty: 300, seat: 'inside', air: false, size: 2.6, boom: 2, ground: true },
@@ -43,6 +44,10 @@ export const SPEC = {
 // Ground vehicles by kind, [USA, Russia]. main: cannon (tank shells), auto (autocannon) or
 // hmg (heavy machine gun); atgm: wire-guided missiles fired with R.
 export const ARMOR = {
+  jeep: [
+    { name: 'M1151 Humvee', hp: 450, speed: 22, boost: 29, turn: 1.9, wheeled: true, main: { type: 'hmg', name: 'M2 .50', rate: 0.12, dmg: 40 } },
+    { name: 'GAZ Tigr', hp: 520, speed: 21, boost: 27, turn: 1.7, wheeled: true, main: { type: 'hmg', name: 'KPVT 14.5mm', rate: 0.12, dmg: 44 } },
+  ],
   apc: [
     { name: 'M113', hp: 800, speed: 11, boost: 14, turn: 1.1, main: { type: 'hmg', name: 'M2 .50', rate: 0.11, dmg: 48 } },
     { name: 'BTR-80', hp: 900, speed: 13, boost: 16, turn: 0.8, main: { type: 'hmg', name: 'KPVT 14.5mm', rate: 0.1, dmg: 55 } },
@@ -69,9 +74,10 @@ export const FPV = {
   drone10: { thrust: 21.5, drag: 0.3, battery: 75, radius: 9, dmg: 320, direct: 1700, weapon: 'Heavy FPV', scale: 1.9, pitch: 0.6 },
 };
 export const isDrone = (kind) => !!SPEC[kind]?.drone;
-const MODEL_NAME = { apc: ['M113', 'BTR-80'], ifv: ['M2 Bradley', 'BMP-2'], mbt: ['M1A2 SEPv3', 'T-90M'], tank: ['M1 Abrams', 'T-80'], jet: ['F-16C', 'Su-27'], attacker: ['A-10C', 'Su-25'], aa: ['AA Gun', 'AA Gun'], heli: ['AH-64 Apache', 'Mi-24 Hind'], gunship: ['AH-64D Apache', 'Mi-24V Hind'] };
+const MODEL_NAME = { jeep: ['M1151 Humvee', 'GAZ Tigr'], apc: ['M113', 'BTR-80'], ifv: ['M2 Bradley', 'BMP-2'], mbt: ['M1A2 SEPv3', 'T-90M'], tank: ['M1 Abrams', 'T-80'], jet: ['F-16C', 'Su-27'], attacker: ['A-10C', 'Su-25'], aa: ['AA Gun', 'AA Gun'], heli: ['AH-64 Apache', 'Mi-24 Hind'], gunship: ['AH-64D Apache', 'Mi-24V Hind'] };
 export const vehicleName = (kind, team) => MODEL_NAME[kind]?.[team] || SPEC[kind]?.name || kind;
 const HELP = {
+  jeep: 'W S drive · A D steer · Shift boost · Mouse aim the roof gun · LMB fire · F get out',
   tank: 'WASD drive · Shift boost · Mouse aim turret · LMB cannon · Space coax MG · RMB gunner sight · F exit',
   jet: 'Mouse aims, the jet follows · W S throttle · Shift afterburner · A D roll · LMB guns · R air-to-ground missile (locks what you aim at) · G IR missile · Space flares · RMB zoom · F leave',
   drone: 'Mouse pitch / yaw · A D roll · W S throttle · Space full power · Shift hover assist · LMB detonate · F abort',
@@ -247,14 +253,51 @@ export function buildTank(team, ally) {
   return team ? buildT80(ally) : buildAbrams(ally);
 }
 
+// Running gear: the track belt (top run, bottom run, angled ends) with its grousers, road
+// wheels with rims and hubs, return rollers, a toothed drive sprocket at the back and an
+// idler at the front.
 function tracks(hull, M, n, r, len, x, skirt) {
+  const tw = 0.62, top = 0.82, zf = -len / 2 + 0.35, zb = len / 2 - 0.35;
   for (const s of [-1, 1]) {
-    mk(hull, rb(0.62, 0.95, len, 0.3), M.track, x * s, 0.5, 0);
-    for (let i = 0; i < n; i++) mk(hull, cylX(r, 0.22), M.dark, (x + 0.2) * s, 0.42, -len / 2 + 0.75 + i * (len - 1.5) / (n - 1));
-    mk(hull, cylX(0.28, 0.2), M.metal, (x + 0.18) * s, 0.72, -len / 2 + 0.2);
-    mk(hull, cylX(0.3, 0.2), M.dark, (x + 0.18) * s, 0.68, len / 2 - 0.25);
+    const cx = x * s;
+    mk(hull, rb(tw, 0.09, len - 0.9, 0.02), M.track, cx, top, 0);
+    mk(hull, rb(tw, 0.09, len - 1.1, 0.02), M.track, cx, 0.05, 0);
+    mk(hull, rb(tw, 0.09, 0.95, 0.02), M.track, cx, 0.42, -len / 2 + 0.18, 1.1);
+    mk(hull, rb(tw, 0.09, 0.9, 0.02), M.track, cx, 0.46, len / 2 - 0.2, -1.2);
+    for (let i = 0; i < Math.round(len / 0.3); i++) {
+      const z = -len / 2 + 0.55 + i * 0.3;
+      if (z > len / 2 - 0.55) break;
+      mk(hull, rb(tw + 0.02, 0.05, 0.07, 0.01), M.dark, cx, top + 0.06, z);
+      mk(hull, rb(tw + 0.02, 0.05, 0.07, 0.01), M.dark, cx, 0.0, z);
+    }
+    for (let i = 0; i < n; i++) {
+      const z = -len / 2 + 0.75 + i * (len - 1.5) / (n - 1);
+      mk(hull, cylX(r, 0.26, 18), M.rubber, (x + 0.02) * s, 0.42, z);
+      mk(hull, cylX(r * 0.82, 0.29, 16), M.hull2, (x + 0.02) * s, 0.42, z);
+      mk(hull, cylX(r * 0.3, 0.33, 10), M.dark, (x + 0.02) * s, 0.42, z);
+      mk(hull, rb(0.12, 0.1, 0.5, 0.02), M.dark, (x - 0.28) * s, 0.55, z - 0.2, 0.4);
+    }
+    for (const z of [-len / 4, 0, len / 4]) mk(hull, cylX(0.11, 0.3, 10), M.dark, cx, top - 0.1, z);
+    // sprocket (back) with teeth, idler (front)
+    mk(hull, cylX(0.3, 0.3, 16), M.metal, (x + 0.02) * s, 0.62, zb);
+    for (let i = 0; i < 10; i++) { const a = i * 0.628; mk(hull, rb(0.28, 0.08, 0.08, 0.01), M.dark, (x + 0.02) * s, 0.62 + Math.cos(a) * 0.32, zb + Math.sin(a) * 0.32, a); }
+    mk(hull, cylX(0.12, 0.34, 10), M.dark, (x + 0.02) * s, 0.62, zb);
+    mk(hull, cylX(0.3, 0.28, 16), M.hull2, (x + 0.02) * s, 0.55, zf);
+    mk(hull, cylX(0.12, 0.34, 10), M.dark, (x + 0.02) * s, 0.55, zf);
     if (skirt) skirt(s);
   }
+}
+
+// a pintle heavy machine gun on a cupola: stand, receiver, barrel, ammo can
+function roofGun(parent, M, x, y, z, len = 1.2) {
+  const g = new THREE.Group(); g.position.set(x, y, z); parent.add(g);
+  mk(g, cylY(0.03, 0.3, 6), M.dark, 0, 0.15, 0);
+  mk(g, rb(0.13, 0.15, 0.55, 0.02), M.dark, 0, 0.36, 0.05);
+  mk(g, cylZ(0.025, 0.025, len, 8), M.dark, 0, 0.38, -0.2 - len / 2);
+  mk(g, cylZ(0.04, 0.045, 0.14, 8), M.dark, 0, 0.38, -0.25 - len);
+  mk(g, rb(0.1, 0.14, 0.2, 0.02), M.olive, -0.13, 0.3, 0.05);
+  mk(g, rb(0.03, 0.12, 0.12, 0.01), M.dark, 0, 0.36, 0.34);
+  return g;
 }
 
 function buildAbrams(ally) {
@@ -292,6 +335,15 @@ function buildAbrams(ally) {
   mk(turret, cylY(0.02, 1.0, 5), M.dark, 0.0, 1.2, 1.4);
   mk(turret, cylY(0.012, 2.4, 4), M.dark, -1.2, 1.9, 2.4);
   mk(turret, rb(0.7, 0.03, 0.7, 0.01), M.mark, 0, 0.745, 1.0);
+  roofGun(turret, M, 0.65, 1.02, 0.45, 1.15);
+  roofGun(turret, M, -0.6, 0.86, 0.35, 0.75);
+  // bustle rack: a rail cage full of kit round the back of the turret
+  for (let i = 0; i < 8; i++) mk(turret, cylY(0.02, 0.45, 5), M.dark, -1.3 + i * 0.37, 0.95, 2.85);
+  mk(turret, rb(2.7, 0.03, 0.03, 0.005), M.dark, 0, 1.17, 2.85);
+  mk(turret, rb(2.3, 0.3, 0.7, 0.12), M.sand, 0, 0.88, 2.45);
+  mk(turret, rb(0.5, 0.22, 0.4, 0.06), M.olive, 0.9, 0.95, 2.4);
+  // the mantlet's dust cover
+  mk(turret, rb(1.05, 0.5, 0.2, 0.08), M.sand, 0, 0.38, -2.02);
   const gun = new THREE.Group(); gun.position.set(0, 0.38, -1.95); turret.add(gun);
   mk(gun, rb(1.0, 0.56, 0.5, 0.06), M.hull2, 0, 0, 0.1);
   mk(gun, cylZ(0.12, 0.12, 5.0, 16), M.metal, 0, 0, -2.5);
@@ -348,6 +400,9 @@ function buildT80(ally) {
   mk(turret, cylZ(0.09, 0.09, 1.9, 8), M.dark, -1.05, 0.62, 2.1);
   mk(turret, cylY(0.012, 2.4, 4), M.dark, 1.0, 1.7, 1.6);
   mk(turret, rb(0.6, 0.03, 0.6, 0.01), M.mark, 0, 0.74, 0.7);
+  roofGun(turret, M, 0.55, 0.82, 0.5, 1.2);
+  // snorkel tube along the back and a stowed tow cable loop
+  mk(turret, cylZ(0.07, 0.07, 1.6, 8), M.dark, 1.1, 0.55, 1.4);
   const gun = new THREE.Group(); gun.position.set(0, 0.38, -1.55); turret.add(gun);
   mk(gun, rb(0.8, 0.5, 0.5, 0.1), M.hull2, 0, 0, 0.1);
   mk(gun, cylZ(0.11, 0.12, 5.1, 16), M.metal, 0, 0, -2.6);
@@ -469,6 +524,119 @@ function buildBMP2(ally) {
   mk(T.gun, cylZ(0.065, 0.065, 0.25, 10), M.dark, 0, 0, -2.85);
   mk(T.turret, rb(0.5, 0.03, 0.5, 0.01), M.mark, 0, 0.56, 0.3);
   return { g, hull, ...T };
+}
+
+// ---------- jeeps ----------
+// A wheel that spins (child 0) inside a hub that steers (the group); front wheels are flagged.
+function carWheel(hull, M, x, y, z, r, w, front) {
+  const hub = new THREE.Group(); hub.position.set(x, y, z); hub.userData.front = front; hull.add(hub);
+  const spin = new THREE.Group(); hub.add(spin);
+  mk(spin, cylX(r, w, 20), M.rubber, 0, 0, 0);
+  for (let i = 0; i < 8; i++) mk(spin, rb(w + 0.02, 0.07, 0.1, 0.01), M.rubber, 0, Math.cos(i * 0.785) * r, Math.sin(i * 0.785) * r, i * 0.785);
+  mk(spin, cylX(r * 0.58, w + 0.03, 12), M.hull2, 0, 0, 0);
+  for (let i = 0; i < 6; i++) mk(spin, cylX(0.025, w + 0.07, 5), M.dark, 0, Math.cos(i * 1.047) * r * 0.36, Math.sin(i * 1.047) * r * 0.36);
+  mk(spin, cylX(r * 0.2, w + 0.08, 8), M.dark, 0, 0, 0);
+  return hub;
+}
+
+// M1151 Humvee: wide flat body, sloped grille, four armoured doors with small windows, rear
+// deck, and an O-GPK gunner turret with the M2
+function buildHumvee(ally) {
+  const M = mats(0, ally), g = new THREE.Group(), hull = new THREE.Group(); g.add(hull);
+  // chassis tub and fenders
+  mk(hull, rb(2.18, 0.5, 4.6, 0.05), M.body, 0, 0.95, 0);
+  for (const s of [-1, 1]) {
+    mk(hull, rb(0.5, 0.12, 1.25, 0.03), M.body, 0.86 * s, 1.24, -1.55);
+    mk(hull, rb(0.5, 0.12, 1.25, 0.03), M.body, 0.86 * s, 1.24, 1.55);
+    mk(hull, rb(0.06, 0.34, 1.2, 0.02), M.dark, 1.1 * s, 0.75, 0);
+  }
+  // hood sloping down to the grille
+  mk(hull, rb(2.1, 0.12, 1.55, 0.04), M.body, 0, 1.36, -1.52, 0.1);
+  mk(hull, rb(1.6, 0.46, 0.1, 0.03), M.hull2, 0, 1.08, -2.3, -0.25);
+  for (let i = 0; i < 9; i++) mk(hull, rb(0.05, 0.36, 0.04, 0.01), M.dark, -0.62 + i * 0.155, 1.08, -2.36, -0.25);
+  for (const s of [-1, 1]) {
+    mk(hull, rb(0.2, 0.14, 0.05, 0.02), M.lamp, 0.8 * s, 1.18, -2.3);
+    mk(hull, rb(0.1, 0.1, 0.05, 0.01), M.lamp, 0.95 * s, 1.34, -2.28);
+  }
+  mk(hull, rb(2.2, 0.2, 0.22, 0.04), M.dark, 0, 0.72, -2.35);
+  mk(hull, cylX(0.07, 1.9, 8), M.dark, 0, 0.62, -2.5);
+  // armoured cab: near-vertical sides, a thick windshield in two panes
+  mk(hull, rb(2.14, 0.9, 2.3, 0.05), M.body, 0, 1.75, 0.3);
+  mk(hull, rb(2.08, 0.1, 2.3, 0.03), M.hull2, 0, 2.23, 0.3);
+  for (const s of [-1, 1]) {
+    mk(hull, rb(0.86, 0.5, 0.06, 0.02), M.glass, 0.5 * s, 1.88, -0.87, -0.12);
+    for (const z of [-0.35, 0.8]) {
+      mk(hull, rb(0.05, 0.36, 0.5, 0.02), M.glass, 1.075 * s, 1.9, z);
+      mk(hull, rb(0.04, 0.82, 1.02, 0.01), M.hull2, 1.085 * s, 1.55, z);
+      mk(hull, rb(0.05, 0.05, 0.18, 0.01), M.dark, 1.11 * s, 1.5, z + 0.3);
+    }
+    mk(hull, rb(0.04, 0.08, 0.3, 0.01), M.dark, 1.15 * s, 1.95, -0.95);
+    mk(hull, rb(0.04, 0.22, 0.16, 0.01), M.glass, 1.18 * s, 1.95, -1.08);
+  }
+  mk(hull, rb(2.14, 0.12, 0.08, 0.02), M.hull2, 0, 2.14, -0.86);
+  // rear deck with a canvas-covered load and spare can racks
+  mk(hull, rb(2.14, 0.55, 1.2, 0.04), M.body, 0, 1.45, 1.95);
+  mk(hull, rb(1.9, 0.35, 0.9, 0.18), M.sand, 0, 1.88, 1.9);
+  for (const s of [-1, 1]) mk(hull, rb(0.18, 0.46, 0.34, 0.03), M.olive, 0.7 * s, 1.35, 2.6);
+  mk(hull, rb(0.22, 0.12, 0.05, 0.02), new THREE.MeshBasicMaterial({ color: new THREE.Color(2, 0.2, 0.15) }), 0, 1.35, 2.57);
+  mk(hull, cylY(0.012, 2.2, 4), M.dark, -0.95, 3.1, 1.5);
+  const hubs = [];
+  for (const s of [-1, 1]) for (const [z, f] of [[-1.55, true], [1.55, false]]) hubs.push(carWheel(hull, M, 0.9 * s, 0.48, z, 0.48, 0.38, f));
+  // O-GPK turret: a ring on the roof, a front shield with a window, side wings
+  const T = smallTurret(g, M, 2.3, 0.35, 1.65, 0.05, { gy: 0.55, gz: -0.4 });
+  mk(T.turret, cylY(0.58, 0.14, 16), M.hull2, 0, 0.05, 0);
+  mk(T.turret, rb(1.2, 0.72, 0.06, 0.02), M.hull2, 0, 0.5, -0.62);
+  mk(T.turret, rb(0.34, 0.2, 0.07, 0.02), M.glass, 0, 0.72, -0.64);
+  for (const s of [-1, 1]) mk(T.turret, rb(0.06, 0.62, 0.7, 0.02), M.hull2, 0.62 * s, 0.46, -0.3, 0, 0.35 * s, 0);
+  mk(T.gun, rb(0.16, 0.2, 0.95, 0.02), M.dark, 0, 0, 0.05);
+  mk(T.gun, cylZ(0.04, 0.06, 0.2, 8), M.dark, 0, 0, -1.6);
+  mk(T.gun, rb(0.12, 0.2, 0.22, 0.02), M.olive, -0.16, -0.08, 0.1);
+  mk(T.turret, rb(0.5, 0.03, 0.5, 0.01), M.mark, 0, 0.13, 0.35);
+  return { g, hull, ...T, wheels: hubs };
+}
+
+// GAZ Tigr: a tall armoured 4x4 with a long bonnet, slab sides, small square windows,
+// and a roof hatch mount with the heavy machine gun
+function buildTigr(ally) {
+  const M = mats(1, ally), g = new THREE.Group(), hull = new THREE.Group(); g.add(hull);
+  mk(hull, rb(2.3, 0.45, 5.1, 0.05), M.dark, 0, 0.85, 0.05);
+  // long bonnet with a raised centre and a big bumper
+  mk(hull, rb(2.25, 0.62, 1.7, 0.08), M.body, 0, 1.34, -1.7);
+  mk(hull, rb(1.2, 0.1, 1.5, 0.04), M.hull2, 0, 1.68, -1.7, 0.03);
+  mk(hull, rb(1.9, 0.5, 0.08, 0.03), M.hull2, 0, 1.3, -2.56);
+  for (let i = 0; i < 6; i++) mk(hull, rb(1.3, 0.035, 0.04, 0.01), M.dark, 0, 1.12 + i * 0.07, -2.61);
+  mk(hull, rb(2.35, 0.26, 0.28, 0.04), M.dark, 0, 0.88, -2.66);
+  for (const s of [-1, 1]) {
+    mk(hull, cylZ(0.1, 0.1, 0.06, 12), M.lamp, 0.8 * s, 1.32, -2.62);
+    mk(hull, rb(0.55, 0.14, 1.1, 0.04), M.body, 1.02 * s, 1.18, -1.65);
+    mk(hull, rb(0.55, 0.14, 1.1, 0.04), M.body, 1.02 * s, 1.18, 1.85);
+  }
+  // cab: tall box, near-vertical windshield, small square side windows, back door
+  mk(hull, rb(2.3, 1.25, 3.3, 0.08), M.body, 0, 2.02, 0.85);
+  mk(hull, rb(2.2, 0.1, 3.2, 0.03), M.hull2, 0, 2.68, 0.85);
+  for (const s of [-1, 1]) {
+    mk(hull, rb(0.95, 0.44, 0.06, 0.02), M.glass, 0.52 * s, 2.25, -0.82, -0.18);
+    for (const z of [-0.3, 0.55, 1.4, 2.1]) {
+      mk(hull, rb(0.05, 0.32, 0.4, 0.02), M.glass, 1.16 * s, 2.3, z);
+      mk(hull, cylX(0.035, 0.08, 6), M.dark, 1.18 * s, 2.0, z);
+    }
+    mk(hull, rb(0.04, 1.0, 1.05, 0.01), M.hull2, 1.165 * s, 1.95, 0.15);
+    mk(hull, rb(0.05, 0.05, 0.2, 0.01), M.dark, 1.19 * s, 1.95, 0.4);
+    mk(hull, rb(0.05, 0.12, 0.3, 0.01), M.dark, 1.2 * s, 2.3, -0.95);
+  }
+  mk(hull, rb(1.1, 1.0, 0.06, 0.02), M.hull2, 0.4, 1.95, 2.52);
+  mk(hull, cylZ(0.4, 0.4, 0.2, 16), M.rubber, -0.6, 1.9, 2.62);
+  mk(hull, cylZ(0.2, 0.2, 0.21, 10), M.hull2, -0.6, 1.9, 2.62);
+  mk(hull, cylY(0.012, 2.2, 4), M.dark, 1.0, 3.6, 2.2);
+  const hubs = [];
+  for (const s of [-1, 1]) for (const [z, f] of [[-1.7, true], [1.85, false]]) hubs.push(carWheel(hull, M, 0.98 * s, 0.55, z, 0.55, 0.4, f));
+  const T = smallTurret(g, M, 2.75, 0.8, 1.8, 0.055, { gy: 0.5, gz: -0.35 });
+  mk(T.turret, cylY(0.5, 0.16, 16), M.hull2, 0, 0.06, 0);
+  mk(T.turret, rb(0.9, 0.5, 0.06, 0.02), M.hull2, 0, 0.42, -0.5, -0.12);
+  mk(T.gun, rb(0.18, 0.22, 1.0, 0.02), M.dark, 0, 0, 0.05);
+  mk(T.gun, cylZ(0.05, 0.07, 0.25, 8), M.dark, 0, 0, -1.75);
+  mk(T.turret, rb(0.5, 0.03, 0.5, 0.01), M.mark, 0, 0.15, 0.4);
+  return { g, hull, ...T, wheels: hubs };
 }
 
 // M1A2 SEPv3: the Abrams with the commander's independent viewer, TUSK tiles and a loader shield
@@ -647,7 +815,7 @@ export function buildAA(team, ally) {
   return { g, mount, guns, muzzles };
 }
 
-const MODELS = { tank: buildTank, apc: (t, a) => t ? buildBTR80(a) : buildM113(a), ifv: (t, a) => t ? buildBMP2(a) : buildBradley(a), mbt: (t, a) => t ? buildT90M(a) : buildM1A2(a), jet: (t, a) => buildAircraft(airframeFor('jet', t), a), attacker: (t, a) => buildAircraft(airframeFor('attacker', t), a), drone: buildDrone, drone10: (t, a) => buildDrone(t, a, 1.9), recon: buildRecon, aa: buildAA, heli: (team) => buildChopper(team), gunship: (team) => buildChopper(team) };
+const MODELS = { jeep: (t, a) => t ? buildTigr(a) : buildHumvee(a), tank: buildTank, apc: (t, a) => t ? buildBTR80(a) : buildM113(a), ifv: (t, a) => t ? buildBMP2(a) : buildBradley(a), mbt: (t, a) => t ? buildT90M(a) : buildM1A2(a), jet: (t, a) => buildAircraft(airframeFor('jet', t), a), attacker: (t, a) => buildAircraft(airframeFor('attacker', t), a), drone: buildDrone, drone10: (t, a) => buildDrone(t, a, 1.9), recon: buildRecon, aa: buildAA, heli: (team) => buildChopper(team), gunship: (team) => buildChopper(team) };
 
 function pose(kind, m, pos, quat, a, b, dt) {
   m.g.position.copy(pos);
@@ -804,7 +972,7 @@ export class Tank extends Vehicle {
     this.A = ARMOR[kind][this.team] || ARMOR.tank[0];
     this.name = this.A.name; this.maxHealth = this.health = this.A.hp;
     this.atgm = this.A.atgm?.n || 0; this.atgmWant = false;
-    this.help = HELP.tank + (this.atgm ? ' · R guided missile' : '');
+    this.help = this.A.wheeled ? HELP.jeep : HELP.tank + (this.atgm ? ' · R guided missile' : '');
     this.addModel();
     this.pos.set(x, groundAt(x, z, 1.5, 1), z);
     this.yaw = yaw; this.speed = 0; this.aimYaw = yaw; this.aimPitch = 0; this.tYaw = yaw; this.tPitch = 0;
@@ -812,7 +980,7 @@ export class Tank extends Vehicle {
     this.reload = 1; this.mgT = 0; this.recoil = 0; this.zoom = 0; this.tiltX = 0; this.tiltZ = 0;
     this.scanT = 0; this.target = null; this.path = null; this.pathI = 0; this.goal = null; this.aiFire = 1;
     this.stuckT = 0; this.stuckPos = this.pos.clone(); this.reverseT = 0; this.crushT = 0;
-    this.sound = game.audio.engine('tank');
+    this.sound = game.audio.engine(this.A.wheeled ? 'car' : 'tank');
     this.pose(0);
   }
 
@@ -856,18 +1024,24 @@ export class Tank extends Vehicle {
     if (this.ai && !this.driver) this.think(dt);
     else if (!this.driver) { this.throttle = 0; this.steer = 0; this.fireWant = false; this.mgWant = false; }
     // tracks: accelerate to the throttle's speed, neutral steer on A/D
-    const want = this.throttle > 0 ? (this.boost ? this.A.boost : this.A.speed) * this.throttle : this.throttle * 4.5;
-    const acc = Math.abs(want) > Math.abs(this.speed) && want * this.speed >= 0 ? 3.2 : 7;
+    const W = this.A.wheeled;
+    const want = this.throttle > 0 ? (this.boost ? this.A.boost : this.A.speed) * this.throttle : this.throttle * (W ? 8 : 4.5);
+    const acc = Math.abs(want) > Math.abs(this.speed) && want * this.speed >= 0 ? (W ? 7 : 3.2) : (W ? 12 : 7);
     this.speed += clamp(want - this.speed, -acc * dt, acc * dt);
-    const turn = this.steer * this.A.turn * dt;
+    // tracks pivot on the spot; wheels only turn while rolling, and less at speed
+    const turn = W ? this.steer * this.A.turn * dt * clamp(this.speed / 5, -1, 1) * (1 - Math.min(0.45, Math.abs(this.speed) / 60))
+      : this.steer * this.A.turn * dt;
+    this.steerVis = (this.steerVis || 0) + (this.steer * 0.5 - (this.steerVis || 0)) * Math.min(1, dt * 8);
+    this.roll = (this.roll || 0) + this.speed * dt;
     const fx = -Math.sin(this.yaw), fz = -Math.cos(this.yaw);
     const nx = this.pos.x + fx * this.speed * dt, nz = this.pos.z + fz * this.speed * dt, ny = this.yaw + turn;
-    if (Math.abs(this.speed) > 1.2 && (this.crushT -= dt) <= 0) this.crush(nx + fx * Math.sign(this.speed) * 0.4, nz + fz * Math.sign(this.speed) * 0.4, ny);
+    if (Math.abs(this.speed) > 1.2 && (this.crushT -= dt) <= 0 && !W) this.crush(nx + fx * Math.sign(this.speed) * 0.4, nz + fz * Math.sign(this.speed) * 0.4, ny);
     if (this.fits(nx, nz, ny)) { this.pos.x = nx; this.pos.z = nz; this.yaw = ny; }
     else if (this.fits(this.pos.x, this.pos.z, ny)) { this.yaw = ny; this.speed *= 0.5; }
     else if (this.fits(nx, nz, this.yaw)) { this.pos.x = nx; this.pos.z = nz; }
     else {
-      if (Math.abs(this.speed) > 3 && this.controlled) g.shake = Math.max(g.shake, 0.03);
+      if (Math.abs(this.speed) > 3 && this.controlled) g.shake = Math.max(g.shake, W ? 0.06 : 0.03);
+      if (W && Math.abs(this.speed) > 14 && g.authority) this.applyDamage((Math.abs(this.speed) - 14) * 12, null, 'Car');
       this.speed *= -0.15;
     }
     // ride over kerbs and rubble; pitch and roll with the ground
@@ -899,6 +1073,7 @@ export class Tank extends Vehicle {
     this.quat.setFromEuler(_e.set(this.tiltX, this.yaw, this.tiltZ, 'YXZ'));
     m.g.position.copy(this.pos); m.g.quaternion.copy(this.quat);
     m.turret.rotation.y = this.a; m.gun.rotation.x = this.b;
+    if (m.wheels) for (const w of m.wheels) { w.children[0].rotation.x = -(this.roll || 0) / 0.48; if (w.userData.front) w.rotation.y = this.steerVis || 0; }
     m.gun.position.z = m.gunZ + Math.sin(Math.min(1, this.recoil) * Math.PI * 0.5) * 0.5 * (this.recoil > 0.8 ? 1 : this.recoil / 0.8);
     m.g.updateMatrixWorld(true);
   }
@@ -2133,7 +2308,9 @@ export class AttackHeli extends Vehicle {
     this.gunT = 0; this.atgm = 4; this.rockets = 14; this.rocketT = 0; this.flares = 12;
     this.target = null; this.scanT = 0; this.camInit = false; this.camPos = new THREE.Vector3();
     this.sound = game.audio.rotor();
-    this.t = 3;
+    this.t = 3; this.acq = 0;
+    // a bot pilot's helicopter is softer and leaves sooner than one a player flies
+    if (!owner.isPlayer) { this.maxHealth = this.health = 1050; this.atgm = 2; }
   }
 
   control(dt, inp) {
@@ -2179,7 +2356,7 @@ export class AttackHeli extends Vehicle {
     this.gunT -= dt; this.rocketT -= dt;
     if (this.fireWant && this.gunT <= 0) this.fireCannon();
     if (this.rocketWant && this.rocketT <= 0 && this.rockets > 0) this.fireRocket();
-    if (!this.driver && this.t > 120) this.cleanup();
+    if (!this.driver && this.t > (this.owner?.isPlayer ? 120 : 80)) this.cleanup();
   }
 
   aimVec(out) { return aimDir(this.aimYaw, this.aimPitch, out); }
@@ -2191,11 +2368,13 @@ export class AttackHeli extends Vehicle {
   }
 
   fireCannon() {
-    this.gunT = 0.1;
+    // a bot gunner fires slower, looser bursts that do less per round
+    const ai = !this.driver, sp = ai ? 0.07 : 0.01;
+    this.gunT = ai ? 0.22 : 0.1;
     const o = _c.set(this.pos.x, this.pos.y - 0.9, this.pos.z).addScaledVector(this.aimVec(_u), 3).clone();
     const d = this.aimVec(new THREE.Vector3());
-    d.x += (Math.random() - 0.5) * 0.01; d.y += (Math.random() - 0.5) * 0.01; d.z += (Math.random() - 0.5) * 0.01;
-    this.game.vehicleGun(this, o, d.normalize(), 'Chopper', 70, 0xff9050, 'heli', true, 2.2);
+    d.x += (Math.random() - 0.5) * sp; d.y += (Math.random() - 0.5) * sp; d.z += (Math.random() - 0.5) * sp;
+    this.game.vehicleGun(this, o, d.normalize(), 'Chopper', ai ? 34 : 70, 0xff9050, 'heli', true, ai ? 1.4 : 2.2);
   }
 
   fireRocket() {
@@ -2226,7 +2405,7 @@ export class AttackHeli extends Vehicle {
     this.inp.u = alt < 38 ? 1 : alt > 46 ? -1 : 0;
     if ((this.scanT -= dt) <= 0) {
       this.scanT = 0.6; this.target = null;
-      let best = 170;
+      let best = 130;
       for (const e of g.targetsFor(this.team)) {
         if (e.air && !e.spec?.drone) continue;
         const d = e.pos.distanceTo(this.pos);
@@ -2234,15 +2413,18 @@ export class AttackHeli extends Vehicle {
       }
     }
     const t = this.target;
+    // it takes the crew a few seconds to line up on a new target, and it breaks off to reposition
+    if (t !== this.acqT) { this.acqT = t; this.acq = 2.5 + Math.random() * 1.5; }
+    this.acq -= dt;
     if (t?.alive && alt > 15) {
       const p = t.aimPoint(_w, false), dx = p.x - this.pos.x, dz = p.z - this.pos.z, hd = Math.hypot(dx, dz);
       this.aimYaw = Math.atan2(-dx, -dz);
       this.aimPitch = Math.atan2(p.y - this.pos.y, hd);
       this.inp.f = hd > 90 ? 1 : hd < 50 ? -0.5 : 0;
       this.inp.s = Math.sin(this.t * 0.4) * 0.6;
-      if (Math.abs(wrap(this.aimYaw - this.heading)) < 0.15) {
-        if (t.isVehicle && t.spec?.ground && this.atgm > 0 && Math.random() < dt * 0.4) this.fireAtgm();
-        else this.fireWant = Math.sin(this.t * 2) > 0.2;
+      if (this.acq <= 0 && Math.abs(wrap(this.aimYaw - this.heading)) < 0.15) {
+        if (t.isVehicle && t.spec?.ground && this.atgm > 0 && Math.random() < dt * 0.12) this.fireAtgm();
+        else this.fireWant = Math.sin(this.t * 1.3) > 0.55;
       }
     } else if (alt > 15) {
       const c = SIZE / 2;
@@ -2480,6 +2662,33 @@ export function placeEmplacements(game) {
     }
   }
   return out;
+}
+
+// Parking beside a team's spawn for a jeep: open ground a little to the side of the base.
+export function jeepSpot(game, team) {
+  const yaw = team === 0 ? Math.PI : 0, sp = spawns[team], cx = sp.reduce((a, s) => a + s.x, 0) / sp.length, cz = sp.reduce((a, s) => a + s.z, 0) / sp.length;
+  for (const r of [6, 9, 12, 15, 19, 24]) for (let i = 0; i < 12; i++) {
+    const a = i * 0.5236, x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r;
+    if (x < 4 || z < 4 || x > SIZE - 4 || z > SIZE - 4) continue;
+    const gy = groundAt(x, z, 1, 3);
+    if ([-1.9, 0, 1.9].some(k => overlaps(x, z + k, 1.45, gy + 0.4, gy + 2.6))) continue;
+    if (game.vehicles.some(v => v.alive && (v.spec?.ground || v.kind === 'aa') && Math.hypot(v.pos.x - x, v.pos.z - z) < 5.5)) continue;
+    if (sp.some(s => Math.hypot(s.x - x, s.z - z) < 3)) continue;
+    return { x, z, yaw };
+  }
+  return tankSpot(game, team);
+}
+
+// an engineer's spawn beacon: a folding tripod, a radio box and a blinking lamp
+export function beaconMesh(ally) {
+  const g = new THREE.Group(), M = mats(ally ? 0 : 1, ally);
+  for (let i = 0; i < 3; i++) mk(g, cylY(0.02, 0.8, 5), M.dark, Math.cos(i * 2.09) * 0.2, 0.36, Math.sin(i * 2.09) * 0.2, Math.sin(i * 2.09) * 0.45, 0, -Math.cos(i * 2.09) * 0.45);
+  mk(g, rb(0.32, 0.26, 0.2, 0.03), M.olive, 0, 0.75, 0);
+  mk(g, cylY(0.008, 0.9, 4), M.dark, 0.1, 1.3, 0);
+  mk(g, rb(0.18, 0.04, 0.05, 0.01), M.dark, -0.05, 0.8, -0.11);
+  const lamp = mk(g, sphere(0.05), M.led, 0, 0.93, 0);
+  g.userData.lamp = lamp;
+  return g;
 }
 
 // Open ground at a team's base with room for a tank, pointing at the enemy.

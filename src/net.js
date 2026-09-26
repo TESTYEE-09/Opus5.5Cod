@@ -331,6 +331,9 @@ export class Net {
         g.remoteShot(s, d);
         break;
       }
+      case 'build':
+        if (s.alive && ['bag', 'beacon'].includes(d.w) && Number.isFinite(+d.x) && Number.isFinite(+d.z) && Math.hypot(+d.x - s.pos.x, +d.z - s.pos.z) < 5) g.build(s, d.w, +d.x, +d.z, +d.yaw || 0);
+        break;
       case 'act':
         if (s.alive) g.mode.act(s, String(d.id));
         break;

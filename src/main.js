@@ -465,7 +465,7 @@ document.addEventListener('pointerlockchange', () => {
 // ---------- input ----------
 const keys = new Set(), pressed = new Set(), mouse = new Set(), mousePressed = new Set();
 let mdx = 0, mdy = 0, wheel = 0;
-const GAME_KEYS = new Set(['Tab', 'Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyC', 'KeyG', 'KeyV', 'KeyR', 'KeyQ', 'KeyE', 'KeyF', 'KeyZ', 'KeyM', 'KeyH', 'KeyB',
+const GAME_KEYS = new Set(['Tab', 'Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyC', 'KeyG', 'KeyV', 'KeyR', 'KeyQ', 'KeyE', 'KeyF', 'KeyZ', 'KeyT', 'KeyX', 'KeyM', 'KeyH', 'KeyB',
   'ControlLeft', 'ControlRight', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9']);
 
 addEventListener('keydown', (e) => {
@@ -506,6 +506,7 @@ function readInput() {
     pronePressed: pressed.has('ControlLeft') || pressed.has('ControlRight') || pressed.has('KeyZ'),
     leanL: keys.has('KeyQ'), leanR: keys.has('KeyE'), usePressed: pressed.has('KeyF'), use: keys.has('KeyF'), digit,
     melee: pressed.has('KeyV'), nade: keys.has('KeyG'), nadePressed: pressed.has('KeyG'),
+    build: pressed.has('KeyT') ? 'bag' : pressed.has('KeyX') ? 'beacon' : null,
     switchTo, streak, call, dx: mdx, dy: mdy,
   };
   pressed.clear(); mousePressed.clear();

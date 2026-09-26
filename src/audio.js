@@ -442,6 +442,7 @@ export class Sfx {
     };
     let level, lpBase, ref;
     if (kind === 'tank') { osc('sawtooth', 36, 0.5); osc('square', 72, 0.18); hiss('lowpass', 220, 0.7, 1.4); lpBase = 700; level = db(-13); ref = 10; }
+    else if (kind === 'car') { osc('sawtooth', 48, 0.45); osc('square', 96, 0.14); osc('sawtooth', 145, 0.08); hiss('lowpass', 400, 0.7, 0.8); lpBase = 1100; level = db(-14); ref = 7; }
     else if (kind === 'jet') { hiss('bandpass', 1300, 0.6, 2.2); hiss('lowpass', 300, 0.5, 1.5); osc('sine', 2600, 0.04); lpBase = 6000; level = db(-11); ref = 25; }
     else { osc('sawtooth', 210, 0.35); osc('sawtooth', 216, 0.3); osc('square', 420, 0.06); hiss('bandpass', 2000, 1, 0.3); lpBase = 3200; level = db(-19); ref = 4; }
     lp.frequency.value = lpBase;

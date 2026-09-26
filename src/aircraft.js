@@ -382,9 +382,29 @@ export function buildApacheModel() {
   }
   add(g, fin([[0.1, 6.9, 1.2, 0.1], [1.8, 7.5, 0.8, 0.09]]), M.skin, 0, 0.4, 0);
   add(g, wing([[0.1, 7.4, 0.6, 0.08, 0.3], [1.2, 7.5, 0.5, 0.07, 0.3]]), M.skin);
+  // canopy frames: the Apache's flat-plate glazing is split by heavy bars
+  for (const [z, y, w] of [[-2.9, 0.5, 0.9], [-2.1, 0.72, 0.9], [-1.75, 0.9, 0.95], [-0.8, 1.02, 0.95]]) add(g, new THREE.BoxGeometry(w, 0.05, 0.06), M.dark, 0, y, z);
+  add(g, new THREE.BoxGeometry(0.05, 0.05, 2.3), M.dark, 0, 0.98, -1.75);
+  // TADS/PNVS: the twin sensor drums on the nose
+  for (const s of [-1, 1]) add(g, cyl(0.2, 0.2, 0.36, 12).rotateZ(Math.PI / 2).rotateY(Math.PI / 2), M.dark, 0.26 * s, -0.5, -3.85);
+  add(g, new THREE.BoxGeometry(0.34, 0.3, 0.4), M.dark, 0, -0.2, -3.8);
+  add(g, new THREE.BoxGeometry(0.2, 0.08, 0.02), M.glass, 0.26, -0.5, -4.04);
+  // wire cutters above and below the cockpit
+  add(g, new THREE.BoxGeometry(0.04, 0.5, 0.04), M.metal, 0, 0.9, -2.75, -0.6);
+  add(g, new THREE.BoxGeometry(0.04, 0.4, 0.04), M.metal, 0, -0.8, -3.2, 0.5);
+  // engine intakes, the avionics bays (cheek fairings), a tail wheel and the IR jammer
+  for (const s of [-1, 1]) {
+    add(g, cyl(0.2, 0.2, 0.05, 12).rotateX(Math.PI / 2), M.dark, 0.85 * s, 0.55, -0.82);
+    add(g, loft([[-2.3, 0.001, 0.001, 0.001, 0], [-2.0, 0.22, 0.25, 0.25, 0], [0.4, 0.24, 0.28, 0.28, 0], [0.9, 0.001, 0.001, 0.001, 0]], 12), M.skin, 0.58 * s, -0.35, 0);
+  }
+  add(g, new THREE.BoxGeometry(0.06, 0.6, 0.06), M.dark, 0, -0.1, 7.2);
+  add(g, new THREE.CylinderGeometry(0.16, 0.16, 0.1, 12).rotateZ(Math.PI / 2), M.dark, 0, -0.45, 7.2);
+  add(g, new THREE.CylinderGeometry(0.16, 0.2, 0.3, 10), M.dark, 0, 1.25, 1.4);
   const rotor = blades(4, 7.3, 0.55, M); rotor.position.y = 1.78; g.add(rotor);
   add(g, new THREE.CylinderGeometry(0.1, 0.14, 0.6, 10), M.dark, 0, 1.5, 0);
-  add(g, new THREE.SphereGeometry(0.28, 12, 8), M.dark, 0, 2.05, 0);
+  // the AH-64D's Longbow radar dome above the rotor
+  add(g, new THREE.CylinderGeometry(0.08, 0.08, 0.5, 8), M.dark, 0, 2.1, 0);
+  add(g, new THREE.SphereGeometry(0.62, 18, 10).scale(1, 0.42, 1), M.skin, 0, 2.55, 0);
   const tail = tailRotor(2, 1.4, M); tail.position.set(-0.3, 1.9, 8.0); g.add(tail);
   return { g, rotor, tail };
 }
@@ -412,6 +432,23 @@ export function buildHindModel() {
   }
   add(g, fin([[0.2, 8.9, 1.4, 0.1], [2.0, 9.6, 0.9, 0.09]], 0, 0.1), M.skin, 0, 0.5, 0);
   add(g, wing([[0.1, 8.7, 0.7, 0.08, 0.5], [1.6, 8.8, 0.55, 0.07, 0.5]]), M.skin);
+  // troop cabin: square windows and the split doors behind the cockpit
+  for (const s of [-1, 1]) {
+    for (const z of [-0.3, 0.4, 1.1]) add(g, new THREE.BoxGeometry(0.03, 0.3, 0.34), M.glass, 1.0 * s, 0.25, z);
+    add(g, new THREE.BoxGeometry(0.03, 0.9, 0.95), M.skin, 0.99 * s, -0.1, 0.4);
+    // exhausts bent out and down, dust filter domes on the intakes
+    add(g, cyl(0.22, 0.2, 0.7, 12).rotateX(-0.4).rotateZ(0.5 * s), M.dark, 1.15 * s, 1.0, 2.9);
+    add(g, new THREE.SphereGeometry(0.34, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2).rotateX(-Math.PI / 2), M.olive, 0.72 * s, 1.1, -1.25);
+    // tricycle gear
+    add(g, new THREE.BoxGeometry(0.08, 0.6, 0.08), M.dark, 0.85 * s, -1.05, 0.4);
+    add(g, new THREE.CylinderGeometry(0.28, 0.28, 0.18, 14).rotateZ(Math.PI / 2), M.dark, 0.95 * s, -1.4, 0.4);
+  }
+  add(g, new THREE.CylinderGeometry(0.22, 0.22, 0.16, 12).rotateZ(Math.PI / 2), M.dark, 0, -1.3, -3.2);
+  // YakB four-barrel gun turret under the nose
+  add(g, new THREE.SphereGeometry(0.3, 12, 8), M.dark, 0, -0.62, -3.75);
+  for (let i = 0; i < 4; i++) add(g, cyl(0.025, 0.025, 0.9, 6), M.metal, Math.cos(i * 1.57) * 0.06, -0.62 + Math.sin(i * 1.57) * 0.06, -4.3);
+  // canopy framing on both bubbles
+  for (const [z, y] of [[-3.1, 0.55], [-1.8, 1.0]]) add(g, new THREE.BoxGeometry(0.04, 0.04, 1.2), M.dark, 0, y, z);
   const rotor = blades(5, 8.6, 0.6, M); rotor.position.y = 1.9; g.add(rotor);
   add(g, new THREE.CylinderGeometry(0.14, 0.18, 0.5, 10), M.dark, 0, 1.65, 0);
   const tail = tailRotor(3, 1.6, M); tail.position.set(-0.35, 2.2, 10.0); g.add(tail);

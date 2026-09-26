@@ -1234,10 +1234,7 @@ export function breakObject(id) {
     o.gone = true;
     for (const b of o.boxes) b.dead = true;
     for (const c of o.cells) cells[c] = mergeList((rawCells.get(c) || []).filter(s => s[2] < 0 || !objects[s[2]].gone));
-    const i0 = Math.max(0, Math.floor(o.x0) - 1), i1 = Math.min(NAV - 1, Math.floor(o.x1) + 1);
-    const k0 = Math.max(0, Math.floor(o.z0) - 1), k1 = Math.min(NAV - 1, Math.floor(o.z1) + 1);
-    for (let k = k0; k <= k1; k++) for (let i = i0; i <= i1; i++) walk[k * NAV + i] = navFree(i, k);
-    paintMinimap(mapDef, Math.floor(o.x0 / CELL) - 1, Math.floor(o.z0 / CELL) - 1, Math.ceil(o.x1 / CELL) + 1, Math.ceil(o.z1 / CELL) + 1);
+    refreshArea(o);
   }
   if (o.chunk) buildChunk(o.chunk);
   return o;
@@ -1293,4 +1290,41 @@ export function updateWorld(dt, cam, far = Infinity) {
     const o = waterMat.normalMap.offset;
     o.x = (o.x + dt * 0.004) % 1; o.y = (o.y + dt * 0.0025) % 1;
   }
+}
+
+// An engineer's sandbag wall, built mid-match: a breakable object like the map's own sandbags.
+// The wall runs across the facing direction (boxes are axis-aligned, so it snaps to 90°).
+// Every peer calls this in the same order, so object ids stay in step.
+export function buildSandbags(x, z, yaw, y) {
+  const across = Math.abs(Math.cos(yaw)) > Math.abs(Math.sin(yaw));
+  const hx = across ? 1.3 : 0.32, hz = across ? 0.32 : 1.3;
+  const id = newObject('sandbag'), o = objects[id];
+  addBox(x - hx, y, z - hz, x + hx, y + 1.1, z + hz, 'sandbag', true, id);
+  const b = o.boxes[0];
+  for (const c of o.cells) {
+    const sp = cells[c];
+    const raw = rawCells.get(c) || sp.slice(0, -1).map(s => [s[0], s[1], -1]);
+    raw.push([y, y + 1.1, id]);
+    rawCells.set(c, raw);
+    cells[c] = mergeList(raw);
+  }
+  const i0 = Math.floor(b.x0 / BUCKET), i1 = Math.floor(b.x1 / BUCKET), k0 = Math.floor(b.z0 / BUCKET), k1 = Math.floor(b.z1 / BUCKET);
+  for (let k = k0; k <= k1; k++) for (let i = i0; i <= i1; i++) {
+    const key = k * 8192 + i;
+    if (!boxGrid.has(key)) boxGrid.set(key, []);
+    boxGrid.get(key).push(b);
+  }
+  refreshArea(o);
+  const ch = chunkFor(x, z);
+  ch.objs.push(o); o.chunk = ch;
+  buildChunk(ch);
+  return o;
+}
+
+// nav and minimap around an object that appeared or went away
+function refreshArea(o) {
+  const i0 = Math.max(0, Math.floor(o.x0) - 1), i1 = Math.min(NAV - 1, Math.floor(o.x1) + 1);
+  const k0 = Math.max(0, Math.floor(o.z0) - 1), k1 = Math.min(NAV - 1, Math.floor(o.z1) + 1);
+  for (let k = k0; k <= k1; k++) for (let i = i0; i <= i1; i++) walk[k * NAV + i] = navFree(i, k);
+  paintMinimap(mapDef, Math.floor(o.x0 / CELL) - 1, Math.floor(o.z0 / CELL) - 1, Math.ceil(o.x1 / CELL) + 1, Math.ceil(o.z1 / CELL) + 1);
 }
