@@ -27,7 +27,7 @@ const se = (t, a, b, n) => {
 };
 
 // Fuselage loft along -z (nose) to +z (tail). sections: [z, halfWidth, top, bottom, yCentre, n]
-function loft(sections, seg = 24, capEnds = true) {
+export function loft(sections, seg = 24, capEnds = true) {
   const pos = [], uv = [], idx = [];
   sections.forEach(([z, w, top, bot, yc, n = 2.2], i) => {
     for (let k = 0; k <= seg; k++) {

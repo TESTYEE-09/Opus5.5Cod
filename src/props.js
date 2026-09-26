@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mulberry } from './textures.js';
+import { loft } from './aircraft.js';
 
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _s = new THREE.Vector3(), _p = new THREE.Vector3();
 const _c = new THREE.Color();
@@ -76,28 +77,36 @@ export function kitMaterials(enhance) {
 const CAR_COLORS = [0x8c2a22, 0x2a4c6e, 0xb8b2a4, 0x3b4a33, 0xc49a3a, 0x505358, 0x1f2326, 0x7a6a55];
 
 export const PROPS = {
+  // Lofted body: lower shell, then the glass greenhouse; sedan, hatchback or pickup
   car(k, o, R) {
     const L = o.len || 4.5, W = o.wid || 2, burnt = o.burnt;
     const paint = burnt ? 0x2d2723 : o.color ?? CAR_COLORS[Math.floor(R() * CAR_COLORS.length)];
-    const pk = burnt ? 'rough' : 'paint';
-    k.part(rbox(W, 0.7, L, 0.14), pk, paint, 0, 0.66, 0);
-    k.part(rbox(W * 0.86, 0.62, L * 0.5, 0.16), pk, paint, 0, 1.3, L * 0.04);
-    if (burnt) k.part(box(W * 0.88, 0.4, L * 0.44), 'rough', 0x0c0b0a, 0, 1.32, L * 0.04);
-    else {
-      k.part(box(W * 0.875, 0.4, L * 0.44), 'glass', 0x16202a, 0, 1.33, L * 0.04);
-      k.part(box(W * 0.8, 0.4, L * 0.515), 'glass', 0x16202a, 0, 1.33, L * 0.04);
-      for (const s of [-1, 1]) {
-        k.part(box(0.24, 0.1, 0.05), 'glow', [0xfff1d0, 1.2], s * W * 0.32, 0.74, -L / 2 - 0.01);
-        k.part(box(0.26, 0.1, 0.05), 'glow', [0xff2a1a, 1.4], s * W * 0.34, 0.8, L / 2 + 0.01);
-        k.part(box(0.05, 0.08, 0.22), 'metal', 0x202224, s * (W * 0.44 + 0.04), 1.1, -L * 0.18);
-      }
-      k.part(box(W * 0.5, 0.12, 0.04), 'metal', 0x303234, 0, 0.62, -L / 2 - 0.02);
+    const pk = burnt ? 'rough' : 'paint', style = o.style ?? Math.floor(R() * 3), h = L / 2, w = W / 2;
+    const key = `car${L},${W},${style}`;
+    const lower = cached(`${key}l`, () => loft([[-h, w * 0.8, 0.28, 0.25, 0.62, 3], [-h + 0.25, w * 0.96, 0.36, 0.32, 0.66, 4], [-h * 0.3, w, 0.42, 0.34, 0.7, 5],
+      [h * 0.5, w, 0.42, 0.34, 0.72, 5], [h - 0.3, w * 0.96, 0.4, 0.32, 0.72, 4], [h, w * 0.85, 0.32, 0.28, 0.7, 3]], 16));
+    k.part(lower, pk, paint, 0, 0, 0);
+    // greenhouse: a pickup has a short cab and an open bed
+    const cab = style === 2 ? [[-h * 0.45, w * 0.86, 0.001, 0.001, 1.1], [-h * 0.3, w * 0.84, 0.5, 0.001, 1.1, 5], [h * 0.05, w * 0.84, 0.52, 0.001, 1.1, 5], [h * 0.12, w * 0.8, 0.001, 0.001, 1.1]]
+      : style === 1 ? [[-h * 0.5, w * 0.88, 0.001, 0.001, 1.1], [-h * 0.25, w * 0.84, 0.52, 0.001, 1.1, 5], [h * 0.7, w * 0.84, 0.5, 0.001, 1.1, 5], [h * 0.9, w * 0.82, 0.001, 0.001, 1.1]]
+        : [[-h * 0.55, w * 0.88, 0.001, 0.001, 1.1], [-h * 0.25, w * 0.84, 0.5, 0.001, 1.1, 5], [h * 0.35, w * 0.84, 0.5, 0.001, 1.1, 5], [h * 0.62, w * 0.86, 0.001, 0.001, 1.1]];
+    k.part(cached(`${key}g`, () => loft(cab, 16)), burnt ? 'rough' : 'glass', burnt ? 0x0c0b0a : 0x16202a, 0, 0, 0);
+    // roof skin over the glass
+    k.part(box(W * 0.8, 0.05, (style === 2 ? h * 0.35 : style === 1 ? h * 0.9 : h * 0.6)), pk, paint, 0, 1.61, style === 2 ? -h * 0.12 : style === 1 ? h * 0.22 : 0);
+    if (style === 2) { k.part(box(W * 0.95, 0.35, h * 0.8), pk, paint, 0, 1.2, h * 0.55); k.part(box(W * 0.85, 0.3, h * 0.75), 'rough', 0x1a1a1a, 0, 1.25, h * 0.56); }
+    if (!burnt) for (const s of [-1, 1]) {
+      k.part(box(0.28, 0.1, 0.05), 'glow', [0xfff1d0, 1.2], s * W * 0.32, 0.8, -h - 0.01);
+      k.part(box(0.26, 0.1, 0.05), 'glow', [0xff2a1a, 1.4], s * W * 0.34, 0.88, h + 0.01);
+      k.part(box(0.05, 0.08, 0.2), 'metal', 0x202224, s * (w + 0.04), 1.12, -h * 0.35);
     }
-    for (const z of [-1, 1]) k.part(box(W * 1.02, 0.18, 0.2), 'metal', burnt ? 0x221f1c : 0x2a2b2d, 0, 0.42, z * (L / 2 - 0.02));
+    k.part(box(W * 0.55, 0.16, 0.05), 'metal', 0x2a2b2d, 0, 0.62, -h - 0.02);
+    for (const z of [-1, 1]) k.part(box(W * 1.01, 0.16, 0.18), 'metal', burnt ? 0x221f1c : 0x2a2b2d, 0, 0.46, z * (h - 0.02));
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
-      const x = sx * (W / 2 - 0.13), z = sz * L * 0.31;
-      k.part(cyl(0.36, 0.36, 0.26, 16), 'rough', 0x141414, x, 0.36, z, 0, 0, Math.PI / 2);
-      k.part(cyl(0.2, 0.2, 0.28, 12), 'metal', burnt ? 0x3a2a22 : 0x8a8c8e, x, 0.36, z, 0, 0, Math.PI / 2);
+      const x = sx * (w - 0.12), z = sz * L * 0.31;
+      k.part(torus(0.27, 0.1), 'rough', 0x141414, x, 0.37, z, 0, Math.PI / 2, 0);
+      k.part(cyl(0.22, 0.22, 0.2, 16), 'rough', 0x141414, x, 0.37, z, 0, 0, Math.PI / 2);
+      k.part(cyl(0.17, 0.17, 0.22, 12), 'metal', burnt ? 0x3a2a22 : 0x9a9c9e, x, 0.37, z, 0, 0, Math.PI / 2);
+      for (let i = 0; i < 5; i++) k.part(box(0.23, 0.03, 0.05), 'metal', burnt ? 0x3a2a22 : 0x7a7c7e, x + sx * 0.02, 0.37, z, i * Math.PI / 5, 0, 0);
     }
   },
   bus(k, o) {
