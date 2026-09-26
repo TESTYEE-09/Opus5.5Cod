@@ -1,6 +1,6 @@
 import { setSleeves } from './weapons.js';
 import * as THREE from 'three';
-import { moveBody, overlaps, raycastWorld, groundAt, STEP } from './world.js';
+import { moveBody, overlaps, raycastWorld, groundAt, baseFloor, STEP } from './world.js';
 
 const DEG = Math.PI / 180;
 const STAND_H = 1.75, CROUCH_H = 1.15, PRONE_H = 0.7, STAND_EYE = 1.62, CROUCH_EYE = 1.02, PRONE_EYE = 0.4;
@@ -31,7 +31,7 @@ export class Player {
   }
 
   spawn(p, yaw, cls) {
-    this.pos.set(p.x, 0, p.z);
+    this.pos.set(p.x, baseFloor(p.x, p.z), p.z);
     this.vel.set(0, 0, 0);
     this.yaw = yaw; this.pitch = 0;
     this.health = 100; this.alive = true;

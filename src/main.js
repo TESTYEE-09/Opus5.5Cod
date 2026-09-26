@@ -14,6 +14,7 @@ import { Net, cleanName } from './net.js';
 import { daily, describe } from './challenges.js';
 import { loadAssets, setAssetAnisotropy } from './assets.js';
 import { setThermal } from './soldier.js';
+import { loadSceneModel, sceneModel } from './scenes.js';
 import { TREE, NATIONS, RANKS, ICONS, unlocked, researching, progress, validChoice } from './research.js';
 
 const canvas = document.getElementById('game');
@@ -226,6 +227,7 @@ $('diffs').addEventListener('click', (e) => {
 });
 function chooseMap(id) {
   settings.map = id; fixMode(); save(); audio.init(); audio.ui();
+  if (MAPS[id].scene) loadSceneModel(MAPS[id].scene).catch(() => {});
   if (game.state !== 'playing') loadMapById(id);
   if (net.active && net.isHost) { net.setMap(id); net.setGameMode(settings.mode); }
   renderClassCards();
@@ -311,8 +313,21 @@ function hideScreens() {
   for (const id of ['menu', 'end', 'pause', 'lobby']) $(id).classList.add('hidden');
 }
 
-function deploy() {
+// a map made from a downloaded scene: fetch its model first, with progress on the loading screen
+async function ensureScene(id) {
+  const sc = MAPS[id]?.scene;
+  if (!sc || sceneModel(sc)) return;
+  const el = document.createElement('div');
+  el.id = 'loading';
+  el.innerHTML = `<b>${MAPS[id].name.toUpperCase()}</b><span>Downloading the map</span><div class="bar"><i id="loadingBar"></i></div>`;
+  document.body.appendChild(el);
+  try { await loadSceneModel(sc, (f) => { $('loadingBar').style.width = `${Math.round(f * 100)}%`; }); } catch { /* play on with collision only */ }
+  el.remove();
+}
+
+async function deploy() {
   audio.init();
+  await ensureScene(settings.map);
   if (net.active) { net.leave(); game.net = null; }
   game.startMatch({ ...settings, ...matchRules(), name: cleanName(settings.name) });
   hideScreens();
@@ -383,8 +398,9 @@ function showLobby() {
   $('lobby').classList.remove('hidden');
 }
 
-function startMp() {
+async function startMp() {
   audio.init();
+  await ensureScene(settings.map);
   net.startGame({ ...settings, ...matchRules() });
   hideScreens();
   renderClassCards();

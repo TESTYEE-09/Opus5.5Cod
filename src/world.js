@@ -2,6 +2,7 @@
 // Bodies, bullets, grenades and bot navigation all read the same grid. Maps are
 // described in maps.js and loaded at runtime with loadMap().
 import * as THREE from 'three';
+import { sceneModel, loadSceneModel } from './scenes.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { surface, R, macroNoise, mulberry, logoAtlas } from './textures.js';
 import { PlanarReflection } from './reflect.js';
@@ -331,8 +332,24 @@ export function floorAt(x, z, r, maxY) {
 export let NAV = SIZE;
 let walk = new Uint8Array(NAV * NAV);
 
+// a downloaded scene's street is not flat: its floor is the top of each cell's lowest span
+function lowTop(i, k) {
+  const sp = cellSpans(i, k);
+  if (!sp || sp === OOB) return 0;
+  let lo = null;
+  for (const s of sp) if (!lo || s[0] < lo[0]) lo = s;
+  // a column solid all the way up is inside a building: no floor to stand on
+  return lo[0] < 0 ? (lo[1] > 30 ? Infinity : lo[1]) : 0;
+}
+export function baseFloor(x, z) {
+  if (!mapDef?.scene) return playH(x, z);
+  const y = lowTop(Math.floor(x / CELL), Math.floor(z / CELL));
+  return y === Infinity ? 0 : y;
+}
+
 function navFree(i, k) {
-  const base = playH(i + 0.5, k + 0.5);
+  const base = mapDef?.scene ? Math.max(lowTop(i * 2, k * 2), lowTop(i * 2 + 1, k * 2), lowTop(i * 2, k * 2 + 1), lowTop(i * 2 + 1, k * 2 + 1)) : playH(i + 0.5, k + 0.5);
+  if (base === Infinity) return 0;
   if (hasTerrain() && Math.abs(playH(i + 1, k + 0.5) - playH(i, k + 0.5)) + Math.abs(playH(i + 0.5, k + 1) - playH(i + 0.5, k)) > 1.3) return 0;
   for (let dk = 0; dk < 2; dk++) for (let di = 0; di < 2; di++) {
     if (blocks(cellSpans(i * 2 + di, k * 2 + dk), base + 0.05, base + 1.9)) return 0;
@@ -704,6 +721,7 @@ let nature = { models: [], cards: [] };
 const NATURAL = new Set(['pine', 'palm', 'olive', 'rock', 'farTree', 'mountain']);
 let group = null, waterMat = null, materials = [], matFor = null, kmats = null;
 export let mapDef = null;
+let sceneHost = null;
 let reflection = null;
 // the rain-wet floor's planar reflection (Shipment), rendered by main before each frame
 export const wetFloor = () => reflection;
@@ -834,6 +852,7 @@ function buildBeam(p) {
 }
 
 export function loadMap(scene, def) {
+  sceneHost?.clear();
   if (group) {
     scene.remove(group);
     group.traverse(o => { if (o.geometry && !o.isInstancedMesh) o.geometry.dispose(); if (o.isLight) o.dispose?.(); });
@@ -954,7 +973,7 @@ export function loadMap(scene, def) {
   materials.push(groundMat);
   const ground = new THREE.Mesh(groundGeo, groundMat);
   ground.rotation.x = -Math.PI / 2;
-  ground.position.set(SIZE / 2 + (gd.dx || 0), 0, SIZE / 2 + (gd.dz || 0));
+  ground.position.set(SIZE / 2 + (gd.dx || 0), gd.y || 0, SIZE / 2 + (gd.dz || 0));
   ground.receiveShadow = true;
   group.add(ground); floors.push(ground);
   if (hasTerrain()) {
@@ -1021,6 +1040,14 @@ export function loadMap(scene, def) {
   }
 
   if (per.fence) group.add(buildFence(def));
+  // a downloaded scene: its model joins the world as soon as it is loaded
+  if (def.scene) {
+    sceneHost ||= new THREE.Group();
+    group.add(sceneHost);
+    const attach = (m) => { if (mapDef === def) sceneHost.add(m); };
+    const m = sceneModel(def.scene);
+    if (m) attach(m); else loadSceneModel(def.scene).then(attach).catch(() => {});
+  }
 
   // lamp light pools on the ground (only drawn when the map is dark enough to need them)
   if (def.look?.pools) {

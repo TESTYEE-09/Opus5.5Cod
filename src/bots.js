@@ -1,6 +1,6 @@
 import { buildRigged, animateRigged, soldierReady } from './soldier.js';
 import * as THREE from 'three';
-import { moveBody, findPath, lineWalkable, overlaps, interest, randomWalkable, lineOfSight, walkable, SIZE, STEP } from './world.js';
+import { moveBody, findPath, lineWalkable, overlaps, interest, randomWalkable, lineOfSight, walkable, baseFloor, SIZE, STEP } from './world.js';
 import { WEAPONS } from './weapons.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -274,7 +274,7 @@ export class Bot {
     this.kit = pickKit(this.team, A);
     this.def = WEAPONS[this.kit];
     this.mag = this.def.mag;
-    this.pos.set(p.x, 0, p.z);
+    this.pos.set(p.x, baseFloor(p.x, p.z), p.z);
     this.vel.set(0, 0, 0);
     this.yaw = yaw; this.pitch = 0;
     this.health = 100; this.alive = true; this.protect = 1.5;

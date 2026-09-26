@@ -2,6 +2,7 @@
 // and glTF props. Anything that fails to load is skipped and the procedural version is used.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { loadSceneData } from './scenes.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { TEXTURES, MODELS } from './assetlist.js';
 import { addWind, buildPalms } from './nature.js';
@@ -111,6 +112,7 @@ export async function loadAssets(onProgress = () => {}) {
     ...[...new Set(Object.values(TEXTURES).map(t => t.id))].map(id => () => probe(id)),
     ...Object.entries(MODELS).map(([type, d]) => () => loadModel(type, d, loader)),
     () => loadSoldierModel(loader),
+    () => loadSceneData(),
   ];
   let done = 0;
   await Promise.all(jobs.map(j => j().catch((e) => console.warn('asset failed', e)).finally(() => onProgress(++done / jobs.length))));

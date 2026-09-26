@@ -9,6 +9,7 @@
 // opposite: a 48 m ship's deck of container lanes, in the rain.
 import { SIZE, shiftApi, terrainY } from './world.js';
 import { mulberry } from './textures.js';
+import { sceneData } from './scenes.js';
 
 const DESTRUCTIBLE = new Set(['plaster', 'plaster2', 'brick', 'planks', 'corrugated']);
 
@@ -752,6 +753,21 @@ function shipBackdrop(api, rnd) {
   api.prop('ship', 420, -300, { rot: 0.4 }); api.prop('ship', -520, 160, { rot: 2.6 }); api.prop('ship', 260, 820, { rot: 1.2 });
 }
 
+// ---------- Bistro: a real downloaded scene ----------
+// Amazon Lumberyard Bistro (CC-BY 4.0, NVIDIA ORCA): a Paris street from the courtyard, past the
+// café terrace, down to the plaza. Collision, spawns and points of interest come from
+// tools/bistro/build_bistro.py; the model is loaded by scenes.js.
+function sceneLayout(B, id) {
+  const d = sceneData(id);
+  if (!d) return;
+  for (const [x0, z0, x1, z1, y0, y1] of d.boxes) B.box(x0, y0, z0, x1, y1, z1, 'invis');
+  d.spawns.forEach((list, team) => {
+    const [cx, cz] = d.spawns[1 - team][0];
+    for (const [x, z] of list) B.spawn(team, x, z, Math.atan2(-(cx - x), -(cz - z)));
+  });
+  for (const [x, z] of d.interest) B.interest(x, z);
+}
+
 // ---------- definitions ----------
 export const MAPS = {
   shipment: {
@@ -776,6 +792,40 @@ export const MAPS = {
       grade: { sat: 0.9, contrast: 1.12, tint: [0.96, 1.0, 1.05] }, particles: 'rain', lightning: true, spots: 4, sunDisk: 0, rays: 0,
     },
     audio: { decay: 1.1, wet: 0.24, tone: 3800, amb: 'rain' },
+  },
+  bistro: {
+    name: 'Bistro', desc: 'A real Paris street, scanned in from Amazon\'s Bistro scene: the café terrace, the lanes and the plaza. 8 v 8.',
+    seed: 11, size: 200, teamSize: 8, modes: ['tdm'], noVehicles: true, scene: 'bistro', clutter: 0,
+    credit: 'Amazon Lumberyard Bistro, CC-BY 4.0 (NVIDIA ORCA)',
+    layout(B) { sceneLayout(B, 'bistro'); },
+    perimeter: { mat: 'invis', h: 12 },
+    ground: { recipe: 'slab', args: [0x77736c], ts: 6, y: -0.05 },
+    minimap: { ground: [40, 40, 42], road: [90, 88, 84] },
+    look: {
+      sunDir: [0.55, 0.42, -0.5], sunColor: 0xffd2a0, sunIntensity: 2.6,
+      hemiSky: 0xb8c8e0, hemiGround: 0x6a5a4a, hemiIntensity: 0.6, envIntensity: 0.8,
+      zenith: 0x4a6ea8, horizon: 0xf0c8a0, groundColor: 0x5a5048, cloudCover: 0.35, cloudColor: 0xffe0c8, sunGlow: 0xffc890,
+      fog: 0xd8c0a8, fogNear: 60, fogFar: 380, exposure: 1.0, shadowSoft: 2, rays: 0.3,
+      grade: { sat: 1.06, contrast: 1.06, tint: [1.03, 1.0, 0.96] }, particles: 'dust', groundDust: [0.5, 0.48, 0.45],
+    },
+    audio: { decay: 1.5, wet: 0.26, tone: 4800, amb: 'wind' },
+  },
+  downtown: {
+    name: 'Downtown', desc: 'A city crossroads built from Poly Haven\'s scanned alley kit: apartment blocks, brick factories, alleys, a yard and a parking lot. 10 v 10.',
+    seed: 13, size: 160, teamSize: 10, modes: ['tdm'], noVehicles: true, scene: 'downtown', clutter: 0,
+    credit: 'Poly Haven (CC0): modular facades, props and textures',
+    layout(B) { sceneLayout(B, 'downtown'); },
+    perimeter: { mat: 'invis', h: 14 },
+    ground: { recipe: 'slab', args: [0x55575a], ts: 6, y: -0.35 },
+    minimap: { ground: [44, 46, 50], road: [80, 80, 82] },
+    look: {
+      sunDir: [-0.5, 0.5, 0.45], sunColor: 0xffe2c4, sunIntensity: 2.8,
+      hemiSky: 0xbcc8dc, hemiGround: 0x5a544c, hemiIntensity: 0.6, envIntensity: 0.8,
+      zenith: 0x3f65a0, horizon: 0xdcd2c4, groundColor: 0x4a4844, cloudCover: 0.45, cloudColor: 0xf2eee8, sunGlow: 0xffd8a8,
+      fog: 0xc8c4bc, fogNear: 70, fogFar: 420, exposure: 1.0, shadowSoft: 2, rays: 0.2,
+      grade: { sat: 1.02, contrast: 1.08, tint: [1.0, 1.0, 1.02] }, particles: 'dust', groundDust: [0.45, 0.45, 0.46],
+    },
+    audio: { decay: 1.8, wet: 0.3, tone: 4600, amb: 'harbor' },
   },
   crossroads: {
     name: 'Crossroads', desc: '600 m of desert: the town at the junction, walled villages, farmland, five flags.', seed: 7, hills: 48, size: BIG, teamSize: 12, land: 'desert', relief: 11, ramp: 18,

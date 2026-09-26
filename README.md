@@ -115,3 +115,8 @@ Then open http://localhost:5178. `npm run build` writes a static site to `dist/`
 | `src/audio.js` | Sample playback, loudness matching, the mix, distance falloff, panning and reverb |
 | `src/hud.js` | HUD, minimap and scoreboards |
 | `src/main.js` | Renderer, menus, input and the frame loop |
+
+## Map credits
+
+- **Bistro** is Amazon Lumberyard Bistro, © Amazon, CC-BY 4.0, from NVIDIA's Open Research Content Archive (https://developer.nvidia.com/orca/amazon-lumberyard-bistro). Reduced and converted with `tools/bistro/build_bistro.py`.
+- **Downtown** is built from Poly Haven's CC0 models and textures (modular urban apartments and factory facades, covered car, street lamp, barriers, bins, hydrants, asphalt and paving) with `tools/downtown/build_downtown.py`.

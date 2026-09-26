@@ -266,6 +266,8 @@ button:disabled { opacity: 0.5; cursor: default; }
 
 .cards.modes { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
 .card.off { opacity: 0.35; }
+.map-bistro::before { background: linear-gradient(135deg, #b5452e, #e8b070 45%, #3a4a6a); }
+.map-downtown::before { background: linear-gradient(135deg, #2a2f3a, #7a6a5a 50%, #c89a5a); }
 .map-shipment::before { background: linear-gradient(135deg, #2f6a6a, #1a222c 60%, #a8541e); }
 .rank { margin: 6px 0 0; font-size: 16px; opacity: 0.85; letter-spacing: 1px; }
 .rank b { color: var(--gold); }
