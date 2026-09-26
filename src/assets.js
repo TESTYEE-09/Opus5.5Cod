@@ -46,6 +46,16 @@ export function applyPbr(mat, set, { metal = 0 } = {}) {
 export const models = {};
 const ready = { tex: new Set() };
 
+// decimated scans can leave zero-length normals, which light as NaN
+function fixNormals(g) {
+  const n = g.attributes.normal;
+  if (!n) { g.computeVertexNormals(); return; }
+  for (let i = 0; i < n.count; i++) {
+    const x = n.getX(i), y = n.getY(i), z = n.getZ(i), l = Math.hypot(x, y, z);
+    if (!(l > 1e-6)) n.setXYZ(i, 0, 1, 0); else if (Math.abs(l - 1) > 1e-3) n.setXYZ(i, x / l, y / l, z / l);
+  }
+}
+
 function partsOf(root, d) {
   root.updateMatrixWorld(true);
   const byMat = new Map();
@@ -61,6 +71,7 @@ function partsOf(root, d) {
     const g = geos.length > 1 ? mergeGeometries(geos) : geos[0];
     if (!g) continue;
     if (d.lay) g.rotateX(-Math.PI / 2);
+    fixNormals(g);
     g.computeBoundingBox();
     box.union(g.boundingBox);
     for (const t of [mat.map, mat.normalMap, mat.roughnessMap, mat.aoMap]) if (t) t.anisotropy = anisotropy;

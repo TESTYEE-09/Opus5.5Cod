@@ -66,6 +66,22 @@ const BlurShader = {
     }`,
 };
 
+// Drops NaN/infinite pixels and caps extreme highlights before bloom. One bad pixel (a
+// degenerate normal, a specular spike) otherwise blooms into a flash or blacks the screen.
+const SanitizeShader = {
+  uniforms: { tDiffuse: { value: null } },
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: `uniform sampler2D tDiffuse; varying vec2 vUv;
+    void main() {
+      vec3 c = texture2D(tDiffuse, vUv).rgb;
+      if (any(isnan(c)) || any(isinf(c))) c = vec3(0.0);
+      c = max(c, 0.0);
+      float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+      if (l > 12.0) c *= 12.0 / l;
+      gl_FragColor = vec4(c, 1.0);
+    }`,
+};
+
 const GradeShader = {
   uniforms: {
     tDiffuse: { value: null }, time: { value: 0 }, sat: { value: 1 }, contrast: { value: 1 },
@@ -164,6 +180,7 @@ export class Graphics {
     vm.clear = false; vm.clearDepth = true;
     c.addPass(vm);
     this.vmPass = vm;
+    c.addPass(new ShaderPass(SanitizeShader));
     if (q.bloom) {
       this.bloom = new UnrealBloomPass(new THREE.Vector2(w / 2, h / 2), 0.32, 0.55, 0.92);
       c.addPass(this.bloom);
