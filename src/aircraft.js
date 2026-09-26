@@ -327,3 +327,93 @@ export function buildAircraft(type, ally) {
   m.type = type;
   return m;
 }
+
+// ---------- attack helicopters ----------
+// Same interface as before: { g, rotor (spins about y), tail (spins about x) }; the nose is -z.
+function blades(n, r, chord, M) {
+  const rotor = new THREE.Group();
+  const blade = wing([[0.3, -chord / 2, chord, 0.08, 0], [r, -chord / 2, chord * 0.85, 0.06, -0.08]], false);
+  for (let i = 0; i < n; i++) { const b = add(rotor, blade, M.dark); b.rotation.y = i / n * Math.PI * 2; }
+  add(rotor, new THREE.CylinderGeometry(0.3, 0.34, 0.35, 12), M.dark, 0, 0, 0);
+  const blur = new THREE.Mesh(new THREE.CircleGeometry(r, 40).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({ color: 0x151515, transparent: true, opacity: 0.1, depthWrite: false, side: THREE.DoubleSide }));
+  blur.castShadow = false;
+  rotor.add(blur);
+  return rotor;
+}
+function tailRotor(n, r, M) {
+  const t = new THREE.Group();
+  for (let i = 0; i < n; i++) add(t, new THREE.BoxGeometry(0.04, r * 2, 0.16), M.dark, 0, 0, 0, i * Math.PI / n);
+  return t;
+}
+function heliMats(key, cols, pattern) {
+  return {
+    skin: new THREE.MeshStandardMaterial({ map: paint(key, cols, pattern), roughness: 0.65, metalness: 0.25 }),
+    dark: new THREE.MeshStandardMaterial({ color: 0x1b1c1e, roughness: 0.5, metalness: 0.5 }),
+    metal: new THREE.MeshStandardMaterial({ color: 0x55585c, roughness: 0.35, metalness: 0.85 }),
+    glass: new THREE.MeshStandardMaterial({ color: 0x223040, roughness: 0.05, metalness: 0.9, transparent: true, opacity: 0.85 }),
+    olive: new THREE.MeshStandardMaterial({ color: 0x4e5634, roughness: 0.6, metalness: 0.2 }),
+  };
+}
+function hellfire(g, M, x, y, z) { add(g, cyl(0.09, 0.09, 1.6, 10), M.olive, x, y, z); add(g, new THREE.ConeGeometry(0.09, 0.2, 10).rotateX(-Math.PI / 2), M.dark, x, y, z - 0.9); }
+function rocketPod(g, M, x, y, z, r = 0.25) { add(g, cyl(r, r, 1.6, 14), M.olive, x, y, z); add(g, new THREE.CircleGeometry(r * 0.85, 14).rotateY(Math.PI), M.dark, x, y, z - 0.81); }
+
+export function buildApacheModel() {
+  const M = heliMats('ah64', ['#3f4536', '#363b2e'], 'twotone'), g = new THREE.Group();
+  // narrow fuselage with the stepped tandem cockpit
+  add(g, loft([[-3.9, 0.001, 0.001, 0.001, -0.35], [-3.6, 0.3, 0.3, 0.3, -0.35], [-2.9, 0.48, 0.5, 0.55, -0.25, 2.6], [-1.4, 0.55, 0.65, 0.7, -0.1, 3],
+    [0.5, 0.58, 0.8, 0.75, 0, 3.2], [2.0, 0.5, 0.75, 0.6, 0.05, 3], [3.2, 0.3, 0.45, 0.35, 0.2, 2.4], [8.2, 0.14, 0.2, 0.18, 0.35]]), M.skin);
+  add(g, new THREE.SphereGeometry(0.46, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2).scale(0.95, 0.9, 1.4), M.glass, 0, 0.35, -2.45);
+  add(g, new THREE.SphereGeometry(0.48, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2).scale(0.95, 1.1, 1.3), M.glass, 0, 0.62, -1.3);
+  // sensor turret on the nose and the chin gun
+  add(g, new THREE.SphereGeometry(0.33, 14, 10), M.dark, 0, -0.45, -3.75);
+  add(g, new THREE.BoxGeometry(0.34, 0.26, 0.34), M.dark, 0, -0.9, -2.15);
+  add(g, cyl(0.05, 0.05, 1.5, 8), M.metal, 0, -0.95, -2.9);
+  for (const s of [-1, 1]) {
+    // engine nacelles high on the sides, exhaust suppressors
+    add(g, loft([[-0.8, 0.001, 0.001, 0.001, 0], [-0.6, 0.3, 0.3, 0.3, 0], [1.3, 0.32, 0.32, 0.32, 0], [1.9, 0.22, 0.22, 0.22, 0.05]], 14), M.skin, 0.85 * s, 0.55, 0.3);
+    add(g, cyl(0.2, 0.26, 0.5, 12), M.dark, 0.95 * s, 0.6, 2.2);
+    // stub wing: Hellfires outboard, rocket pod inboard
+    add(g, wing([[0.5, -0.5, 1.0, 0.1, 0], [2.0, -0.45, 0.8, 0.09, -0.08]], false), M.skin, 0, 0.02, 0).scale.x = s;
+    for (const [dx, dy] of [[-0.15, -0.35], [0.15, -0.35], [-0.15, -0.62], [0.15, -0.62]]) hellfire(g, M, 1.8 * s + dx, dy, -0.2);
+    rocketPod(g, M, 1.1 * s, -0.45, -0.2);
+    add(g, new THREE.CylinderGeometry(0.28, 0.28, 0.16, 14).rotateZ(Math.PI / 2), M.dark, 1.0 * s, -1.3, -1.35);
+    add(g, new THREE.BoxGeometry(0.07, 0.8, 0.07), M.dark, 1.0 * s, -0.9, -1.35);
+  }
+  add(g, fin([[0.1, 6.9, 1.2, 0.1], [1.8, 7.5, 0.8, 0.09]]), M.skin, 0, 0.4, 0);
+  add(g, wing([[0.1, 7.4, 0.6, 0.08, 0.3], [1.2, 7.5, 0.5, 0.07, 0.3]]), M.skin);
+  const rotor = blades(4, 7.3, 0.55, M); rotor.position.y = 1.78; g.add(rotor);
+  add(g, new THREE.CylinderGeometry(0.1, 0.14, 0.6, 10), M.dark, 0, 1.5, 0);
+  add(g, new THREE.SphereGeometry(0.28, 12, 8), M.dark, 0, 2.05, 0);
+  const tail = tailRotor(2, 1.4, M); tail.position.set(-0.3, 1.9, 8.0); g.add(tail);
+  return { g, rotor, tail };
+}
+
+export function buildHindModel() {
+  const M = heliMats('mi24', ['#7a6e4a', '#4d5634', '#8e8058', '#3a3f2a'], 'blotch'), g = new THREE.Group();
+  add(g, loft([[-4.5, 0.001, 0.001, 0.001, -0.3], [-4.1, 0.35, 0.35, 0.35, -0.3], [-3.2, 0.62, 0.6, 0.6, -0.15, 2.6], [-1.6, 0.9, 0.95, 0.9, 0, 3],
+    [1.2, 1.0, 1.1, 0.95, 0.05, 3.2], [3.0, 0.8, 0.9, 0.7, 0.15, 2.8], [4.2, 0.35, 0.45, 0.35, 0.35, 2.4], [10.2, 0.16, 0.22, 0.18, 0.55]]), M.skin);
+  // the "double bubble" tandem canopies
+  add(g, new THREE.SphereGeometry(0.5, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.95, 1.3), M.glass, 0, 0.25, -3.1);
+  add(g, new THREE.SphereGeometry(0.55, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 1.05, 1.4), M.glass, 0, 0.62, -1.8);
+  add(g, new THREE.SphereGeometry(0.2, 12, 8), M.dark, 0.2, -0.45, -4.0);
+  add(g, cyl(0.06, 0.06, 1.3, 8), M.metal, -0.1, -0.5, -4.4);
+  for (const s of [-1, 1]) {
+    add(g, loft([[-1.2, 0.001, 0.001, 0.001, 0], [-0.9, 0.36, 0.36, 0.36, 0], [2.2, 0.36, 0.36, 0.36, 0], [2.8, 0.26, 0.26, 0.26, 0.05]], 14), M.skin, 0.72 * s, 1.1, 0);
+    add(g, cyl(0.3, 0.3, 0.05, 14), M.dark, 0.72 * s, 1.1, -1.21);
+    add(g, cyl(0.24, 0.3, 0.6, 12), M.dark, 1.0 * s, 1.05, 3.0);
+    // anhedral stub wings, two rocket pods and the Shturm rails at the tip
+    const w = add(g, wing([[0.9, -0.2, 1.6, 0.1, -0.1], [3.2, 0.1, 1.2, 0.09, -0.45]], false), M.skin, 0, 0.1, 0.2);
+    w.scale.x = s;
+    for (const x of [1.6, 2.4]) rocketPod(g, M, x * s, -0.35 - (x - 1.6) * 0.2, 0.3, 0.27);
+    for (const dy of [-0.55, -0.85]) hellfire(g, M, 3.2 * s, dy, 0.4);
+    add(g, new THREE.CylinderGeometry(0.3, 0.3, 0.18, 14).rotateZ(Math.PI / 2), M.dark, 1.1 * s, -1.4, 1.2);
+    add(g, new THREE.BoxGeometry(0.08, 0.8, 0.08), M.dark, 1.1 * s, -1.0, 1.2);
+  }
+  add(g, fin([[0.2, 8.9, 1.4, 0.1], [2.0, 9.6, 0.9, 0.09]], 0, 0.1), M.skin, 0, 0.5, 0);
+  add(g, wing([[0.1, 8.7, 0.7, 0.08, 0.5], [1.6, 8.8, 0.55, 0.07, 0.5]]), M.skin);
+  const rotor = blades(5, 8.6, 0.6, M); rotor.position.y = 1.9; g.add(rotor);
+  add(g, new THREE.CylinderGeometry(0.14, 0.18, 0.5, 10), M.dark, 0, 1.65, 0);
+  const tail = tailRotor(3, 1.6, M); tail.position.set(-0.35, 2.2, 10.0); g.add(tail);
+  return { g, rotor, tail };
+}
