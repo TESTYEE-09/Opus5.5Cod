@@ -7,7 +7,6 @@ import { buildSoldier, setRelation, animateSoldier, animateDeath } from './bots.
 import { VehicleProxy, PROJ } from './vehicles.js';
 import { objects, brokenIds } from './world.js';
 import { SILENT } from './game.js';
-import { RENDER_DELAY } from './rewind.js';
 
 const PREFIX = 'frontline-opus55cod-';
 const RATE = 1 / 20;
@@ -38,8 +37,6 @@ export class NetSoldier {
   }
 
   place(x, y, z, yaw) {
-    this.hist && (this.hist.length = 0);
-    this.rewind?.clear();
     this.pos.set(x, y, z); this.tgt.set(x, y, z);
     this.yaw = this.tYaw = yaw;
     this.alive = true; this.health = 100; this.protect = 1.5; this.lastHurt = -99;
@@ -48,44 +45,8 @@ export class NetSoldier {
     r.visible = true; r.rotation.set(0, yaw, 0); r.position.copy(this.pos);
   }
 
-  // The host's copies chase the newest state, because the host is the authority and
-  // must not lag. A client's copies go into a buffer and are drawn RENDER_DELAY in the
-  // past, between the two samples that bracket render time, so jitter never shows.
-  setState(x, y, z, yaw, pitch, crouch, lean = 0, now = 0) {
-    this.tgt.set(x, y, z); this.tYaw = yaw; this.pitch = pitch; this.tCrouch = crouch; this.leanT = lean;
-    if (this.isRemote) return;
-    const b = this.hist ||= [];
-    // a snapshot that arrives out of order would drag the buffer backwards
-    if (b.length && now <= b[b.length - 1].t) return;
-    b.push({ t: now, x, y, z, yaw, pitch, c: crouch, lean });
-    while (b.length > 2 && now - b[0].t > 1) b.shift();
-  }
-
-  // Position and pose at `t`. Between two samples it interpolates; past the newest -
-  // the buffer starved, which a stalled connection does - it carries on at the last
-  // known speed for a short while rather than freezing and then snapping.
-  sampleAt(t) {
-    const b = this.hist;
-    if (!b || !b.length) return null;
-    if (b.length === 1 || t <= b[0].t) return { ...b[0], speed: 0 };
-    const last = b[b.length - 1];
-    if (t >= last.t) {
-      const prev = b[b.length - 2];
-      const gap = Math.max(1e-3, last.t - prev.t);
-      const over = Math.min(t - last.t, 0.2);
-      const vx = (last.x - prev.x) / gap, vz = (last.z - prev.z) / gap;
-      return { ...last, x: last.x + vx * over, z: last.z + vz * over, speed: Math.hypot(vx, vz), starved: true };
-    }
-    let i = b.length - 1;
-    while (i > 0 && b[i - 1].t > t) i--;
-    const a = b[i - 1], c = b[i];
-    const k = (t - a.t) / Math.max(1e-6, c.t - a.t);
-    return {
-      t, x: a.x + (c.x - a.x) * k, y: a.y + (c.y - a.y) * k, z: a.z + (c.z - a.z) * k,
-      yaw: a.yaw + wrap(c.yaw - a.yaw) * k, pitch: a.pitch + (c.pitch - a.pitch) * k,
-      c: a.c + (c.c - a.c) * k, lean: a.lean + (c.lean - a.lean) * k,
-      speed: Math.hypot(c.x - a.x, c.z - a.z) / Math.max(1e-3, c.t - a.t),
-    };
+  setState(x, y, z, yaw, pitch, crouch) {
+    this.tgt.set(x, y, z); this.tYaw = yaw; this.pitch = pitch; this.tCrouch = crouch;
   }
 
   get proneAmt() { return Math.max(0, Math.min(1, this.crouchAmt - 1)); }
@@ -122,29 +83,12 @@ export class NetSoldier {
       return;
     }
     const px = this.pos.x, pz = this.pos.z;
-    const sm = this.isRemote ? null : this.sampleAt(this.game.netTime - RENDER_DELAY);
-    if (sm) {
-      // Follow the interpolated point, but never cover more ground in a frame than the
-      // soldier could: a stall followed by a burst would otherwise show as a teleport.
-      const step = Math.hypot(sm.x - this.pos.x, sm.z - this.pos.z, sm.y - this.pos.y);
-      const cap = Math.max(0.5, sm.speed * 2.2) * dt + 0.01;
-      if (step > 4 || step <= cap) this.pos.set(sm.x, sm.y, sm.z);
-      else {
-        const k = cap / step;
-        this.pos.set(this.pos.x + (sm.x - this.pos.x) * k, this.pos.y + (sm.y - this.pos.y) * k, this.pos.z + (sm.z - this.pos.z) * k);
-      }
-      this.yaw = wrap(this.yaw + wrap(sm.yaw - this.yaw) * Math.min(1, dt * 20));
-      this.pitch = sm.pitch;
-      this.crouchAmt += (sm.c - this.crouchAmt) * Math.min(1, dt * 14);
-      this.leanOff += (sm.lean - this.leanOff) * Math.min(1, dt * 14);
-    } else {
-      if (this.pos.distanceTo(this.tgt) > 4) this.pos.copy(this.tgt);
-      else this.pos.lerp(this.tgt, 1 - Math.exp(-dt * 14));
-      this.yaw = wrap(this.yaw + wrap(this.tYaw - this.yaw) * Math.min(1, dt * 16));
-      this.crouchAmt += (this.tCrouch - this.crouchAmt) * Math.min(1, dt * 12);
-      this.leanOff += (this.leanT - this.leanOff) * Math.min(1, dt * 14);
-    }
+    if (this.pos.distanceTo(this.tgt) > 4) this.pos.copy(this.tgt);
+    else this.pos.lerp(this.tgt, 1 - Math.exp(-dt * 14));
     this.vel.set((this.pos.x - px) / Math.max(dt, 1e-3), 0, (this.pos.z - pz) / Math.max(dt, 1e-3));
+    this.yaw = wrap(this.yaw + wrap(this.tYaw - this.yaw) * Math.min(1, dt * 16));
+    this.crouchAmt += (this.tCrouch - this.crouchAmt) * Math.min(1, dt * 12);
+    this.leanOff += (this.leanT - this.leanOff) * Math.min(1, dt * 14);
     const sp = Math.hypot(this.vel.x, this.vel.z);
     if (sp > 1.5 && sp < 12 && !this.inVehicle) {
       this.stepAcc = (this.stepAcc || 0) + sp * dt;
@@ -174,50 +118,27 @@ export class Net {
     this.sendT = 0;
     this.myId = 0;
     this.name = 'Player';
-    this.seq = 0;
-    this.ack = 0;   // client: the newest snapshot it has seen, echoed back so the host can rewind
   }
 
   get active() { return !!this.peer; }
 
-  // one monotonic local clock
-  perf() { return performance.now() / 1000; }
-
-  // A client's estimate of the host's match clock. Samples have to be stamped with the
-  // host's time, not with arrival time: packets bunch up after a stall, and two samples
-  // sharing an arrival stamp would make the interpolator snap between them.
-  // The estimate takes the least-delayed packet seen and lets that drift back down.
-  noteHostTime(ht) {
-    const cand = ht - this.perf();
-    if (this.off === undefined || cand > this.off) this.off = cand;
-    else this.off += (cand - this.off) * 0.02;
-  }
-
-  hostNow() { return this.perf() + (this.off || 0); }
-
-  // `want` claims a particular room code, which is how a client takes over a room whose
-  // host has gone. PeerJS holds a dead id for a moment, so that case retries.
-  host(name, want = null) {
+  host(name) {
     this.isHost = true;
     this.name = cleanName(name);
     return new Promise((resolve, reject) => {
       const attempt = (tries) => {
-        const code = want || Array.from({ length: 5 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
+        const code = Array.from({ length: 5 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
         const peer = new Peer(PREFIX + code, { debug: 0 });
         peer.on('open', () => { this.peer = peer; this.code = code; resolve(code); this.pushLobby(); });
         peer.on('error', (e) => {
-          if (e.type === 'unavailable-id' && tries > 0) {
-            peer.destroy();
-            setTimeout(() => attempt(tries - 1), want ? 1500 : 0);
-            return;
-          }
+          if (e.type === 'unavailable-id' && tries > 0) { peer.destroy(); attempt(tries - 1); return; }
           if (!this.peer) reject(new Error(describe(e)));
           else this.ui.error(describe(e));
         });
         peer.on('connection', (conn) => this.accept(conn));
         peer.on('disconnected', () => { if (this.peer && !this.peer.destroyed) this.peer.reconnect(); });
       };
-      attempt(want ? 6 : 3);
+      attempt(3);
     });
   }
 
@@ -243,64 +164,13 @@ export class Net {
           if (d?.t === 'full') { fail('That game is full.'); return; }
           this.onClientData(d);
         });
-        conn.on('close', () => { if (settled && this.peer === peer) this.hostLost(); else fail('The host left the game.'); });
+        conn.on('close', () => fail('The host left the game.'));
       });
       setTimeout(() => { if (!settled) fail('Could not reach that game. Check the code and try again.'); }, 15000);
     });
   }
 
-  // The host's connection dropped. Rather than ending the session, the surviving client
-  // with the lowest id claims the same room code and the rest rejoin it, so everyone
-  // lands back in the lobby with the code they already shared.
-  hostLost() {
-    if (this.migrating) return;
-    this.migrating = true;
-    const code = this.code;
-    const ids = (this.members_ || []).filter(m => !m.host).map(m => m.id).sort((a, b) => a - b);
-    const queue = ids.length ? ids : [this.myId];
-    const place = Math.max(0, queue.indexOf(this.myId));
-    this.quit();
-    if (queue[0] === this.myId) this.takeOver(code);
-    else this.rejoin(code, place, 4);
-  }
-
-  async takeOver(code) {
-    this.ui.migrate('The host left. Taking over the room…', code);
-    try {
-      await this.host(this.name, code);
-      this.migrating = false;
-      this.ui.migrate('The host left, so you are hosting now. Same room code - start the match when everyone is back.', code);
-      this.pushLobby();
-    } catch {
-      this.migrating = false;
-      this.ui.closed('The host left and the room could not be taken over.');
-    }
-  }
-
-  rejoin(code, place, tries) {
-    this.ui.migrate('The host left. Rejoining the room…', code);
-    setTimeout(async () => {
-      try {
-        await this.join(code, this.name);
-        this.migrating = false;
-      } catch {
-        if (tries > 1) { this.quit(); this.rejoin(code, place, tries - 1); return; }
-        this.migrating = false;
-        this.ui.closed('The host left and the room did not come back.');
-      }
-    }, 2500 + place * 600);
-  }
-
-  // Drop the connection without telling anyone; used between migration attempts.
-  quit() {
-    const p = this.peer;
-    this.peer = null; this.conn = null;
-    this.clients.clear();
-    if (p) { try { p.destroy(); } catch { /* already gone */ } }
-  }
-
   leave() {
-    this.migrating = false;
     if (this.isHost) this.broadcast({ t: 'bye' });
     const p = this.peer;
     this.peer = null; this.conn = null;
@@ -439,8 +309,7 @@ export class Net {
       case 'hit': {
         if (!s.alive) break;
         const v = g.byId.get(d.id) || g.vehicles.find(x => x.id === d.id);
-        if (!v) break;
-        g.applyClientHit(s, v, Math.max(0, Math.min(250, num(d.d))), String(d.w ?? '').slice(0, 20), !!d.h, this.sentAt(id, d.ack));
+        if (v) g.damage(v, Math.max(0, Math.min(250, num(d.d))), s, String(d.w ?? '').slice(0, 20), !!d.h, s.pos);
         break;
       }
       case 'ob': {
@@ -454,17 +323,13 @@ export class Net {
       }
       case 'fire': {
         if (!s.alive) break;
-        const silent = !!d.sd || SILENT.has(String(d.key));
+        const silent = SILENT.has(String(d.key));
         if (!silent) s.firedT = g.time;
         s.shotT = g.time;
         g.noise(s, s.pos, silent ? 6 : 45);
         g.remoteShot(s, d);
         break;
       }
-      case 'kit':
-        // the only perk the host has to know about: Ghost keeps them off enemy minimaps
-        if (s.ghost !== !!d.g) { s.ghost = !!d.g; g.emit({ k: 'roster', r: g.rosterList() }); }
-        break;
       case 'act':
         if (s.alive) g.mode.act(s, String(d.id));
         break;
@@ -487,17 +352,10 @@ export class Net {
     }
   }
 
-  // the host match time at which the snapshot a client is acknowledging went out
-  sentAt(id, ack) {
-    const c = this.clients.get(id);
-    if (!c || typeof ack !== 'number') return 0;
-    return c.sent?.get(ack) || 0;
-  }
-
   snapshot() {
     const g = this.game;
     return {
-      t: 'snap', sq: ++this.seq, ht: r2(g.time), tl: r2(g.timeLeft), sc: g.teamScore, uav: g.uav.map(r2), m: g.mode.netState(),
+      t: 'snap', tl: r2(g.timeLeft), sc: g.teamScore, uav: g.uav.map(r2), m: g.mode.netState(),
       s: g.soldiers.map(s => [s.id, r2(s.pos.x), r2(s.pos.y), r2(s.pos.z), r2(s.yaw), r2(s.pitch || 0), r2(s.crouchAmt + (s.isPlayer ? s.proneAmt : 0)),
         s.alive ? 1 : 0, Math.max(0, Math.round(s.health)), s.kills, s.deaths, s.assists, s.score, s.streak, r2(s.leanOff || 0), s.inVehicle ? 1 : 0]),
       v: g.vehicles.filter(v => v.alive || v.persistent).map(v => (v.isProxy ? proxyRow(v) : v.netRow())),
@@ -512,13 +370,9 @@ export class Net {
   onClientData(d) {
     if (!d || typeof d !== 'object') return;
     const g = this.game;
-    if (d.t === 'lobby') { this.members_ = Array.isArray(d.members) ? d.members : this.members_; this.ui.lobby(d); }
+    if (d.t === 'lobby') this.ui.lobby(d);
     else if (d.t === 'start') { g.startClient(d, this.myId); this.ui.started(); }
-    else if (d.t === 'snap' && g.state === 'playing') {
-      if (typeof d.sq === 'number') this.ack = d.sq;
-      if (typeof d.ht === 'number') this.noteHostTime(d.ht);
-      g.applySnapshot(d, num(d.ht, this.hostNow()));
-    }
+    else if (d.t === 'snap' && g.state === 'playing') g.applySnapshot(d);
     else if (d.t === 'snap' && Array.isArray(d.ev)) { for (const ev of d.ev) if (ev?.k === 'end') g.applyEvent(ev); }
     else if (d.t === 'bye') this.ui.closed('The host ended the session.');
   }
@@ -530,19 +384,9 @@ export class Net {
     this.sendT += dt;
     if (this.sendT < RATE) return;
     this.sendT = 0;
-    if (this.isHost) {
-      if (!this.clients.size) { this.game.events.length = 0; return; }
-      const snap = this.snapshot(), at = this.game.time;
-      for (const c of this.clients.values()) {
-        if (!c.conn.open) continue;
-        (c.sent ||= new Map()).set(snap.sq, at);
-        if (c.sent.size > 60) c.sent.delete(c.sent.keys().next().value);
-        c.conn.send(snap);
-      }
-      return;
-    }
+    if (this.isHost) { if (this.clients.size) this.broadcast(this.snapshot()); else this.game.events.length = 0; return; }
     const g = this.game, pl = g.player;
-    this.send({ t: 'st', ack: this.ack, p: [r2(pl.pos.x), r2(pl.pos.y), r2(pl.pos.z)], y: r2(pl.yaw), pi: r2(pl.pitch), c: r2(pl.crouchAmt + pl.proneAmt), l: r2(pl.leanOff), iv: pl.inVehicle ? 1 : 0, a: g.arsenal.ads > 0.5 ? 1 : 0 });
+    this.send({ t: 'st', p: [r2(pl.pos.x), r2(pl.pos.y), r2(pl.pos.z)], y: r2(pl.yaw), pi: r2(pl.pitch), c: r2(pl.crouchAmt + pl.proneAmt), l: r2(pl.leanOff), iv: pl.inVehicle ? 1 : 0, a: g.arsenal.ads > 0.5 ? 1 : 0 });
     for (const v of g.vehicles) if (v.local && v.alive) this.send({ t: 'vs', r: v.netRow() });
   }
 }

@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { flashTexture } from './effects.js';
 import { surface, R } from './textures.js';
-import { applyPerks, NO_PERKS } from './loadout.js';
 
 // Spread values are degrees; recoil is degrees per shot. Burst weapons fire `burst`
 // rounds at `burstRpm` per trigger pull, then wait for `rpm`.
@@ -592,16 +591,12 @@ export class Arsenal {
 
   equip(cls) {
     for (const s of this.slots) this.holder.remove(s.model.root);
-    this.perks = cls.perks || NO_PERKS;
-    const ammo = this.perks.has('bandolier') ? 1.5 : 1;
-    this.slots = [['primary', cls.primary], ['secondary', cls.secondary], ['launcher', cls.launcher]]
-      .filter(([, id]) => id).map(([slot, id]) => {
-        const def = applyPerks(cls.defs?.[slot] || WEAPONS[id], this.perks);
-        const model = BUILD[def.model]();
-        model.root.visible = false;
-        this.holder.add(model.root);
-        return { id, def, mag: def.mag, reserve: Math.round(def.reserve * ammo), model };
-      });
+    this.slots = [cls.primary, cls.secondary, cls.launcher].filter(Boolean).map(id => {
+      const def = WEAPONS[id], model = BUILD[def.model]();
+      model.root.visible = false;
+      this.holder.add(model.root);
+      return { id, def, mag: def.mag, reserve: def.reserve, model };
+    });
     this.frags = cls.frags;
     this.cur = 0;
     this.slots[0].model.root.visible = true;

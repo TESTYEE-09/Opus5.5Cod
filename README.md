@@ -36,10 +36,7 @@ A browser first-person shooter in the style of Call of Duty, built with three.js
 - Lean around corners with Q and E, and go prone with Ctrl or Z. Prone halves your spread and recoil and shrinks you to a low target.
 - Mantle: jump at a ledge up to about 2 m high and you climb onto it. Double-tap Shift for a tactical sprint.
 - Press M for the full map: flags, the mission objective, your team and vehicles.
-- Rank: every match's score, plus a bonus for a win or a finished mission, earns XP toward 55 ranks, from Private to Commander. Score comes from kills, assists, captures and completed objectives, so all of those feed your rank. Your rank shows in the menu and after each match.
-- **Custom loadouts**: five of your own kits sit alongside the ten fixed classes (the fixed ones stay, because Undercover and Ground War need the Operator and launcher kits). Press **Edit loadouts** on the menu to pick a primary, a secondary and an optional launcher, bolt on four attachments and choose three perks. Everything above your rank is locked, and a locked pick falls back to the slot's default when you deploy rather than refusing to spawn. Your loadouts are kept in this browser.
-  - Attachments are stat changes, not decoration: a **reflex** raises the gun faster, a **4x scope** swaps in a full-screen reticle and real magnification for a slower aim, a **suppressor** makes you quiet and invisible to minimaps but cuts your effective range, a **long barrel** holds damage further out, an **extended mag** carries half again as many rounds for a slower reload, a **fast mag** reloads quicker, a **foregrip** cuts recoil, and a **laser** tightens hip fire.
-  - Perks, one per slot: **Lightweight** (10% faster on foot) or **Quiet Boots** (much harder to hear); **Quickdraw** (quarter-faster reload, 20% faster aim) or **Bandolier** (an extra grenade and half again as much reserve ammo); **Steady** (15% less recoil) or **Ghost** (enemy UAVs and minimaps never show you).
+- Rank: every match's score, plus a bonus for a win or a finished mission, earns XP toward 55 ranks, from Private to Commander. Your rank shows in the menu and after each match.
 - Sights: open reflex and holographic sights with clear glass and thin frames, glowing dots on the iron sights, and full-screen scope reticles for the sniper and marksman rifles.
 - Graphics: procedural textures with normal maps, a physically based lighting model lit from an image of the sky, soft sun shadows, bloom, filmic tone mapping, sharpening and a colour grade. High and Ultra add sun shafts through buildings and cranes, and Ultra adds ambient occlusion. Wet floors carry planar reflections, rippled by the rain and fading with the puddles. Floodlights get fake volumetric beams and real spot lights. Shipping containers have frames, door hardware and weathered company logos. The big maps are drawn in 64 m chunks that are culled by the camera, by the sun's shadow camera and by the fog, with small props and far soldiers hidden at distance. Low, Medium, High and Ultra presets are in the menu.
 - Effects: detailed vehicles, trees and props; per-surface bullet impacts (sparks on metal, splinters on wood, dust on stone); layered explosions; ejected brass; blood; snow, dust and rain (with splashes) in the air.
@@ -47,7 +44,6 @@ A browser first-person shooter in the style of Call of Duty, built with three.js
 - Sprint, crouch, slide (sprint then C), slide-jump, stairs and a roof you can reach.
 - Bots spot enemies inside a view cone with line of sight, react after a delay, and aim more accurately the longer they track you. They hear gunfire, share sightings with their team, path around the map, strafe, throw grenades and run from yours. Three skill levels.
 - Killstreaks: UAV at 3 kills, an airstrike you aim yourself at 5, the Chopper Gunner at 7. Bots use them too, call in their own drones, tanks and jets, and some carry RPGs and Stingers.
-- **Killcam and spectate**: when you die the camera drops with your body, then cuts over your killer's shoulder and follows their fight live until you respawn. If they die first it moves to whoever is left on your side, and you can click or press Space to cycle through your team yourself (right click goes back). The match's final kill plays the same way before the summary screen.
 - Minimap, kill feed, hit markers, damage direction arrows, grenade warnings, medals, scoreboard (Tab) and an end-of-match summary.
 - Recorded sound for every gun, reload, explosion, footstep and vehicle, loudness-matched and mixed in one table. Gunfire echoes differently on each map. You can hear enemy footsteps, sounds behind you are muffled, low health dulls your hearing, and a close blast leaves your ears ringing. See [sound credits](public/sfx/CREDITS.md).
 
@@ -57,10 +53,9 @@ Type a callsign, press **Host**, and send the 5-letter room code to your friends
 
 The host's browser runs the match: bots, damage, score and killstreaks. Other players connect to the host directly over WebRTC through [PeerJS](https://peerjs.com), which uses its public server only to introduce the browsers to each other.
 
-- Other players are drawn about 100 ms in the past, interpolated between the two snapshots that bracket that moment rather than chasing the newest one. Samples are stamped with the host's clock, which each client estimates from arrival times, so a stall that delivers three snapshots at once plays them back in order instead of snapping. If the buffer runs dry the soldier carries on at their last known speed for up to 200 ms, and no soldier is ever moved further in one frame than a sprint could carry them.
-- Hits are still claimed by the shooter's browser, but the host now checks each claim instead of taking it. It keeps 600 ms of every soldier's position, rewinds to the moment the claiming client was drawing — the snapshot that client acknowledged, minus the interpolation delay — and drops the claim if the damage is more than that weapon could do at that range, if there was no line of sight to the target's chest or head, if the shooter had not fired, or if the target was already dead. A claim against a target with no history yet is allowed through rather than eating a real hit. This stops damage through walls, from impossible range, and inflated damage numbers; it cannot tell a good aim from an aimbot, so it is a check, not anti-cheat.
 - The host should keep the game tab in front. Browsers slow down background tabs, and a slowed host slows the match for everyone.
-- If the host leaves, the session survives. Everyone drops back to the lobby, the surviving player with the lowest join order claims the same room code, and the rest rejoin it a couple of seconds later, so the code you already shared still works and the host just presses Start again. The match itself does not continue across the handover - scores and the round are lost, and if nobody can claim the code you are told so instead of being dumped to the menu without explanation.
+- If the host leaves, the match ends for everyone.
+- Hits are decided by the shooter's browser and trusted by the host. That suits a game among friends; it would not stop a cheater.
 - Some strict school or office networks block WebRTC. PeerJS relays through its own TURN servers when a direct connection fails, but not every network allows that.
 
 ## Controls
@@ -82,7 +77,6 @@ The host's browser runs the match: bots, damage, score and killstreaks. Other pl
 | F | Enter or leave a tank or AA gun; leave a jet or the chopper gun; abort a drone. Hold F for mission actions |
 | 4, 5, 6 | UAV, airstrike, Chopper Gunner |
 | 7, 8, 9 | FPV drone, tank, jet |
-| Click / Space (while dead) | Watch the next player; right click for the previous |
 | Tab | Scoreboard |
 | M | Full map |
 | 1-6 (while dead, Ground War) | Choose your spawn |
@@ -106,7 +100,6 @@ Then open http://localhost:5178. `npm run build` writes a static site to `dist/`
 | `src/modes.js` | Team Deathmatch, Ground War (flags, spawns, scoring) and Undercover (suspicion, alarms, the mission chain) |
 | `src/reflect.js` | Planar reflections for rain-wet floors |
 | `src/rank.js` | XP and career rank |
-| `src/loadout.js` | Custom loadouts: weapon choices, attachment stat deltas, perks and level unlocks |
 | `src/props.js` | Vehicles, trees, lamps and other detailed props, merged into a few meshes |
 | `src/textures.js` | Procedural colour and normal-map textures |
 | `src/atmosphere.js` | Sky, sun, fog, image-based lighting, rain, snow, dust and lightning |
@@ -116,11 +109,9 @@ Then open http://localhost:5178. `npm run build` writes a static site to `dist/`
 | `src/bots.js` | Soldier models and bot AI |
 | `src/vehicles.js` | Tank, jet, FPV drone, AA gun and attack chopper: models, handling, AI, HUDs; rockets, shells, bombs and flak; network copies |
 | `src/streaks.js` | Helicopter model and the airstrike flyover |
-| `src/spectate.js` | The death camera, the killcam and free spectate |
 | `src/effects.js` | Particles, tracers, impacts, explosions and decals |
 | `src/game.js` | Match rules, combat, scoring, and host and client roles |
-| `src/net.js` | PeerJS rooms, lobby, snapshots, snapshot interpolation and networked soldiers |
-| `src/rewind.js` | The host's position history and the checks it runs on a client's hit claim |
+| `src/net.js` | PeerJS rooms, lobby, snapshots and networked soldiers |
 | `src/audio.js` | Sample playback, loudness matching, the mix, distance falloff, panning and reverb |
 | `src/hud.js` | HUD, minimap and scoreboards |
 | `src/main.js` | Renderer, menus, input and the frame loop |

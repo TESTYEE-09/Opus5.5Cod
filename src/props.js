@@ -1,12 +1,9 @@
 // Detailed static props (vehicles, trees, lamps, cranes...). Every part is baked into a
 // handful of merged meshes with vertex colours, so a whole map of props costs a few draw calls.
-// The smaller clutter — barrels, crates, barriers, stones — is stamped out of the scanned PBR
-// models in models.js instead, one InstancedMesh per model part.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mulberry } from './textures.js';
-import { modelParts } from './models.js';
 
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _s = new THREE.Vector3(), _p = new THREE.Vector3();
 const _c = new THREE.Color();
@@ -23,7 +20,7 @@ export const torus = (r, t, arc = Math.PI * 2) => cached(`t${r},${t},${arc}`, ()
 export const halfDisc = (r) => cached(`h${r}`, () => new THREE.CircleGeometry(r, 20, 0, Math.PI));
 
 export class Kit {
-  constructor() { this.buckets = {}; this.instances = {}; this.stack = [new THREE.Matrix4()]; this.lights = []; }
+  constructor() { this.buckets = {}; this.stack = [new THREE.Matrix4()]; this.lights = []; }
   get top() { return this.stack[this.stack.length - 1]; }
   push(x = 0, y = 0, z = 0, ry = 0, rx = 0, rz = 0, s = 1) {
     _m.compose(_p.set(x, y, z), _q.setFromEuler(_e.set(rx, ry, rz, 'YXZ')), _s.set(s, s, s));
@@ -45,15 +42,6 @@ export class Kit {
     g.setAttribute('color', new THREE.BufferAttribute(col, 3));
     (this.buckets[kind] ||= []).push(g);
   }
-  // Place a scanned model under the current transform. Returns false if it has not loaded,
-  // which lets a recipe fall back to its built-from-boxes version.
-  model(name, { x = 0, y = 0, z = 0, ry = 0, rx = 0, rz = 0, s = 1, sx = s, sy = s, sz = s, color = null } = {}) {
-    if (!modelParts(name)) return false;
-    _m.compose(_p.set(x, y, z), _q.setFromEuler(_e.set(rx, ry, rz, 'YXZ')), _s.set(sx, sy, sz));
-    (this.instances[name] ||= []).push({ m: this.top.clone().multiply(_m), color });
-    return true;
-  }
-
   // world position of a local point under the current transform
   at(x, y, z) { return new THREE.Vector3(x, y, z).applyMatrix4(this.top); }
   build(materials) {
@@ -65,20 +53,6 @@ export class Kit {
       mesh.receiveShadow = kind !== 'glow';
       out.push(mesh);
       for (const g of geos) g.dispose();
-    }
-    for (const [name, list] of Object.entries(this.instances)) {
-      const tinted = list.some(i => i.color !== null);
-      for (const part of modelParts(name)) {
-        const im = new THREE.InstancedMesh(part.geometry, part.material, list.length);
-        list.forEach((i, n) => {
-          im.setMatrixAt(n, i.m);
-          if (tinted) im.setColorAt(n, _c.set(i.color ?? 0xffffff));
-        });
-        im.instanceMatrix.needsUpdate = true;
-        im.castShadow = im.receiveShadow = true;
-        im.computeBoundingSphere();
-        out.push(im);
-      }
     }
     return out;
   }
@@ -271,7 +245,6 @@ export const PROPS = {
   barrel(k, o, R) {
     const cols = o.colors || [0x2b4a7a, 0x7a2b22, 0x5a5a3a, 0x6b4a2a];
     const col = cols[Math.floor(R() * cols.length)];
-    if (k.model('barrel_03', { ry: R() * 6.28, color: col })) return;
     k.part(cyl(0.3, 0.3, 0.9, 14), 'paint', col, 0, 0.45, 0);
     for (const y of [0.3, 0.6]) k.part(cyl(0.312, 0.312, 0.04, 14), 'metal', 0x3a3a3a, 0, y, 0);
     k.part(cyl(0.27, 0.27, 0.02, 14), 'metal', 0x2a2a2a, 0, 0.905, 0);
@@ -279,12 +252,7 @@ export const PROPS = {
   },
   tires(k, o, R) {
     const n = o.n || 3;
-    for (let i = 0; i < n; i++) {
-      const x = R() * 0.1, z = R() * 0.1;
-      // the scan stands the tyre on its edge; lay it down to stack it
-      if (k.model('old_tyre', { x, y: i * 0.18, z, rx: -Math.PI / 2, ry: R() * 6.28 })) continue;
-      k.part(torus(0.34, 0.14), 'rough', 0x161616, x, 0.14 + i * 0.27, z, Math.PI / 2, 0, 0);
-    }
+    for (let i = 0; i < n; i++) k.part(torus(0.34, 0.14), 'rough', 0x161616, R() * 0.1, 0.14 + i * 0.27, R() * 0.1, Math.PI / 2, 0, 0);
   },
   ac(k) {
     k.part(rbox(0.9, 0.6, 0.4, 0.04), 'paint', 0xb9b6ae, 0, 0, 0);
@@ -305,8 +273,6 @@ export const PROPS = {
     const cols = o.colors || [0x8a8274, 0x9e9483, 0x6e675c, 0xa05a3c];
     for (let i = 0; i < (o.n || 14); i++) {
       const r = 0.12 + R() * 0.35, a = R() * 6.28, d = R() * (o.r || 1.4);
-      // stone_01 is normalised to 0.7 m across, so match the shard radius it stands in for
-      if (r > 0.22 && k.model('stone_01', { x: Math.cos(a) * d, z: Math.sin(a) * d, ry: R() * 6.28, s: r * 2 / 0.7 })) continue;
       k.part(ico(r, 0), 'facet', cols[Math.floor(R() * cols.length)], Math.cos(a) * d, r * 0.4, Math.sin(a) * d, R() * 3, R() * 3, 0, 1, 0.6, 1);
     }
   },
@@ -320,17 +286,8 @@ export const PROPS = {
     k.part(cyl(0.18, 0.22, 0.6, 10), 'metal', 0x2a2b2c, 0, 0.3, 0);
     k.part(cyl(0.3, 0.2, 0.15, 10), 'metal', 0x2a2b2c, 0, 0.62, 0);
   },
-  jersey(k, o, R) {
+  jersey(k, o) {
     const l = o.len || 3;
-    if (modelParts('concrete_road_barrier')) {
-      // the scanned section is 1.53 m long on its own x; turned a quarter turn that becomes
-      // the run's z, so it is sx that stretches a section to fill its share of the run
-      const n = Math.max(1, Math.round(l / 1.5)), step = l / n;
-      for (let i = 0; i < n; i++) {
-        k.model('concrete_road_barrier', { z: -l / 2 + step * (i + 0.5), ry: Math.PI / 2 + (R() - 0.5) * 0.04, sx: step / 1.53 });
-      }
-      return;
-    }
     k.part(box(0.62, 0.3, l), 'rough', 0xa8a39a, 0, 0.15, 0);
     k.part(box(0.4, 0.3, l), 'rough', 0xaba69d, 0, 0.45, 0);
     k.part(box(0.24, 0.3, l), 'rough', 0xb0aba2, 0, 0.75, 0);
@@ -422,12 +379,6 @@ export const PROPS = {
     if (o.snow) k.part(cone(h * 0.15, h * 0.35, 6), 'far', 0xdfe6ee, 0, h * 0.72, 0);
   },
   pallets(k, o, R) {
-    if (modelParts('wooden_military_crate')) {
-      for (let i = 0; i < (o.n || 4); i++) {
-        k.model(i % 2 ? 'wooden_crate_02' : 'wooden_military_crate', { y: i * 0.46, ry: (R() - 0.5) * 0.25 });
-      }
-      return;
-    }
     for (let i = 0; i < (o.n || 4); i++) {
       k.part(box(1.2, 0.12, 1.0), 'rough', 0x8a6a42, 0, 0.06 + i * 0.16, 0, 0, R() * 0.1, 0);
       for (const x of [-0.5, 0, 0.5]) k.part(box(0.1, 0.06, 1), 'rough', 0x6a5032, x, 0.14 + i * 0.16, 0);
@@ -437,36 +388,7 @@ export const PROPS = {
     for (let x = -o.w / 2 + 0.3; x < o.w / 2; x += 0.62) k.part(rbox(0.6, 0.2, 0.36, 0.08), 'rough', 0x7d6f50, x, 0.1, 0);
     for (let x = -o.w / 2 + 0.6; x < o.w / 2 - 0.3; x += 0.62) k.part(rbox(0.6, 0.2, 0.36, 0.08), 'rough', 0x857756, x, 0.3, 0);
   },
-  // Scanned set dressing a map can drop anywhere: a small pile of whatever fits the spot.
-  // Purely visual, like every other prop — collision comes from the boxes around it.
-  clutter(k, o, R) {
-    const pool = o.pool || CLUTTER;
-    for (let i = 0; i < (o.n || 3); i++) {
-      const a = R() * 6.28, d = R() * (o.r || 1.2);
-      k.model(pool[Math.floor(R() * pool.length)], { x: Math.cos(a) * d, z: Math.sin(a) * d, ry: R() * 6.28 });
-    }
-  },
-  hydrant(k, o, R) { k.model('fire_hydrant', { ry: o.rot != null ? 0 : R() * 6.28 }); },
-  bin(k, o, R) { k.model('metal_trash_can', { ry: R() * 6.28 }); },
-  jerrycans(k, o, R) {
-    for (let i = 0; i < (o.n || 3); i++) k.model(R() < 0.6 ? 'metal_jerrycan_green' : 'metal_jerrycan', { x: (i - 1) * 0.34, z: (R() - 0.5) * 0.2, ry: R() * 6.28 });
-  },
-  gastanks(k, o, R) {
-    k.model('propane_tank', { ry: R() * 6.28 });
-    for (let i = 0; i < 2; i++) k.model('small_lpg_tank', { x: 0.7 + i * 0.5, z: (R() - 0.5) * 0.4, ry: R() * 6.28 });
-  },
-  utilitybox(k, o, R) { k.model('utility_box_01', { ry: R() * 6.28 }); },
-  ladder(k, o) { k.model('ladder_sectioned_01', { rz: -0.14 }); },
-  shrub(k, o, R) { k.model('shrub_03', { ry: R() * 6.28, s: 0.8 + R() * 0.6 }); },
-  stump(k, o, R) { k.model('tree_stump_01', { ry: R() * 6.28 }); },
-  cementbags(k, o, R) {
-    for (let i = 0; i < (o.n || 4); i++) k.model('cement_bag', { x: (R() - 0.5) * 0.3, y: i * 0.14, z: (R() - 0.5) * 0.3, ry: R() * 6.28 });
-  },
 };
-
-// what `clutter` reaches for by default
-const CLUTTER = ['metal_jerrycan_green', 'metal_jerrycan', 'cardboard_box_01', 'wooden_crate_02',
-  'ammo_box', 'small_lpg_tank', 'cement_bag', 'stone_01', 'plastic_crate_02'];
 
 const shade = (c, k) => (Math.min(255, ((c >> 16) & 255) * k) << 16) | (Math.min(255, ((c >> 8) & 255) * k) << 8) | Math.min(255, (c & 255) * k);
 // a thin bar from a to b ([x, y, z] in the prop's local space)
@@ -501,15 +423,6 @@ Object.assign(PROPS, {
   // stacked white rugged equipment cases
   cases(k, o, R) {
     const w = o.w || 1.2, d = o.d || 0.8;
-    if (modelParts('ammo_box')) {
-      let h = 0;
-      for (let i = 0; i < (o.n || 3); i++) {
-        const name = R() < 0.7 ? 'ammo_box' : 'medical_box';
-        k.model(name, { y: h, ry: Math.PI / 2 + (R() - 0.5) * 0.3 });
-        h += name === 'ammo_box' ? 0.35 : 0.09;
-      }
-      return;
-    }
     let y = 0;
     for (let i = 0; i < (o.n || 3); i++) {
       const h = 0.55 + R() * 0.25, c = [0xd4d7d4, 0xc2c6c4, 0xb4b9b8][i % 3];
@@ -523,13 +436,6 @@ Object.assign(PROPS, {
   },
   // blue plastic crates on a pallet
   bluecrates(k, o, R) {
-    if (modelParts('plastic_crate_01')) {
-      for (let i = 0; i < (o.n || 4); i++) {
-        const x = (i % 2 - 0.5) * 0.62, tall = R() < 0.5;
-        k.model(tall ? 'plastic_crate_01' : 'plastic_crate_02', { x, y: Math.floor(i / 2) * 0.43, ry: (R() - 0.5) * 0.2 });
-      }
-      return;
-    }
     k.part(box(1.2, 0.14, 1.0), 'rough', 0x7a6242, 0, 0.07, 0);
     for (let i = 0; i < (o.n || 4); i++) {
       const x = (i % 2 - 0.5) * 0.6, y = 0.14 + Math.floor(i / 2) * 0.46 + 0.23;

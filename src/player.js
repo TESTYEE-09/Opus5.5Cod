@@ -195,7 +195,6 @@ export class Player {
     else if (this.tacT > 0) this.tacT -= dt;
     let speed = this.sprinting ? (this.tacT > 0 ? 8.7 : 7.2) : this.prone ? 1.15 : this.crouched ? 2.6 : 4.8;
     speed *= def.speed * (1 - 0.45 * ars.adsEase());
-    if (ars.perks?.has('light')) speed *= 1.1;
 
     // lean around corners with Q / E; the head stops short of walls
     const leanWant = this.sprinting || this.proneAmt > 0.3 ? 0 : (inp.leanR ? 1 : 0) - (inp.leanL ? 1 : 0);
@@ -234,11 +233,7 @@ export class Player {
       this.stepDist += this.hSpeed * dt;
       this.bobPhase += this.hSpeed * dt * (this.sprinting ? 2.4 : 2.8);
       const stride = this.sprinting ? 2.6 : 2.1;
-      if (this.stepDist > stride) {
-        this.stepDist = 0;
-        const quiet = ars.perks?.has('quiet') ? 0.35 : 1;
-        g.audio.step(null, (this.prone ? 0.05 : this.crouched ? 0.08 : 0.18) * quiet);
-      }
+      if (this.stepDist > stride) { this.stepDist = 0; g.audio.step(null, this.prone ? 0.05 : this.crouched ? 0.08 : 0.18); }
     }
 
     // health regen

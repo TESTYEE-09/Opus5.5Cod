@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { SIZE, loadMap, updateWorld, wetFloor, sites } from './world.js';
-import { loadModels } from './models.js';
 import { MAPS, MODES } from './maps.js';
 import { profile } from './rank.js';
 import { Graphics, QUALITY } from './graphics.js';
@@ -8,8 +7,7 @@ import { Atmosphere } from './atmosphere.js';
 import { Sfx } from './audio.js';
 import { Hud } from './hud.js';
 import { Game } from './game.js';
-import { CLASSES, WEAPONS } from './weapons.js';
-import { loadLoadouts, saveLoadouts, legalise, describe, unlocked, PRIMARIES, SECONDARIES, LAUNCHERS, ATTACHMENTS, ATTACH_SLOTS, PERKS, PERK_SLOTS, SLOT_COUNT } from './loadout.js';
+import { CLASSES } from './weapons.js';
 import { DIFFICULTY } from './bots.js';
 import { Net, cleanName } from './net.js';
 
@@ -69,41 +67,25 @@ const defaults = { sens: 1, fov: 80, vol: 0.7, difficulty: 'regular', cls: 'assa
 const matchRules = () => ({ scoreLimit: MODES[settings.mode].scoreLimit, timeLimit: MODES[settings.mode].timeLimit });
 let settings = { ...defaults };
 try { Object.assign(settings, JSON.parse(localStorage.getItem('frontline.settings') || '{}')); } catch { /* storage unavailable */ }
-if (!CLASSES[settings.cls] && !/^custom[0-4]$/.test(settings.cls || '')) settings.cls = 'assault';
+if (!CLASSES[settings.cls]) settings.cls = 'assault';
 if (!DIFFICULTY[settings.difficulty]) settings.difficulty = 'regular';
 if (!MAPS[settings.map]) settings.map = 'crossroads';
 const fixMode = () => { if (!MAPS[settings.map].modes.includes(settings.mode)) settings.mode = MAPS[settings.map].modes[0]; };
 fixMode();
 if (!QUALITY[settings.quality]) settings.quality = 'high';
 const save = () => { try { localStorage.setItem('frontline.settings', JSON.stringify(settings)); } catch { /* storage unavailable */ } };
-const esc = (t) => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-let loadouts = loadLoadouts();
 audio.setVolume(settings.vol);
 
 function $(id) { return document.getElementById(id); }
 
-let lastYaw = 0, lastPitch = 0;
-
 gfx.setQuality(settings.quality, atmo);
-// The scanned props have to be in memory before the first map builds its instanced meshes.
-// If they fail we still boot — every recipe falls back to its built-from-boxes version.
-await loadModels(import.meta.env.BASE_URL, gfx.renderer.capabilities.getMaxAnisotropy());
 loadMapById(settings.map);
 
-// Every pickable kit: the fixed classes, then the five saved loadouts.
-function kitList() {
-  const out = Object.entries(CLASSES).map(([k, c]) => [k, c.name, c.desc]);
-  loadouts.forEach((l, i) => out.push([`custom${i}`, l.name, describe(legalise(l))]));
-  return out;
-}
-
 function renderClassCards() {
-  const kits = kitList();
-  $('classes').innerHTML = kits.map(([k, name, desc]) =>
-    `<button class="card${k === settings.cls ? ' on' : ''}" data-cls="${k}"><b>${esc(name)}</b><span>${esc(desc)}</span></button>`).join('');
-  $('pauseClasses').innerHTML = kits.map(([k, name]) =>
-    `<button class="${k === (game.pendingCls || settings.cls) ? 'on' : ''}" data-cls="${k}">${esc(name)}</button>`).join('');
-  $('kitNote').textContent = 'Five custom loadouts sit alongside the fixed classes; unlocks open up as you rank up.';
+  $('classes').innerHTML = Object.entries(CLASSES).map(([k, c]) =>
+    `<button class="card${k === settings.cls ? ' on' : ''}" data-cls="${k}"><b>${c.name}</b><span>${c.desc}</span></button>`).join('');
+  $('pauseClasses').innerHTML = Object.entries(CLASSES).map(([k, c]) =>
+    `<button class="${k === (game.pendingCls || settings.cls) ? 'on' : ''}" data-cls="${k}">${c.name}</button>`).join('');
   $('diffs').innerHTML = Object.entries(DIFFICULTY).map(([k, d]) =>
     `<button class="${k === settings.difficulty ? 'on' : ''}" data-diff="${k}">${d.name}</button>`).join('');
   $('maps').innerHTML = Object.entries(MAPS).map(([k, m]) =>
@@ -193,7 +175,7 @@ function lock() {
 }
 
 function hideScreens() {
-  for (const id of ['menu', 'end', 'pause', 'lobby', 'kit']) $(id).classList.add('hidden');
+  for (const id of ['menu', 'end', 'pause', 'lobby']) $(id).classList.add('hidden');
 }
 
 function deploy() {
@@ -255,98 +237,11 @@ const net = new Net(game, {
     $('pause').classList.remove('hidden');
   },
   error(msg) { $('lobbyMsg').textContent = msg; },
-  // the host went away: stop the match and sit in the lobby while the room is rebuilt
-  migrate(msg, code) {
-    if (game.state === 'playing') game.state = 'ended';
-    game.clear();
-    game.state = 'menu';
-    if (document.pointerLockElement) document.exitPointerLock();
-    for (const id of ['hud', 'death', 'scoreboard', 'outro']) $(id).classList.add('hidden');
-    $('outro').className = '';
-    hideScreens();
-    $('roomCode').textContent = code || '';
-    $('members').innerHTML = '';
-    $('startMp').classList.add('hidden');
-    $('lobbyMsg').textContent = msg;
-    $('lobby').classList.remove('hidden');
-  },
   closed(msg) { toMenu(msg); },
 });
-// ---------- loadout editor ----------
-let editSlot = 0;
-
-function optionRow(title, list, chosen, kind, level, label) {
-  const opts = list.map(o => {
-    const ok = unlocked(o, level);
-    const n = label(o);
-    return `<button class="${o.id === chosen ? 'on' : ''}" data-kind="${kind}" data-id="${o.id}"${ok ? '' : ' disabled'}>`
-      + `<b>${esc(n.name)}</b><span>${ok ? esc(n.desc) : `Unlocks at rank ${o.level}`}</span></button>`;
-  }).join('');
-  return `<div class="kitgrp"><h4>${esc(title)}</h4><div class="kitopts">${opts}</div></div>`;
-}
-
-const gunLabel = (o) => {
-  const w = WEAPONS[o.id];
-  if (!w) return { name: 'None', desc: 'Leave the slot empty.' };
-  const auto = w.auto ? 'Automatic' : w.burst ? `${w.burst}-round burst` : w.launcher ? 'Launcher' : 'Semi-automatic';
-  return { name: w.name, desc: `${auto} · ${w.dmg[0]} dmg · ${w.mag} rounds${w.silent ? ' · suppressed' : ''}` };
-};
-
-function renderKit() {
-  const level = profile().level;
-  const l = legalise(loadouts[editSlot], 99);
-  $('kitRank').innerHTML = `Rank <b>${level}</b>. Anything above your rank is locked; a locked pick falls back to the default when you deploy.`;
-  $('kitSlots').innerHTML = loadouts.map((k, i) =>
-    `<button class="${i === editSlot ? 'on' : ''}" data-slot="${i}">${esc(k.name)}</button>`).join('');
-  $('kitName').value = l.name;
-  let html = optionRow('Primary', PRIMARIES, l.primary, 'primary', level, gunLabel)
-    + optionRow('Secondary', SECONDARIES, l.secondary, 'secondary', level, gunLabel)
-    + optionRow('Launcher', LAUNCHERS, l.launcher, 'launcher', level, gunLabel);
-  for (const slot of ATTACH_SLOTS) {
-    html += optionRow(slot[0].toUpperCase() + slot.slice(1), ATTACHMENTS[slot], l.attach[slot], `attach:${slot}`, level, (o) => o);
-  }
-  for (let p = 0; p < PERK_SLOTS; p++) {
-    html += optionRow(`Perk ${p + 1}`, PERKS[p], l.perks[p], `perk:${p}`, level, (o) => o);
-  }
-  html += `<p class="kitsum">As you will deploy it: ${esc(describe(legalise(l, level)))}</p>`;
-  $('kitBody').innerHTML = html;
-}
-
-function setKit(kind, id) {
-  const l = loadouts[editSlot];
-  if (kind === 'primary' || kind === 'secondary' || kind === 'launcher') l[kind] = id;
-  else if (kind.startsWith('attach:')) l.attach[kind.slice(7)] = id;
-  else if (kind.startsWith('perk:')) l.perks[+kind.slice(5)] = id;
-  loadouts[editSlot] = legalise(l, 99);
-  saveLoadouts(loadouts);
-  renderKit();
-  renderClassCards();
-}
-
-$('editKit').addEventListener('click', () => { audio.init(); audio.ui(); editSlot = 0; renderKit(); hideScreens(); $('kit').classList.remove('hidden'); });
-$('kitDone').addEventListener('click', () => { audio.ui(); hideScreens(); $('menu').classList.remove('hidden'); renderClassCards(); });
-$('kitSlots').addEventListener('click', (e) => {
-  const b = e.target.closest('[data-slot]');
-  if (!b) return;
-  editSlot = +b.dataset.slot; audio.ui(); renderKit();
-});
-$('kitBody').addEventListener('click', (e) => {
-  const b = e.target.closest('[data-kind]');
-  if (!b || b.disabled) return;
-  audio.ui();
-  setKit(b.dataset.kind, b.dataset.id);
-});
-$('kitName').addEventListener('input', () => {
-  loadouts[editSlot].name = $('kitName').value;
-  loadouts[editSlot] = legalise(loadouts[editSlot], 99);
-  saveLoadouts(loadouts);
-  $('kitSlots').innerHTML = loadouts.map((k, i) => `<button class="${i === editSlot ? 'on' : ''}" data-slot="${i}">${esc(k.name)}</button>`).join('');
-  renderClassCards();
-});
-
 renderClassCards();
 
-const escapeHtml = esc;
+const escapeHtml = (t) => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 function showLobby() {
   hideScreens();
@@ -488,8 +383,6 @@ function frame(ts) {
     hud.showScores = locked && keys.has('Tab');
     if (locked || net.active) game.update(dt, readInput());
     else { readInput(); game.effects.update(0); }
-  } else if (game.state === 'ended' && game.updateOutro(dt)) {
-    hud.showScores = false;
   } else if (game.state === 'menu') {
     menuT += dt * 0.05;
     const small = SIZE < 100, rad = small ? 30 : 70;
@@ -516,15 +409,6 @@ function frame(ts) {
   }
   const pl = game.player, playing = game.state === 'playing';
   const veh = playing && pl.alive ? pl.vehicle : null;
-  // Camera blur: how far the view swung this frame as a fraction of the screen, plus the
-  // tunnel blur that closes in around the sights.
-  camera.getWorldDirection(_cd);
-  const yaw = Math.atan2(-_cd.x, -_cd.z), pitch = Math.asin(Math.max(-1, Math.min(1, _cd.y)));
-  const vfov = camera.fov * Math.PI / 180, hfov = 2 * Math.atan(Math.tan(vfov / 2) * camera.aspect);
-  let dYaw = yaw - lastYaw; if (dYaw > Math.PI) dYaw -= 2 * Math.PI; else if (dYaw < -Math.PI) dYaw += 2 * Math.PI;
-  gfx.setLens(playing ? (dYaw / hfov) * 0.5 : 0, playing ? -((pitch - lastPitch) / vfov) * 0.5 : 0,
-    playing && !veh ? game.arsenal.adsEase() * 0.012 : 0);
-  lastYaw = yaw; lastPitch = pitch;
   const hurt = playing ? (pl.alive ? Math.max(0, (45 - pl.health) / 45) * 0.8 : 0.7) : 0;
   const d = game.arsenal.w?.def;
   const scoped = playing && pl.alive && !veh && d && (d.scope || d.overlay) && game.arsenal.adsEase() > 0.92;

@@ -7,7 +7,6 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { raycastWorld, overlaps, groundAt, floorAt, lineOfSight, findPath, interest, spawns, objectsTouching, SIZE } from './world.js';
 import { buildChopper, chopperHit } from './streaks.js';
 import { flashTexture } from './effects.js';
-import { macroNoise } from './textures.js';
 
 const DEG = Math.PI / 180;
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -145,58 +144,22 @@ export function sweepHit(g, o, d, len, team, ignore) {
 }
 
 // ---------- models ----------
-// Painted armour: object-space triplanar detail on top of the flat colour, so a tank is
-// camo-blotched, dirty on its upward faces and scratched back to bare metal on its edges —
-// and all of it rides with the hull instead of swimming as the vehicle drives.
-function armour(mat, { camo = 0, wear = 0.5, dirt = 0.3, scale = 0.35 } = {}) {
-  const tex = macroNoise();
-  mat.onBeforeCompile = (sh) => {
-    sh.uniforms.uGrain = { value: tex };
-    sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vOPos; varying vec3 vONrm;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvOPos = position; vONrm = normal;');
-    sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', `#include <common>
-        varying vec3 vOPos; varying vec3 vONrm; uniform sampler2D uGrain;
-        float tri(sampler2D t, vec3 p, vec3 w, float f) {
-          return texture2D(t, p.yz * f).r * w.x + texture2D(t, p.xz * f).r * w.y + texture2D(t, p.xy * f).r * w.z;
-        }`)
-      .replace('#include <map_fragment>', `#include <map_fragment>
-        vec3 tw = abs(normalize(vONrm)); tw /= max(tw.x + tw.y + tw.z, 1e-4);
-        float gLo = tri(uGrain, vOPos, tw, ${scale.toFixed(3)});
-        float gHi = tri(uGrain, vOPos, tw, ${(scale * 9).toFixed(3)});
-        ${camo ? `// two overlapping blotch fields make a three-tone camo splodge
-        float blotch = step(0.52, gLo) * 0.6 + step(0.47, tri(uGrain, vOPos + 31.7, tw, ${(scale * 0.62).toFixed(3)})) * 0.4;
-        diffuseColor.rgb *= mix(1.0, 0.62, blotch * ${camo.toFixed(3)});` : ''}
-        // grime settles on anything facing up, heaviest low down on the hull
-        diffuseColor.rgb *= 1.0 - ${dirt.toFixed(3)} * max(normalize(vONrm).y, 0.0) * gHi;
-        diffuseColor.rgb *= 0.86 + 0.28 * gHi;`)
-      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
-        float wearMask = smoothstep(0.62, 0.86, gHi) * ${wear.toFixed(3)};
-        roughnessFactor = clamp(roughnessFactor * (0.8 + 0.45 * gHi) - wearMask * 0.3, 0.04, 1.0);`)
-      .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
-        metalnessFactor = clamp(metalnessFactor + wearMask * 0.55, 0.0, 1.0);`);
-  };
-  mat.customProgramCacheKey = () => `arm${camo}_${wear}_${dirt}_${scale}`;
-  return mat;
-}
-
 const matCache = new Map();
 function mats(team, ally) {
   const key = `${team}${ally ? 1 : 0}`;
   if (matCache.has(key)) return matCache.get(key);
   const std = (color, roughness, metalness) => new THREE.MeshStandardMaterial({ color, roughness, metalness });
   const M = {
-    body: armour(std(team ? 0x4f5b38 : 0xa8966c, 0.72, 0.3), { camo: 0.8, wear: 0.55, dirt: 0.35 }),
-    hull2: armour(std(team ? 0x3e4830 : 0x8f7e5a, 0.75, 0.3), { camo: 0.6, wear: 0.6, dirt: 0.4 }),
-    rubber: armour(std(0x1e1f1c, 0.95, 0), { wear: 0, dirt: 0.5, scale: 0.8 }),
-    dark: armour(std(0x1d1e1f, 0.6, 0.5), { wear: 0.35, dirt: 0.3 }),
-    track: armour(std(0x161616, 0.95, 0.15), { wear: 0.8, dirt: 0.5, scale: 1.2 }),
-    metal: armour(std(0x3a3c3f, 0.38, 0.85), { wear: 0.5, dirt: 0.2 }),
-    jet: armour(std(team ? 0x93a8b8 : 0x858d95, 0.45, 0.45), { camo: 0.22, wear: 0.3, dirt: 0.12, scale: 0.22 }),
-    jet2: armour(std(team ? 0x6c8298 : 0x6c747c, 0.45, 0.45), { camo: 0.3, wear: 0.3, dirt: 0.12, scale: 0.22 }),
-    olive: armour(std(0x4a5231, 0.7, 0.1), { camo: 0.5, wear: 0.4, dirt: 0.35 }),
-    sand: armour(std(0x9a8a66, 0.95, 0), { camo: 0.35, wear: 0.2, dirt: 0.3 }),
+    body: std(team ? 0x4f5b38 : 0xa8966c, 0.72, 0.3),
+    hull2: std(team ? 0x3e4830 : 0x8f7e5a, 0.75, 0.3),
+    rubber: std(0x1e1f1c, 0.95, 0),
+    dark: std(0x1d1e1f, 0.6, 0.5),
+    track: std(0x161616, 0.95, 0.15),
+    metal: std(0x3a3c3f, 0.38, 0.85),
+    jet: std(team ? 0x93a8b8 : 0x858d95, 0.45, 0.45),
+    jet2: std(team ? 0x6c8298 : 0x6c747c, 0.45, 0.45),
+    olive: std(0x4a5231, 0.7, 0.1),
+    sand: std(0x9a8a66, 0.95, 0),
     glass: new THREE.MeshStandardMaterial({ color: 0x1c2c3c, roughness: 0.05, metalness: 0.9 }),
     mark: new THREE.MeshBasicMaterial({ color: ally ? 0x3d7fe0 : 0xd0342a }),
     led: new THREE.MeshBasicMaterial({ color: ally ? new THREE.Color(0.4, 1.2, 3) : new THREE.Color(3, 0.4, 0.3) }),

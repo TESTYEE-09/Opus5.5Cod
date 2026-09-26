@@ -8,9 +8,6 @@ import { Jet } from './streaks.js';
 import { NetSoldier } from './net.js';
 import { Chopper, Tank, FighterJet, Drone, VehicleProxy, Projectiles, PROJ, VEHICLE_WEAPONS, hitSoldier, placeEmplacements, tankSpot } from './vehicles.js';
 import { createMode } from './modes.js';
-import { Spectator } from './spectate.js';
-import { loadLoadouts, toClass } from './loadout.js';
-import { Rewind, verifyHit, claimTime } from './rewind.js';
 
 const DEG = Math.PI / 180;
 const NAMES = ['Viper', 'Ghost', 'Havoc', 'Reaper', 'Nomad', 'Sarge', 'Hawk', 'Wolf', 'Rook', 'Blitz', 'Frost', 'Onyx',
@@ -64,7 +61,6 @@ export class Game {
     this.player = new Player(this);
     this.player.id = 0;
     this.jet = new Jet(scene);
-    this.spectator = new Spectator();
     this.bots = []; this.nets = []; this.soldiers = [this.player]; this.byId = new Map();
     this.grenades = []; this.pickups = []; this.vehicles = []; this.jobs = []; this.events = [];
     this.netNades = [];
@@ -88,19 +84,6 @@ export class Game {
   }
 
   get authority() { return this.role !== 'client'; }
-
-  // A class id is either one of the fixed CLASSES or 'custom0'..'custom4', a saved loadout.
-  classFor(id) {
-    const m = /^custom(\d)$/.exec(String(id ?? ''));
-    if (m) {
-      const l = loadLoadouts()[+m[1]];
-      if (l) return toClass(l);
-    }
-    return CLASSES[id] || CLASSES.assault;
-  }
-
-  // perks only exist for the local player; remote soldiers carry a ghost flag instead
-  hidden(s) { return s === this.player ? !!this.arsenal.perks?.has('ghost') : !!s.ghost; }
   emit(ev) { if (this.role === 'host') this.events.push(ev); }
 
   // ---------- match flow ----------
@@ -135,7 +118,7 @@ export class Game {
     pl.resetStats();
     for (const r of roster) {
       if (r.me) continue;
-      if (this.role === 'client') { const n = new NetSoldier(this, r.id, r.team, r.name, r.human, false); n.ghost = !!r.g; this.nets.push(n); }
+      if (this.role === 'client') this.nets.push(new NetSoldier(this, r.id, r.team, r.name, r.human, false));
       else this.nets.push(new NetSoldier(this, r.id, r.team, r.name, true, true));
     }
     if (this.authority) {
@@ -167,21 +150,16 @@ export class Game {
     this.targeting = false;
     this.pickupId = 0;
     this.pendingCls = settings.cls;
-    this.lastKill = null;
-    this.outroT = 0;
-    this.spectator.reset();
     this.state = 'playing';
     this.hud.reset(this);
 
     if (this.role === 'client') {
-      pl.spawn(me, me.yaw, this.classFor(settings.cls));
-      this.sentGhost = this.arsenal.perks?.has('ghost') ? 1 : 0;
-      this.net.send({ t: 'kit', g: this.sentGhost });
+      pl.spawn(me, me.yaw, CLASSES[settings.cls]);
       for (const n of this.nets) { const r = roster.find(x => x.id === n.id); n.pos.set(r.x, 0, r.z); n.tgt.copy(n.pos); }
       return;
     }
     const sp = this.pickSpawn(pl.team, pl);
-    pl.spawn(sp, sp.yaw, this.classFor(settings.cls));
+    pl.spawn(sp, sp.yaw, CLASSES[settings.cls]);
     for (const n of this.nets) { const s = this.pickSpawn(n.team, n); n.place(s.x, 0, s.z, s.yaw); }
     for (const b of this.bots) { const s = this.mode.initialSpot?.(b) || this.pickSpawn(b.team, b); b.spawn(s, s.yaw); }
   }
@@ -202,7 +180,7 @@ export class Game {
   }
 
   rosterList() {
-    return this.soldiers.map(s => ({ id: s.id, name: s.name, team: s.team, human: !!(s.isPlayer || s.human), g: this.hidden(s) ? 1 : 0, x: r2(s.pos.x), z: r2(s.pos.z), yaw: r2(s.yaw) }));
+    return this.soldiers.map(s => ({ id: s.id, name: s.name, team: s.team, human: !!(s.isPlayer || s.human), x: r2(s.pos.x), z: r2(s.pos.z), yaw: r2(s.yaw) }));
   }
 
   // host: a player joined or left mid-match
@@ -250,39 +228,10 @@ export class Game {
     for (const v of this.vehicles) v.remove();
     this.vehicles = [];
     this.projectiles.clear();
-    this.emit({ k: 'end', sc: this.teamScore, lk: this.lastKill || null });
+    this.emit({ k: 'end', sc: this.teamScore });
     this.net?.flush();
+    this.hud.showEnd(this);
     if (document.pointerLockElement) document.exitPointerLock();
-    if (!this.startOutro()) this.hud.showEnd(this);
-  }
-
-  // The final killcam: follow whoever got the last kill for a few seconds, then show
-  // the summary. Skipped when there was no kill or the shooter has since died.
-  startOutro(lk = this.lastKill) {
-    const killer = lk && this.byId.get(lk.a), victim = lk && this.byId.get(lk.v);
-    if (!killer || !victim || !killer.alive) return false;
-    this.outroT = 4.5;
-    this.spectator.begin(victim.pos, victim.yaw, killer);
-    this.hud.showOutro(killer, victim, lk.w, this.player);
-    return true;
-  }
-
-  // Driven by the frame loop while the state is 'ended' and an outro is running.
-  updateOutro(dt) {
-    if (!(this.outroT > 0)) return false;
-    this.time += dt;
-    for (const n of this.nets) n.update(dt);
-    if (this.authority) for (const b of this.bots) b.update(dt);
-    this.effects.update(dt);
-    this.spectator.update(dt, this, this.camera);
-    this.camera.updateMatrixWorld();
-    const L = this.audio.listener;
-    L.x = this.camera.position.x; L.y = this.camera.position.y; L.z = this.camera.position.z;
-    L.yaw = this.spectator.yaw;
-    this.audio.update(dt);
-    this.arsenal.holder.visible = false;
-    if ((this.outroT -= dt) <= 0) { this.outroT = 0; this.hud.hideOutro(); this.hud.showEnd(this); return false; }
-    return true;
   }
 
   pickSpawn(team, who = null) {
@@ -312,24 +261,6 @@ export class Game {
     }
     const s = this.pickSpawn(bot.team, bot);
     bot.spawn(s, s.yaw);
-  }
-
-  // A client's Ghost perk can change between spawns, so resend it when it does.
-  syncKit() {
-    if (this.role !== 'client') return;
-    const g = this.arsenal.perks?.has('ghost') ? 1 : 0;
-    if (g === this.sentGhost) return;
-    this.sentGhost = g;
-    this.net.send({ t: 'kit', g });
-  }
-
-  // A client says it hit something. Rewind to the moment that client was drawing and
-  // check the shot could have connected before applying it.
-  applyClientHit(shooter, victim, dmg, weapon, head, sentAt) {
-    if (victim.isVehicle) { this.damage(victim, dmg, shooter, weapon, head, shooter.pos); return; }
-    const why = verifyHit(this, shooter, victim, dmg, weapon, head, claimTime(this.time, sentAt));
-    if (why) { this.rejected = (this.rejected || 0) + 1; return; }
-    this.damage(victim, dmg, shooter, weapon, head, shooter.pos);
   }
 
   // ---------- queries ----------
@@ -452,7 +383,6 @@ export class Game {
       this.popupFor(a, [['Assist', 25]]);
     }
     victim.damagers.clear();
-    if (valid) this.lastKill = { a: killer.id, v: victim.id, w: weapon };
     this.hud.feed(killer, victim, weapon, headshot, this.player);
     this.emit({ k: 'kill', a: killer ? killer.id : -1, v: victim.id, w: weapon, h: !!headshot });
     if (valid && this.teamScore[killer.team] >= this.settings.scoreLimit) this.end();
@@ -465,7 +395,6 @@ export class Game {
     this.deadT = 4;
     this.killer = killer && killer !== pl ? killer : null;
     this.deathYaw = pl.yaw;
-    this.spectator.begin(pl.pos, pl.yaw, this.killer);
     this.targeting = false;
     this.hud.hint('');
     this.hud.showDeath(this.killer, weapon, pl);
@@ -556,8 +485,8 @@ export class Game {
     }
     for (const [o, dmg] of objHits) this.hitObject(o, dmg, pl, false);
     if (this.role === 'client') {
-      for (const [e, r] of hits) this.net.send({ t: 'hit', ack: this.net.ack, id: e.id, d: Math.round(r.dmg * 10) / 10, h: r.head, w: def.name });
-      this.net.send({ t: 'fire', m: arr(muzzle), e: sent, key: def.model, sd: def.silent ? 1 : 0 });
+      for (const [e, r] of hits) this.net.send({ t: 'hit', id: e.id, d: Math.round(r.dmg * 10) / 10, h: r.head, w: def.name });
+      this.net.send({ t: 'fire', m: arr(muzzle), e: sent, key: def.model });
     } else for (const [e, r] of hits) this.damage(e, r.dmg, pl, def.name, r.head, pl.pos);
     const fx = this.effects;
     fx.muzzleLight.position.copy(muzzle); fx.muzzleLight.intensity = 6; fx.muzzleT = 0.05;
@@ -599,7 +528,7 @@ export class Game {
       const head = h.zone === 'head';
       const amt = h.entity.isVehicle ? dmg : dmg * (head ? 1.5 : 1);
       if (this.authority) this.damage(h.entity, amt, shooter, weapon, head, v.pos, { streak: true });
-      else this.net.send({ t: 'hit', ack: this.net.ack, id: h.entity.id, d: Math.min(250, amt), h: head, w: weapon });
+      else this.net.send({ t: 'hit', id: h.entity.id, d: Math.min(250, amt), h: head, w: weapon });
       if (!h.entity.isVehicle) { this.bleed(end, dir); kind = 2; } else this.effects.impact(end, dir.clone().negate(), 'metal');
     } else if (h.world) {
       this.effects.impact(end, h.world.normal, materialAt(end, h.world.normal));
@@ -653,7 +582,7 @@ export class Game {
     this.audio.stab();
     this.bleed(best.aimPoint(_c, false), _fwd);
     pl.vel.x += _fwd.x * 4; pl.vel.z += _fwd.z * 4;
-    if (this.role === 'client') this.net.send({ t: 'hit', ack: this.net.ack, id: best.id, d: 200, h: false, w: 'Knife' });
+    if (this.role === 'client') this.net.send({ t: 'hit', id: best.id, d: 200, h: false, w: 'Knife' });
     else this.damage(best, 200, pl, 'Knife', false, pl.pos);
   }
 
@@ -1126,7 +1055,7 @@ export class Game {
   }
 
   // ---------- client: apply what the host sends ----------
-  applySnapshot(d, at = 0) {
+  applySnapshot(d) {
     if (typeof d.tl === 'number') this.timeLeft = d.tl;
     if (Array.isArray(d.sc)) this.teamScore = d.sc.slice(0, 2);
     if (Array.isArray(d.uav)) this.uav = d.uav.slice(0, 2);
@@ -1140,7 +1069,8 @@ export class Game {
       if (s === pl) { if (pl.alive && alive) pl.health = hp; continue; }
       if (alive && !s.alive) s.place(x, y, z, yaw);
       else if (!alive && s.alive) s.die();
-      s.setState(x, y, z, yaw, pitch, c, typeof ln === 'number' ? ln : 0, at);
+      s.setState(x, y, z, yaw, pitch, c);
+      s.leanT = typeof ln === 'number' ? ln : 0;
       s.setInVehicle(!!iv);
       s.health = hp;
     }
@@ -1206,15 +1136,11 @@ export class Game {
         if (own) this.audio.beep(); else this.audio.alarm();
         break;
       }
-      case 'spawn': if (mine) { pl.spawn({ x: ev.x, z: ev.z }, ev.yaw, this.classFor(this.pendingCls)); this.syncKit(); this.hud.hideDeath(); } break;
+      case 'spawn': if (mine) { pl.spawn({ x: ev.x, z: ev.z }, ev.yaw, CLASSES[this.pendingCls]); this.hud.hideDeath(); } break;
       case 'drop': if (Array.isArray(ev.p)) this.dropPickup(v3(ev.p), ev.id); break;
       case 'took': this.removePickup(ev.id); break;
       case 'roster': this.syncRoster(ev.r || []); break;
-      case 'end':
-        if (Array.isArray(ev.sc)) this.teamScore = ev.sc.slice(0, 2);
-        if (ev.lk) this.lastKill = ev.lk;
-        this.end();
-        break;
+      case 'end': if (Array.isArray(ev.sc)) this.teamScore = ev.sc.slice(0, 2); this.end(); break;
     }
   }
 
@@ -1224,7 +1150,6 @@ export class Game {
     for (const r of list) {
       if (r.id === this.player.id || this.byId.has(r.id)) continue;
       const n = new NetSoldier(this, r.id, r.team, r.name, r.human, false);
-      n.ghost = !!r.g;
       n.pos.set(r.x, 0, r.z); n.tgt.copy(n.pos);
       this.nets.push(n);
     }
@@ -1236,7 +1161,6 @@ export class Game {
     if (this.state !== 'playing') return;
     const pl = this.player, ars = this.arsenal;
     this.time += dt;
-    this.netTime = this.net?.active && !this.authority ? this.net.hostNow() : this.time;
     this.timeLeft = Math.max(0, this.timeLeft - dt);
     if (this.authority && this.timeLeft <= 0) { if (this.mode.kind === 'uc') this.mode.finish(false); else this.end(); return; }
     this.pathBudget = 4;
@@ -1297,8 +1221,6 @@ export class Game {
     } else {
       this.deadT -= dt;
       this.interact = null;
-      if (inp.jumpPressed || inp.firePressed) this.spectator.cycle(this, 1);
-      if (inp.adsPressed) this.spectator.cycle(this, -1);
       // Ground War: pick where to spawn with the number keys
       if (inp.digit && this.mode.kind === 'gw') {
         const o = this.mode.spawnOptions(pl.team)[inp.digit - 1];
@@ -1306,8 +1228,7 @@ export class Game {
       }
       if (this.authority && this.deadT <= 0) {
         const sp = this.pickSpawn(pl.team, pl);
-        pl.spawn(sp, sp.yaw, this.classFor(this.pendingCls));
-        this.syncKit();
+        pl.spawn(sp, sp.yaw, CLASSES[this.pendingCls]);
         this.hud.hideDeath();
       }
     }
@@ -1331,10 +1252,6 @@ export class Game {
     }
     if (this.authority && this.bots.length) this.aiCalls(dt);
     for (const n of this.nets) n.update(dt);
-    // the host keeps a short ring of every soldier, to rewind on a client's hit claim
-    if (this.role === 'host' && this.net.clients.size) {
-      for (const so of this.soldiers) (so.rewind ||= new Rewind()).push(this.time, so);
-    }
     for (const v of this.vehicles) v.update(dt);
     this.vehicles = this.vehicles.filter(v => v.alive || v.persistent);
     this.projectiles.update(dt);
@@ -1381,8 +1298,17 @@ export class Game {
   }
 
   deathCam(dt) {
-    this.spectator.update(dt, this, this.camera);
-    this.deathYaw = this.spectator.yaw;
+    const pl = this.player, cam = this.camera;
+    const k = Math.min(1, Math.max(0, (4 - this.deadT) / 0.6));
+    cam.position.set(pl.pos.x, pl.pos.y + 1.6 - 1.2 * k, pl.pos.z);
+    if (this.killer && this.killer.alive) {
+      _e.subVectors(this.killer.aimPoint(_c, false), cam.position);
+      const want = Math.atan2(-_e.x, -_e.z);
+      let d = want - this.deathYaw;
+      while (d > Math.PI) d -= 2 * Math.PI;
+      while (d < -Math.PI) d += 2 * Math.PI;
+      this.deathYaw += d * Math.min(1, dt * 3);
+      cam.rotation.set(Math.atan2(_e.y, Math.hypot(_e.x, _e.z)) * 0.8, this.deathYaw, 0.35 * k);
+    } else cam.rotation.set(-0.3 * k, this.deathYaw, 0.35 * k);
   }
-
 }

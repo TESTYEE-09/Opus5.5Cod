@@ -81,7 +81,6 @@ export class Hud {
       $('spawnSel').innerHTML = 'Spawn at: ' + opts.map((o, i) => `<span class="${(game.spawnChoice || 'auto') === o.id ? 'on' : ''}"><kbd>${i + 1}</kbd> ${o.id === 'base' ? 'Base' : o.id}</span>`).join(' ') +
         `${game.spawnChoice ? '' : ' <em>(auto: front line)</em>'}`;
     } else $('spawnSel').innerHTML = '';
-    if (!pl.alive) this.spectating(game);
   }
 
   // world markers on the overlay canvas: flags, the objective, suspicious guards
@@ -177,7 +176,7 @@ export class Hud {
     for (const e of game.soldiers) {
       if (!e.alive || e === pl) continue;
       const [x, z] = P(e.pos.x, e.pos.z);
-      if (e.team === pl.team) { g.fillStyle = '#6fb0ff'; g.beginPath(); g.arc(x, z, 3, 0, 7); g.fill(); } else if (!game.hidden(e) && (uav || game.time - e.firedT < 1.2)) { g.fillStyle = '#ff4a3a'; g.beginPath(); g.arc(x, z, 3, 0, 7); g.fill(); }
+      if (e.team === pl.team) { g.fillStyle = '#6fb0ff'; g.beginPath(); g.arc(x, z, 3, 0, 7); g.fill(); } else if (uav || game.time - e.firedT < 1.2) { g.fillStyle = '#ff4a3a'; g.beginPath(); g.arc(x, z, 3, 0, 7); g.fill(); }
     }
     for (const v of game.vehicles) {
       if (!v.alive || (v.team !== pl.team && !uav && v.kind === 'drone')) continue;
@@ -314,30 +313,7 @@ export class Hud {
     $('deathBy').innerHTML = killer ? `Killed by <b class="${killer.team === pl.team ? 'ally' : 'enemy'}">${esc(killer.name)}</b> &middot; ${esc(weapon)}` : `You killed yourself &middot; ${esc(weapon)}`;
   }
 
-  hideDeath() { $('death').classList.add('hidden'); $('spectate').className = ''; }
-
-  // The line under the death panel that says whose view you are watching.
-  spectating(game) {
-    const sp = game.spectator, el = $('spectate');
-    const s = sp.watching;
-    if (!s || sp.phase === 'drop') { el.className = ''; return; }
-    const kind = sp.phase === 'killcam' ? 'KILLCAM' : 'SPECTATING';
-    el.innerHTML = `<b>${kind}</b> <span class="${s.team === game.player.team ? 'ally' : 'enemy'}">${esc(s.name)}</span>`
-      + '<em>Click or Space: next &middot; right click: previous</em>';
-    el.className = 'show';
-  }
-
-  showOutro(killer, victim, weapon, pl) {
-    const el = $('outro');
-    el.innerHTML = `<div class="t">FINAL KILL</div><div class="s"><span class="${killer.team === pl.team ? 'ally' : 'enemy'}">${esc(killer === pl ? 'You' : killer.name)}</span>`
-      + ` &middot; ${esc(weapon)} &middot; <span class="${victim.team === pl.team ? 'ally' : 'enemy'}">${esc(victim === pl ? 'you' : victim.name)}</span></div>`;
-    el.className = 'show';
-    this.root.classList.add('hidden');
-    $('scoreboard').classList.add('hidden');
-    this.hideDeath();
-  }
-
-  hideOutro() { $('outro').className = ''; }
+  hideDeath() { $('death').classList.add('hidden'); }
 
   showEnd(game) {
     const a = game.teamScore[game.player.team], e = game.teamScore[1 - game.player.team];
@@ -529,7 +505,7 @@ export class Hud {
         g.lineTo(e.pos.x - fx * 1.1 + fz * 1.1, e.pos.z - fz * 1.1 - fx * 1.1);
         g.lineTo(e.pos.x - fx * 1.1 - fz * 1.1, e.pos.z - fz * 1.1 + fx * 1.1);
         g.fill();
-      } else if (!game.hidden(e) && (uav || game.time - e.firedT < 1.2)) {
+      } else if (uav || game.time - e.firedT < 1.2) {
         g.fillStyle = '#ff4a3a';
         g.beginPath(); g.arc(e.pos.x, e.pos.z, 1.2, 0, Math.PI * 2); g.fill();
       }
