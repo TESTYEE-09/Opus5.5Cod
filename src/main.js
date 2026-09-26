@@ -7,7 +7,8 @@ import { Atmosphere } from './atmosphere.js';
 import { Sfx } from './audio.js';
 import { Hud } from './hud.js';
 import { Game } from './game.js';
-import { CLASSES } from './weapons.js';
+import { CLASSES, CAMO_MATS } from './weapons.js';
+import { CAMOS, applyCamo } from './camo.js';
 import { DIFFICULTY } from './bots.js';
 import { Net, cleanName } from './net.js';
 import { daily, describe } from './challenges.js';
@@ -65,7 +66,7 @@ function loadMapById(id) {
 const game = new Game({ renderer, scene, camera, wscene, audio, hud, loadMap: loadMapById });
 
 // ---------- settings ----------
-const defaults = { sens: 1, fov: 80, vol: 0.7, difficulty: 'regular', cls: 'assault', name: '', map: 'crossroads', mode: 'gw', quality: 'high', blur: 0.5, scale: 1, dynres: true };
+const defaults = { sens: 1, fov: 80, vol: 0.7, difficulty: 'regular', cls: 'assault', name: '', map: 'crossroads', mode: 'gw', quality: 'high', camo: 'none', blur: 0.5, scale: 1, dynres: true };
 const matchRules = () => ({ scoreLimit: MODES[settings.mode].scoreLimit, timeLimit: MODES[settings.mode].timeLimit });
 let settings = { ...defaults };
 try { Object.assign(settings, JSON.parse(localStorage.getItem('frontline.settings') || '{}')); } catch { /* storage unavailable */ }
@@ -114,12 +115,24 @@ function renderClassCards() {
     `<button class="${k === settings.mode ? 'on' : ''}" data-gm="${k}"${net.active && !net.isHost ? ' disabled' : ''}>${m.name}</button>`).join('');
   $('modeName').textContent = MODES[settings.mode].name;
   const pr = profile();
-  $('rankLine').innerHTML = `Rank <b>${pr.level}</b> &middot; ${pr.title}` + (pr.next ? ` &middot; ${pr.cur.toLocaleString()} / ${pr.next.toLocaleString()} XP` : ' &middot; max rank');
+  const nextCamo = CAMOS.find(c => c.rank > pr.level);
+  $('rankLine').innerHTML = `Rank <b>${pr.level}</b> &middot; ${pr.title}` + (pr.next ? ` &middot; ${pr.cur.toLocaleString()} / ${pr.next.toLocaleString()} XP` : ' &middot; max rank') +
+    (nextCamo ? ` &middot; next unlock: ${nextCamo.name} camo at rank ${nextCamo.rank}` : '');
+  if (!CAMOS.some(c => c.id === settings.camo && c.rank <= pr.level)) settings.camo = 'none';
+  $('camos').innerHTML = CAMOS.map(c => `<button class="camo camo-${c.id}${c.id === settings.camo ? ' on' : ''}${c.rank > pr.level ? ' locked' : ''}" data-camo="${c.id}"${c.rank > pr.level ? ' disabled' : ''}>` +
+    `<b>${c.name}</b><span>${c.rank > pr.level ? `Rank ${c.rank}` : c.id === settings.camo ? 'Equipped' : 'Unlocked'}</span></button>`).join('');
+  applyCamo(settings.camo, CAMO_MATS);
   const dl = daily();
   $('daily').innerHTML = `<h3>Daily challenges${dl.streak > 1 ? ` &middot; ${dl.streak}-day streak` : ''}${dl.bonusReady ? ' &middot; <b>first match today: double XP</b>' : ''}</h3>` +
     dl.list.map(c => `<div class="chal${c.done ? ' done' : ''}"><span>${describe(c)}</span><i style="width:${Math.round(c.have / c.goal * 100)}%"></i><b>${c.done ? 'DONE' : `${c.have}/${c.goal}`} &middot; ${c.xp.toLocaleString()} XP</b></div>`).join('');
   $('deploy').textContent = MODES[settings.mode].coop ? 'PLAY SOLO MISSION' : 'PLAY SOLO';
 }
+
+$('camos').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-camo]');
+  if (!b || b.disabled) return;
+  settings.camo = b.dataset.camo; save(); audio.init(); audio.ui(); renderClassCards();
+});
 
 $('classes').addEventListener('click', (e) => {
   const b = e.target.closest('[data-cls]');

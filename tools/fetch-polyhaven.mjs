@@ -23,7 +23,7 @@ for (const id of new Set(Object.values(TEXTURES).map(t => t.id))) {
   await get(f.nor_gl['1k'].jpg.url, `public/tex/${id}_nor.jpg`);
   await get(f.arm['1k'].jpg.url, `public/tex/${id}_arm.jpg`);
 }
-for (const m of new Set(Object.values(MODELS).map(m => m.id))) {
+for (const m of new Set(Object.values(MODELS).filter(m => m.id).map(m => m.id))) {
   const g = (await api(m)).gltf['1k'].gltf;
   await get(g.url, `public/models/${m}/${m}.gltf`);
   for (const [rel, v] of Object.entries(g.include)) await get(v.url, `public/models/${m}/${rel}`);

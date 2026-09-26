@@ -774,7 +774,7 @@ export const MAPS = {
     audio: { decay: 1.1, wet: 0.24, tone: 3800, amb: 'rain' },
   },
   crossroads: {
-    name: 'Crossroads', desc: '600 m of desert: the town at the junction, walled villages, farmland, five flags.', seed: 7, hills: 48, size: BIG, teamSize: 12,
+    name: 'Crossroads', desc: '600 m of desert: the town at the junction, walled villages, farmland, five flags.', seed: 7, hills: 48, size: BIG, teamSize: 12, land: 'desert', relief: 11, ramp: 18,
     modes: ['gw', 'uc'],
     layout(B, M) {
       groundWar(B, M, {
@@ -799,7 +799,7 @@ export const MAPS = {
     audio: { decay: 1.3, wet: 0.22, tone: 5200, amb: 'wind' },
   },
   harbor: {
-    name: 'Harbor', desc: 'A 600 m port at sunset: container yards, warehouses, gantry cranes, five flags.', seed: 21, size: BIG, teamSize: 12,
+    name: 'Harbor', desc: 'A 600 m port at sunset: container yards, warehouses, gantry cranes, five flags.', seed: 21, size: BIG, teamSize: 12, land: 'port', relief: 4, ramp: 14,
     modes: ['gw', 'uc'],
     layout(B, M) {
       groundWar(B, M, {
@@ -827,7 +827,7 @@ export const MAPS = {
     audio: { decay: 1.9, wet: 0.3, tone: 4200, amb: 'harbor' },
   },
   outpost: {
-    name: 'Outpost', desc: 'A 600 m snowbound valley: the mountain base, cabins, pine forest, five flags.', seed: 33, hills: 75, size: BIG, teamSize: 12,
+    name: 'Outpost', desc: 'A 600 m snowbound valley: the mountain base, cabins, pine forest, five flags.', seed: 33, hills: 75, size: BIG, teamSize: 12, land: 'snow', relief: 16, ridges: true, ramp: 20,
     modes: ['gw', 'uc'],
     layout(B, M) {
       groundWar(B, M, {

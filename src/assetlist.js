@@ -22,6 +22,10 @@ export const TEXTURES = {
   'ground:dirt': { id: 'dry_ground_01' },
   'ground:slab': { id: 'concrete_floor_worn_001' },
   'ground:snow': { id: 'snow_02' },
+  // steep slopes, per land
+  'rock:desert': { id: 'rocks_ground_06' },
+  'rock:snow': { id: 'snow_field_aerial' },
+  'rock:port': { id: 'rocky_trail' },
 };
 
 export const MODELS = {
@@ -36,4 +40,15 @@ export const MODELS = {
   cardboard: { id: 'cardboard_box_01' },
   trashbag: { id: 'trashbag' },
   cement: { id: 'cement_bag' },
+  // vegetation and rocks: Poly Haven scans cut down to game budgets in Blender
+  // (tools/veg/*.py): trees thinned and decimated, conifers rebuilt from baked branch cards
+  conifer: { file: 'veg/conifer.glb', variants: true, wind: 0.0016, windFrom: 2 },
+  olive1: { file: 'veg/island_tree_01.glb', wind: 0.004, windFrom: 1.5 },
+  olive2: { file: 'veg/island_tree_02.glb', wind: 0.004, windFrom: 1.5 },
+  boulderA: { file: 'veg/namaqualand_boulder_02.glb' },
+  boulderB: { file: 'veg/namaqualand_boulder_04.glb' },
+  mossrock: { file: 'veg/rock_moss_set_01.glb', variants: true },
+  deadtrunk: { file: 'veg/dead_tree_trunk.glb' },
+  stump: { file: 'veg/tree_stump_01.glb' },
+  branches: { file: 'veg/dry_branches_medium_01.glb' },
 };

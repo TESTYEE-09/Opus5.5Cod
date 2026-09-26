@@ -536,19 +536,26 @@ export function buildProp(kit, type, o, seed) {
 // Props that have a scanned model (assets.js) are placed as model instances instead of being
 // built from primitives. Returns world placements for instanceProps(), or null to fall back.
 const SCANNED = {
-  barrel: (o) => [{ type: 'barrel' }],
-  tires: (o, R, md) => Array.from({ length: o.n || 3 }, (_, i) => ({ type: 'tires', x: R() * 0.08, z: R() * 0.08, y: i * md.tires.size.y, rot: R() * 6 })),
+  barrel: (o, R, md) => md.barrel ? [{ type: 'barrel' }] : null,
+  tires: (o, R, md) => !md.tires ? null : Array.from({ length: o.n || 3 }, (_, i) => ({ type: 'tires', x: R() * 0.08, z: R() * 0.08, y: i * md.tires.size.y, rot: R() * 6 })),
   jersey: (o, R, md) => {
+    if (!md.jersey) return null;
     const l = o.len || 3, n = Math.max(1, Math.round(l / md.jersey.size.x)), piece = l / n;
     return Array.from({ length: n }, (_, i) => ({ type: 'jersey', z: -l / 2 + piece * (i + 0.5), rot: Math.PI / 2, sx: piece / md.jersey.size.x }));
   },
-  rock: (o, R, md) => o.snow ? null : [{ type: 'rock', rot: R() * 6, s: (o.r || 1.5) * 1.9 / md.rock.size.z }],
-  pallets: (o, R, md) => Array.from({ length: Math.max(1, Math.ceil((o.n || 4) / 2)) }, (_, i) => ({ type: 'pallets', y: i * md.pallets.size.y, rot: Math.PI / 2 + (R() - 0.5) * 0.15 })),
+  rock: (o, R, md) => !md.rock ? null : [{ type: 'rock', rot: R() * 6, s: (o.r || 1.5) * 1.9 / md.rock.size.z }],
+  // the procedural pines and olives become scanned conifers and olive trees
+  pine: (o, R, md) => md.conifer ? [{ type: `conifer:${Math.floor(R() * md.conifer.n)}`, rot: R() * 6.28, s: (o.h || 7 + R() * 5) / md.conifer.size.y * 1.3 }] : null,
+  olive: (o, R, md) => md.olive1 ? [{ type: R() < 0.5 ? 'olive1' : 'olive2', rot: R() * 6.28, s: (o.s || 0.9 + R() * 0.5) * 0.9 }] : null,
+  // the far woods use the lightest conifer
+  farTree: (o, R, md) => o.snow && md.conifer ? [{ type: 'conifer:0', rot: R() * 6.28, s: 0.9 + R() * 0.7 }]
+    : md.olive1 ? [{ type: R() < 0.5 ? 'olive1' : 'olive2', rot: R() * 6.28, s: 1.2 + R() * 0.5 }] : null,
+  pallets: (o, R, md) => !md.pallets ? null : Array.from({ length: Math.max(1, Math.ceil((o.n || 4) / 2)) }, (_, i) => ({ type: 'pallets', y: i * md.pallets.size.y, rot: Math.PI / 2 + (R() - 0.5) * 0.15 })),
 };
 
 export function scannedProp(p, seed, md) {
   const fn = SCANNED[p.type];
-  if (!fn || !md[p.type]) return null;
+  if (!fn) return null;
   const parts = fn(p, mulberry(seed), md);
   if (!parts) return null;
   const c = Math.cos(p.rot || 0), s = Math.sin(p.rot || 0);

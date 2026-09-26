@@ -120,6 +120,8 @@ const M = {
   shell: std({ color: 0xa02a20, roughness: 0.5, metalness: 0.1 }),
 };
 M.tube = M.metal.clone(); M.tube.side = THREE.DoubleSide;
+// the parts a camo repaints
+export const CAMO_MATS = [M.poly, M.tan, M.od, M.wood];
 
 const reticleTex = (() => {
   const c = document.createElement('canvas'); c.width = c.height = 256;

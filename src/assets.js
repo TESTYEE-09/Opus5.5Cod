@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { TEXTURES, MODELS } from './assetlist.js';
+import { addWind } from './nature.js';
 
 const base = import.meta.env.BASE_URL;
 const texLoader = new THREE.TextureLoader();
@@ -45,9 +46,7 @@ export function applyPbr(mat, set, { metal = 0 } = {}) {
 export const models = {};
 const ready = { tex: new Set() };
 
-async function loadModel(type, d, loader) {
-  const gltf = await loader.loadAsync(`${base}models/${d.id}/${d.id}.gltf`);
-  const root = gltf.scene;
+function partsOf(root, d) {
   root.updateMatrixWorld(true);
   const byMat = new Map();
   root.traverse((o) => {
@@ -65,12 +64,27 @@ async function loadModel(type, d, loader) {
     g.computeBoundingBox();
     box.union(g.boundingBox);
     for (const t of [mat.map, mat.normalMap, mat.roughnessMap, mat.aoMap]) if (t) t.anisotropy = anisotropy;
+    // leaves and needles: alpha-tested cards, lit from both sides
+    if (mat.transparent || mat.alphaTest > 0) { mat.transparent = false; mat.alphaTest = 0.5; mat.side = THREE.DoubleSide; mat.depthWrite = true; }
     parts.push({ geometry: g, material: mat });
   }
   // sit on y = 0, centred in x and z
   const c = box.getCenter(new THREE.Vector3());
-  for (const p of parts) p.geometry.translate(-c.x, -box.min.y, -c.z);
-  models[type] = { parts, size: box.getSize(new THREE.Vector3()) };
+  for (const p of parts) { p.geometry.translate(-c.x, -box.min.y, -c.z); p.geometry.computeBoundingSphere(); }
+  return { parts, size: box.getSize(new THREE.Vector3()) };
+}
+
+async function loadModel(type, d, loader) {
+  const gltf = await loader.loadAsync(d.file ? `${base}models/${d.file}` : `${base}models/${d.id}/${d.id}.gltf`);
+  const roots = d.variants ? gltf.scene.children.slice() : [gltf.scene];
+  roots.forEach((r, i) => {
+    if (d.variants) r.position.set(0, 0, 0);
+    const md = partsOf(r, d);
+    if (d.wind) for (const p of md.parts) addWind(p.material, d.wind, d.windFrom || 0);
+    md.n = roots.length;
+    if (i === 0) models[type] = md;
+    models[`${type}:${i}`] = md;
+  });
 }
 
 async function probe(id) {
@@ -91,7 +105,7 @@ export async function loadAssets(onProgress = () => {}) {
 
 // Places scanned props: one InstancedMesh per model part for a list of placements
 // { type, x, y, z, rot, s }. Returns the meshes.
-export function instanceProps(list) {
+export function instanceProps(list, shadows = true) {
   const byType = {};
   for (const p of list) (byType[p.type] ||= []).push(p);
   const out = [], m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), sc = new THREE.Vector3();
@@ -104,7 +118,7 @@ export function instanceProps(list) {
         m.compose(v.set(p.x, p.y || 0, p.z), q.setFromEuler(e.set(p.tilt || 0, p.rot || 0, 0, 'YXZ')), sc.set(p.sx || s, s, p.sz || s));
         im.setMatrixAt(i, m);
       });
-      im.castShadow = im.receiveShadow = true;
+      im.castShadow = shadows; im.receiveShadow = true;
       im.computeBoundingSphere();
       out.push(im);
     }

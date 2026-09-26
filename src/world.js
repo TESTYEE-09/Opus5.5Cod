@@ -7,6 +7,8 @@ import { surface, R, macroNoise, mulberry, logoAtlas } from './textures.js';
 import { PlanarReflection } from './reflect.js';
 import { Kit, kitMaterials, buildProp, scannedProp } from './props.js';
 import { pbrSet, applyPbr, models, instanceProps } from './assets.js';
+import { playH, playNormal, buildTerrain, hasTerrain, vnoise } from './terrain.js';
+import { scatterNature, buildFoliage, tickFoliage } from './nature.js';
 
 // The map size changes per map (Shipment is tiny, the Ground War maps are huge), so SIZE, N
 // and NAV are live bindings that loadMap() resets.
@@ -118,7 +120,7 @@ export function overlaps(x, z, r, lo, hi) {
 }
 
 export function pointSolid(x, y, z) {
-  if (y < 0) return true;
+  if (y < 0 || y < playH(x, z)) return true;
   const sp = cellSpans(Math.floor(x / CELL), Math.floor(z / CELL));
   if (!sp) return false;
   for (const s of sp) if (y >= s[0] && y <= s[1]) return true;
@@ -127,7 +129,7 @@ export function pointSolid(x, y, z) {
 
 // Highest surface at or below maxY under a circle of radius r.
 export function groundAt(x, z, r, maxY) {
-  let g = 0;
+  let g = playH(x, z);
   const i0 = Math.floor((x - r) / CELL), i1 = Math.floor((x + r) / CELL);
   const k0 = Math.floor((z - r) / CELL), k1 = Math.floor((z + r) / CELL);
   for (let k = k0; k <= k1; k++) for (let i = i0; i <= i1; i++) {
@@ -227,8 +229,20 @@ export function raycastWorld(o, d, maxT) {
     if (ix < 0 || iz < 0 || ix >= N || iz >= N) break;
     const tExit = Math.min(tmx, tmz, limit);
     const sp = cells[iz * N + ix];
+    // the rolling ground: sampled at the ray's entry and exit of this cell
+    let tTer = Infinity;
+    if (hasTerrain() && d.y < 0.5) {
+      const ye = o.y + d.y * tEnter, yx = o.y + d.y * tExit;
+      const he = playH(o.x + d.x * tEnter, o.z + d.z * tEnter), hx = playH(o.x + d.x * tExit, o.z + d.z * tExit);
+      if (ye <= he) tTer = tEnter;
+      else if (yx <= hx) tTer = tEnter + (tExit - tEnter) * (ye - he) / Math.max(1e-6, (ye - he) - (yx - hx));
+    }
+    if (tTer <= limit && !sp) {
+      const p = playNormal(o.x + d.x * tTer, o.z + d.z * tTer, _n);
+      return { t: tTer, normal: new THREE.Vector3(p.x, p.y, p.z) };
+    }
     if (sp) {
-      let best = Infinity, top = false;
+      let best = tTer, top = false, ter = tTer < Infinity;
       for (const s of sp) {
         let a, b;
         if (Math.abs(d.y) < 1e-9) {
@@ -239,10 +253,11 @@ export function raycastWorld(o, d, maxT) {
           if (a > b) [a, b] = [b, a];
         }
         const st = Math.max(a, tEnter), en = Math.min(b, tExit);
-        if (st <= en && st < best) { best = st; top = a > tEnter; }
+        if (st <= en && st < best) { best = st; top = a > tEnter; ter = false; }
       }
       if (best <= limit) {
-        if (top) _n.set(0, d.y > 0 ? -1 : 1, 0);
+        if (ter) { const p = playNormal(o.x + d.x * best, o.z + d.z * best, _n); _n.set(p.x, p.y, p.z); }
+        else if (top) _n.set(0, d.y > 0 ? -1 : 1, 0);
         else if (axis === 0) _n.set(-sx, 0, 0);
         else if (axis === 2) _n.set(0, 0, -sz);
         else _n.copy(d).negate();
@@ -270,7 +285,35 @@ export function lineOfSight(a, b) {
 // Height of the land outside the play area (the play area itself is flat at 0).
 let hillAmp = 0;
 export function terrainY(x, z) {
-  if (!hillAmp) return 0;
+  return playH(x, z) + hillsY(x, z);
+}
+
+// mountain peaks on the horizon: [x, z, radius, height], raised into the far hills
+let peaks = [], peakStyle = 'peak';
+function peaksY(x, z) {
+  let h = 0;
+  for (const [px, pz, r, ph] of peaks) {
+    const dx = x - px, dz = z - pz, d2 = dx * dx + dz * dz;
+    if (d2 >= r * r * 1.4) continue;
+    // an irregular footprint, then a massif: broad shoulders, sub-peaks and ridged gullies
+    const re = r * (0.75 + 0.5 * vnoise(x / 260, z / 260, 90));
+    const t = 1 - Math.sqrt(d2) / re;
+    if (t <= 0) continue;
+    const sub = vnoise(x / 140, z / 140, 93), rn = 1 - Math.abs(vnoise(x / 60, z / 60, 91) * 2 - 1), rn2 = 1 - Math.abs(vnoise(x / 19, z / 19, 92) * 2 - 1);
+    // desert: stepped mesas with flat tops; elsewhere peaked massifs
+    const m = Math.min(1, t / 0.38), mesa = m * m * (3 - 2 * m) * (0.85 + 0.15 * Math.round(t * 3) / 3);
+    const shape = peakStyle === 'mesa' ? mesa : t * t * (3 - 2 * t) * 0.55 + t ** 2.2 * 0.45;
+    h = Math.max(h, ph * shape * (0.45 + 0.35 * sub + 0.15 * rn + 0.05 * rn2));
+  }
+  return h;
+}
+
+// the far hills beyond the play area (0 inside it)
+function hillsY(x, z) {
+  if (!hillAmp) return peaks.length ? peaksY(x, z) : 0;
+  return hills0(x, z) + (peaks.length ? peaksY(x, z) : 0);
+}
+function hills0(x, z) {
   const d = Math.hypot(x - SIZE / 2, z - SIZE / 2);
   let k = (d - Math.max(SIZE / 2 + 110, SIZE * 0.72)) / 260;
   if (k <= 0) return 0;
@@ -289,8 +332,10 @@ export let NAV = SIZE;
 let walk = new Uint8Array(NAV * NAV);
 
 function navFree(i, k) {
+  const base = playH(i + 0.5, k + 0.5);
+  if (hasTerrain() && Math.abs(playH(i + 1, k + 0.5) - playH(i, k + 0.5)) + Math.abs(playH(i + 0.5, k + 1) - playH(i + 0.5, k)) > 1.3) return 0;
   for (let dk = 0; dk < 2; dk++) for (let di = 0; di < 2; di++) {
-    if (blocks(cellSpans(i * 2 + di, k * 2 + dk), 0.05, 1.9)) return 0;
+    if (blocks(cellSpans(i * 2 + di, k * 2 + dk), base + 0.05, base + 1.9)) return 0;
   }
   return 1;
 }
@@ -425,23 +470,26 @@ export function randomWalkable(zMin = 1, zMax = SIZE - 1) {
 // ---------- materials ----------
 // World-space variation (breaks up texture tiling) and a darkening band near the ground,
 // injected into the standard material so every surface keeps full PBR lighting.
-export function enhance(mat, { macro = 0.2, groundAO = 0, wet = null } = {}) {
+export function enhance(mat, { macro = 0.2, groundAO = 0, wet = null, rock = null } = {}) {
   const tex = macroNoise();
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uMacro = { value: tex };
+    if (rock) Object.assign(sh.uniforms, { uRock: { value: rock.map }, uRockN: { value: rock.normalMap } });
     if (wet) Object.assign(sh.uniforms, wet.uniforms);
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', `#include <common>\nvarying vec3 vWPos;${wet ? '\nvarying vec4 vReflPos;\nuniform mat4 uReflMat;' : ''}`)
+      .replace('#include <common>', `#include <common>\nvarying vec3 vWPos;${wet ? '\nvarying vec4 vReflPos;\nuniform mat4 uReflMat;' : ''}${rock ? '\nattribute float slope;\nvarying float vSlope;' : ''}`)
       .replace('#include <project_vertex>', `#include <project_vertex>
         #ifdef USE_INSTANCING
           vWPos = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;
         #else
           vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
         #endif
-        ${wet ? 'vReflPos = uReflMat * vec4(vWPos, 1.0);' : ''}`);
+        ${wet ? 'vReflPos = uReflMat * vec4(vWPos, 1.0);' : ''}${rock ? 'vSlope = slope;' : ''}`);
     let fs = sh.fragmentShader
-      .replace('#include <common>', `#include <common>\nvarying vec3 vWPos;\nuniform sampler2D uMacro;${wet ? '\nvarying vec4 vReflPos;\nuniform sampler2D tRefl;\nuniform vec4 uWet;\nuniform float uTime;' : ''}`)
+      .replace('#include <common>', `#include <common>\nvarying vec3 vWPos;\nuniform sampler2D uMacro;${rock ? '\nuniform sampler2D uRock, uRockN;\nvarying float vSlope;\nfloat rockW;' : ''}${wet ? '\nvarying vec4 vReflPos;\nuniform sampler2D tRefl;\nuniform vec4 uWet;\nuniform float uTime;' : ''}`)
       .replace('#include <map_fragment>', `#include <map_fragment>
+        ${rock ? `rockW = smoothstep(0.1, 0.24, vSlope + (texture2D(uMacro, vWPos.xz * 0.05).r - 0.5) * 0.12);
+        diffuseColor.rgb = mix(diffuseColor.rgb, texture2D(uRock, vWPos.xz / 5.0).rgb, rockW);` : ''}
         float mN = texture2D(uMacro, vWPos.xz * 0.012 + vec2(vWPos.y * 0.017)).r * 0.6 + texture2D(uMacro, vWPos.zy * 0.047 + vec2(vWPos.x * 0.013)).r * 0.4;
         diffuseColor.rgb *= clamp(1.0 + (mN - 0.5) * ${(macro * 4).toFixed(3)}, 0.0, 2.0);
         ${groundAO ? `diffuseColor.rgb *= mix(${(1 - groundAO).toFixed(3)}, 1.0, smoothstep(0.0, 1.4, vWPos.y));` : ''}
@@ -462,7 +510,7 @@ export function enhance(mat, { macro = 0.2, groundAO = 0, wet = null } = {}) {
     }
     sh.fragmentShader = fs;
   };
-  mat.customProgramCacheKey = () => `enh${macro}_${groundAO}_${wet ? 'w' : ''}`;
+  mat.customProgramCacheKey = () => `enh${macro}_${groundAO}_${wet ? 'w' : ''}${rock ? 'r' : ''}`;
   return mat;
 }
 
@@ -651,6 +699,9 @@ export function materialAt(p, n) {
 
 // ---------- map loading ----------
 export const props = [];
+let nature = { models: [], cards: [] };
+// props that grow out of the ground rather than stand on a levelled spot
+const NATURAL = new Set(['pine', 'palm', 'olive', 'rock', 'farTree', 'mountain']);
 let group = null, waterMat = null, materials = [], matFor = null, kmats = null;
 export let mapDef = null;
 let reflection = null;
@@ -669,7 +720,7 @@ function chunkFor(x, z, always = false) {
   const key = always ? 'always' : `${far ? 'f' : 'n'}${cx},${cz}`;
   let ch = chunks.get(key);
   if (!ch) {
-    ch = { far: far || always, x: (cx + 0.5) * s, z: (cz + 0.5) * s, group: new THREE.Group(), stat: new THREE.Group(), near: new THREE.Group(), dyn: new THREE.Group(), dynNear: new THREE.Group(), objs: [], boxes: [], props: [], clutter: [] };
+    ch = { far: far || always, x: (cx + 0.5) * s, z: (cz + 0.5) * s, group: new THREE.Group(), stat: new THREE.Group(), near: new THREE.Group(), dyn: new THREE.Group(), dynNear: new THREE.Group(), objs: [], boxes: [], props: [], clutter: [], cards: [] };
     ch.group.add(ch.stat, ch.near, ch.dyn, ch.dynNear);
     chunks.set(key, ch); chunkList.push(ch); group.add(ch.group);
   }
@@ -794,9 +845,11 @@ export function loadMap(scene, def) {
   spawns[0].length = 0; spawns[1].length = 0; interest.length = 0;
   mapDef = def;
   hillAmp = def.hills || 0;
+  peaks = []; peakStyle = def.land === 'desert' ? 'mesa' : 'peak';
 
   const api = makeApi();
   def.layout(api, mirrorApi(api));
+
   const per = def.perimeter || {};
   const pm = per.mat || 'wall', ph = per.h || 6;
   const E = SIZE, E1 = SIZE - 1;
@@ -807,6 +860,28 @@ export function loadMap(scene, def) {
   } else { addBox(0, 0, 1, 1, ph, E1, pm); addBox(E1, 0, 1, E, ph, E1, pm); }
   if (ph < 6) { addBox(0, ph, 0, E, 6, 1, 'invis'); addBox(0, ph, E1, E, 6, E, 'invis'); if (!per.quay) { addBox(0, ph, 1, 1, 6, E1, 'invis'); addBox(E1, ph, 1, E, 6, E1, 'invis'); } }
   if (def.backdrop) def.backdrop(api, mulberry(def.seed || 7));
+  // real terrain replaces the cone mountains, and the far woods sit on it
+  if (def.land) for (let i = props.length - 1; i >= 0; i--) {
+    const m = props[i];
+    if (m.type === 'mountain') { peaks.push([m.x, m.z, m.r * 1.5, m.h * (def.land === 'desert' ? 0.55 : 1.1)]); props.splice(i, 1); }
+    else if (m.type === 'farTree' && peaks.length) m.y = terrainY(m.x, m.z) - 0.3;
+  }
+
+  // rolling ground, pressed flat under everything built, then trees, rocks and grass on it
+  const pads = [];
+  for (const b of boxes) {
+    if (b.x0 <= 0.5 || b.z0 <= 0.5 || b.x1 >= SIZE - 0.5 || b.z1 >= SIZE - 0.5) continue;
+    pads.push([b.x0, b.z0, b.x1, b.z1, 2.5]);
+  }
+  for (const p of props) if (p.y === undefined && !NATURAL.has(p.type)) pads.push([p.x - 1, p.z - 1, p.x + 1, p.z + 1, 1.5]);
+  for (const f of flags) pads.push([f.x - 8, f.z - 8, f.x + 8, f.z + 8, 3]);
+  for (const t of spawns) for (const sp of t) pads.push([sp.x - 3, sp.z - 3, sp.x + 3, sp.z + 3, 3]);
+  for (const st of sites) pads.push([st.x - (st.r || 2) - 3, st.z - (st.r || 2) - 3, st.x + (st.r || 2) + 3, st.z + (st.r || 2) + 3, 3]);
+  for (const r of def.patches || []) pads.push([r.x0, r.z0, r.x1, r.z1, 2]);
+  // roads run level, cut through the hills
+  for (const r of def.roads || []) pads.push([r.x0, r.z0, r.x1, r.z1, 1.5]);
+  buildTerrain({ size: SIZE, relief: def.relief || 0, seed: def.seed || 7, ridges: def.ridges, ramp: def.ramp, pads });
+  nature = scatterNature(def, { addBox, overlaps, roads: def.roads || [], mulberry, SIZE });
 
   // snow settles on every exposed top (and falls with whatever it sits on)
   if (def.snowCaps) {
@@ -839,7 +914,9 @@ export function loadMap(scene, def) {
     const big = b.x1 - b.x0 > CH * 1.5 || b.z1 - b.z0 > CH * 1.5;
     chunkFor((b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2, big).boxes.push(b);
   }
-  props.forEach((p, i) => { p.seed = (def.seed || 7) * 1000 + i; if (!(p.obj >= 0)) chunkFor(p.x, p.z).props.push(p); });
+  props.forEach((p, i) => { p.seed = (def.seed || 7) * 1000 + i; if (p.y === undefined) p.y = playH(p.x, p.z); if (!(p.obj >= 0)) chunkFor(p.x, p.z).props.push(p); });
+  for (const n of nature.models) chunkFor(n.x, n.z).clutter.push(n);
+  for (const n of nature.cards) chunkFor(n.x, n.z).cards.push(n);
   for (const o of objects) {
     if (o.x0 === Infinity) for (const p of o.props) { o.x0 = Math.min(o.x0, p.x - 0.4); o.x1 = Math.max(o.x1, p.x + 0.4); o.z0 = Math.min(o.z0, p.z - 0.4); o.z1 = Math.max(o.z1, p.z + 0.4); o.y0 = 0; o.y1 = 1; }
     const ch = chunkFor((o.x0 + o.x1) / 2, (o.z0 + o.z1) / 2);
@@ -854,17 +931,23 @@ export function loadMap(scene, def) {
   const gt = surface(`${gd.recipe}:${JSON.stringify(gd.args || [])}`, R[gd.recipe](...(gd.args || [])), { size: 1024, seed: 5, normal: gd.normal ?? 1.5 });
   // one big sheet out to the horizon: flat under the play area, rolling hills beyond it
   const gw = gd.w || 4200, gl = gd.l || 4200;
-  const seg = hillAmp ? 200 : 1;
+  const seg = hillAmp || peaks.length ? 280 : 1;
   const groundGeo = new THREE.PlaneGeometry(gw, gl, gd.w ? 1 : seg, gd.l && !gd.w ? 1 : seg);
   groundGeo.attributes.uv.array.forEach((v, i, a) => { a[i] = v * (i % 2 ? gl : gw) / gd.ts; });
-  if (hillAmp) {
+  const outerRock = def.land && pbrSet(`rock:${def.land}`);
+  if (hillAmp || peaks.length) {
     const pa = groundGeo.attributes.position;
-    for (let i = 0; i < pa.count; i++) pa.setZ(i, terrainY(SIZE / 2 + pa.getX(i), SIZE / 2 - pa.getY(i)));
+    for (let i = 0; i < pa.count; i++) pa.setZ(i, hillsY(SIZE / 2 + pa.getX(i), SIZE / 2 - pa.getY(i)));
     groundGeo.computeVertexNormals();
+  }
+  if (outerRock) {
+    const na = groundGeo.attributes.normal, sl = new Float32Array(na.count);
+    for (let i = 0; i < na.count; i++) sl[i] = 1 - na.getZ(i);
+    groundGeo.setAttribute('slope', new THREE.BufferAttribute(sl, 1));
   }
   if (def.wet) reflection = new PlanarReflection(def.wet);
   const floors = [];
-  const groundMat = enhance(new THREE.MeshStandardMaterial({ map: gt.map, normalMap: gt.normalMap, roughness: gd.rough ?? 0.97, metalness: gd.metal ?? 0 }), { macro: 0.3, wet: reflection });
+  const groundMat = enhance(new THREE.MeshStandardMaterial({ map: gt.map, normalMap: gt.normalMap, roughness: gd.rough ?? 0.97, metalness: gd.metal ?? 0 }), { macro: 0.3, wet: reflection, rock: outerRock || null });
   const gscan = pbrSet(`ground:${gd.recipe}`);
   if (gscan) applyPbr(groundMat, gscan);
   materials.push(groundMat);
@@ -873,22 +956,52 @@ export function loadMap(scene, def) {
   ground.position.set(SIZE / 2 + (gd.dx || 0), 0, SIZE / 2 + (gd.dz || 0));
   ground.receiveShadow = true;
   group.add(ground); floors.push(ground);
+  if (hasTerrain()) {
+    // the play area's own ground at 1-1.5 m resolution, drawn over the big sheet
+    const seg = Math.min(SIZE, 420), step = SIZE / seg;
+    const tg = new THREE.PlaneGeometry(SIZE, SIZE, seg, seg);
+    tg.rotateX(-Math.PI / 2); tg.translate(SIZE / 2, 0, SIZE / 2);
+    const pa = tg.attributes.position, uva = tg.attributes.uv, slope = new Float32Array(pa.count), nv = { x: 0, y: 0, z: 0 };
+    for (let i = 0; i < pa.count; i++) {
+      const x = pa.getX(i), z = pa.getZ(i);
+      pa.setY(i, playH(x, z));
+      uva.setXY(i, x / gd.ts, -z / gd.ts);
+      slope[i] = 1 - playNormal(x, z, nv).y;
+    }
+    tg.setAttribute('slope', new THREE.BufferAttribute(slope, 1));
+    tg.computeVertexNormals();
+    const tm = groundMat.clone();
+    tm.polygonOffset = true; tm.polygonOffsetFactor = -1; tm.polygonOffsetUnits = -2;
+    const rock = pbrSet(`rock:${def.land}`);
+    enhance(tm, { macro: 0.3, rock });
+    materials.push(tm);
+    const tmesh = new THREE.Mesh(tg, tm);
+    tmesh.receiveShadow = true;
+    group.add(tmesh); floors.push(tmesh);
+    void step;
+  }
 
-  // roads: u across, v along the road
+  // roads: u across, v along the road; built on the ground so they follow the hills
   let ry = 0.008;
   for (const r of def.roads || []) {
     const along = r.z1 - r.z0 >= r.x1 - r.x0;
     const w = along ? r.x1 - r.x0 : r.z1 - r.z0, l = along ? r.z1 - r.z0 : r.x1 - r.x0;
     const recipe = r.kind || 'road';
     const t = surface(`${recipe}:[]`, R[recipe](), { seed: 9, normal: 1.2 });
-    const g = new THREE.PlaneGeometry(w, l);
-    const uv = g.attributes.uv;
-    for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i), uv.getY(i) * l / w);
-    const m = enhance(new THREE.MeshStandardMaterial({ map: t.map, normalMap: t.normalMap, roughness: 0.92, transparent: !!r.alpha, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }), { macro: 0.25, wet: reflection });
+    const nl = Math.max(1, Math.ceil(l / 1.5)), nw = Math.max(1, Math.ceil(w / 1.5));
+    const g = new THREE.PlaneGeometry(1, 1, nw, nl);
+    const pa = g.attributes.position, uv = g.attributes.uv;
+    for (let i = 0; i < pa.count; i++) {
+      const u = pa.getX(i) + 0.5, v = pa.getY(i) + 0.5;
+      const x = along ? r.x0 + u * w : r.x0 + v * l, z = along ? r.z1 - v * l : r.z0 + u * w;
+      pa.setXYZ(i, x, playH(x, z) + ry, z);
+      uv.setXY(i, u, v * l / w);
+    }
+    g.computeVertexNormals();
+    if (g.attributes.normal.getY(0) < 0) { g.index.array.reverse(); g.computeVertexNormals(); }
+    const m = enhance(new THREE.MeshStandardMaterial({ map: t.map, normalMap: t.normalMap, roughness: 0.92, transparent: !!r.alpha, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }), { macro: 0.25, wet: reflection });
     materials.push(m);
     const mesh = new THREE.Mesh(g, m);
-    mesh.rotation.set(-Math.PI / 2, 0, along ? 0 : Math.PI / 2);
-    mesh.position.set((r.x0 + r.x1) / 2, ry, (r.z0 + r.z1) / 2);
     ry += 0.002;
     mesh.receiveShadow = true;
     group.add(mesh); floors.push(mesh);
@@ -996,15 +1109,16 @@ function buildStatic(ch) {
     if (cs.length) ch.near.add(contactShadows(cs));
   }
   // small props (and the contact shadows) are only drawn within a couple of hundred metres
+  if (ch.cards.length) ch.near.add(buildFoliage(ch.cards));
   if (ch.props.length || ch.clutter.length) {
     const kit = new Kit(), scan = [...ch.clutter];
     for (const p of ch.props) {
       const sp = scannedProp(p, p.seed, models);
       if (sp) scan.push(...sp); else buildProp(kit, p.type, p, p.seed);
     }
-    for (const m of [...kit.build(kmats), ...instanceProps(scan)]) (ch.far ? ch.stat : ch.near).add(m);
+    for (const m of [...kit.build(kmats), ...instanceProps(scan, !ch.far)]) (ch.far ? ch.stat : ch.near).add(m);
   }
-  ch.boxes = []; ch.props = []; ch.clutter = [];
+  ch.boxes = []; ch.props = []; ch.clutter = []; ch.cards = [];
 }
 
 // a chunk's breakable part, rebuilt whenever something in it breaks
@@ -1090,6 +1204,7 @@ export function objectsTouching(x, z, r, lo, hi) {
 // cam: the camera position; far: how far the fog lets you see. Chunks beyond it are hidden.
 export function updateWorld(dt, cam, far = Infinity) {
   beamU.uTime.value += dt;
+  tickFoliage(beamU.uTime.value);
   if (cam) for (const ch of chunkList) {
     if (ch.far) continue;
     const d = Math.hypot(ch.x - cam.x, ch.z - cam.z) - CH * 0.72;
