@@ -249,6 +249,21 @@ const net = new Net(game, {
     $('pause').classList.remove('hidden');
   },
   error(msg) { $('lobbyMsg').textContent = msg; },
+  // the host went away: stop the match and sit in the lobby while the room is rebuilt
+  migrate(msg, code) {
+    if (game.state === 'playing') game.state = 'ended';
+    game.clear();
+    game.state = 'menu';
+    if (document.pointerLockElement) document.exitPointerLock();
+    for (const id of ['hud', 'death', 'scoreboard', 'outro']) $(id).classList.add('hidden');
+    $('outro').className = '';
+    hideScreens();
+    $('roomCode').textContent = code || '';
+    $('members').innerHTML = '';
+    $('startMp').classList.add('hidden');
+    $('lobbyMsg').textContent = msg;
+    $('lobby').classList.remove('hidden');
+  },
   closed(msg) { toMenu(msg); },
 });
 // ---------- loadout editor ----------

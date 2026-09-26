@@ -195,23 +195,29 @@ export class Net {
 
   hostNow() { return this.perf() + (this.off || 0); }
 
-  host(name) {
+  // `want` claims a particular room code, which is how a client takes over a room whose
+  // host has gone. PeerJS holds a dead id for a moment, so that case retries.
+  host(name, want = null) {
     this.isHost = true;
     this.name = cleanName(name);
     return new Promise((resolve, reject) => {
       const attempt = (tries) => {
-        const code = Array.from({ length: 5 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
+        const code = want || Array.from({ length: 5 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
         const peer = new Peer(PREFIX + code, { debug: 0 });
         peer.on('open', () => { this.peer = peer; this.code = code; resolve(code); this.pushLobby(); });
         peer.on('error', (e) => {
-          if (e.type === 'unavailable-id' && tries > 0) { peer.destroy(); attempt(tries - 1); return; }
+          if (e.type === 'unavailable-id' && tries > 0) {
+            peer.destroy();
+            setTimeout(() => attempt(tries - 1), want ? 1500 : 0);
+            return;
+          }
           if (!this.peer) reject(new Error(describe(e)));
           else this.ui.error(describe(e));
         });
         peer.on('connection', (conn) => this.accept(conn));
         peer.on('disconnected', () => { if (this.peer && !this.peer.destroyed) this.peer.reconnect(); });
       };
-      attempt(3);
+      attempt(want ? 6 : 3);
     });
   }
 
@@ -237,13 +243,64 @@ export class Net {
           if (d?.t === 'full') { fail('That game is full.'); return; }
           this.onClientData(d);
         });
-        conn.on('close', () => fail('The host left the game.'));
+        conn.on('close', () => { if (settled && this.peer === peer) this.hostLost(); else fail('The host left the game.'); });
       });
       setTimeout(() => { if (!settled) fail('Could not reach that game. Check the code and try again.'); }, 15000);
     });
   }
 
+  // The host's connection dropped. Rather than ending the session, the surviving client
+  // with the lowest id claims the same room code and the rest rejoin it, so everyone
+  // lands back in the lobby with the code they already shared.
+  hostLost() {
+    if (this.migrating) return;
+    this.migrating = true;
+    const code = this.code;
+    const ids = (this.members_ || []).filter(m => !m.host).map(m => m.id).sort((a, b) => a - b);
+    const queue = ids.length ? ids : [this.myId];
+    const place = Math.max(0, queue.indexOf(this.myId));
+    this.quit();
+    if (queue[0] === this.myId) this.takeOver(code);
+    else this.rejoin(code, place, 4);
+  }
+
+  async takeOver(code) {
+    this.ui.migrate('The host left. Taking over the room…', code);
+    try {
+      await this.host(this.name, code);
+      this.migrating = false;
+      this.ui.migrate('The host left, so you are hosting now. Same room code - start the match when everyone is back.', code);
+      this.pushLobby();
+    } catch {
+      this.migrating = false;
+      this.ui.closed('The host left and the room could not be taken over.');
+    }
+  }
+
+  rejoin(code, place, tries) {
+    this.ui.migrate('The host left. Rejoining the room…', code);
+    setTimeout(async () => {
+      try {
+        await this.join(code, this.name);
+        this.migrating = false;
+      } catch {
+        if (tries > 1) { this.quit(); this.rejoin(code, place, tries - 1); return; }
+        this.migrating = false;
+        this.ui.closed('The host left and the room did not come back.');
+      }
+    }, 2500 + place * 600);
+  }
+
+  // Drop the connection without telling anyone; used between migration attempts.
+  quit() {
+    const p = this.peer;
+    this.peer = null; this.conn = null;
+    this.clients.clear();
+    if (p) { try { p.destroy(); } catch { /* already gone */ } }
+  }
+
   leave() {
+    this.migrating = false;
     if (this.isHost) this.broadcast({ t: 'bye' });
     const p = this.peer;
     this.peer = null; this.conn = null;
@@ -455,7 +512,7 @@ export class Net {
   onClientData(d) {
     if (!d || typeof d !== 'object') return;
     const g = this.game;
-    if (d.t === 'lobby') this.ui.lobby(d);
+    if (d.t === 'lobby') { this.members_ = Array.isArray(d.members) ? d.members : this.members_; this.ui.lobby(d); }
     else if (d.t === 'start') { g.startClient(d, this.myId); this.ui.started(); }
     else if (d.t === 'snap' && g.state === 'playing') {
       if (typeof d.sq === 'number') this.ack = d.sq;
