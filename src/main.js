@@ -383,6 +383,8 @@ function frame(ts) {
     hud.showScores = locked && keys.has('Tab');
     if (locked || net.active) game.update(dt, readInput());
     else { readInput(); game.effects.update(0); }
+  } else if (game.state === 'ended' && game.updateOutro(dt)) {
+    hud.showScores = false;
   } else if (game.state === 'menu') {
     menuT += dt * 0.05;
     const small = SIZE < 100, rad = small ? 30 : 70;

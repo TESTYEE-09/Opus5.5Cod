@@ -44,6 +44,7 @@ A browser first-person shooter in the style of Call of Duty, built with three.js
 - Sprint, crouch, slide (sprint then C), slide-jump, stairs and a roof you can reach.
 - Bots spot enemies inside a view cone with line of sight, react after a delay, and aim more accurately the longer they track you. They hear gunfire, share sightings with their team, path around the map, strafe, throw grenades and run from yours. Three skill levels.
 - Killstreaks: UAV at 3 kills, an airstrike you aim yourself at 5, the Chopper Gunner at 7. Bots use them too, call in their own drones, tanks and jets, and some carry RPGs and Stingers.
+- **Killcam and spectate**: when you die the camera drops with your body, then cuts over your killer's shoulder and follows their fight live until you respawn. If they die first it moves to whoever is left on your side, and you can click or press Space to cycle through your team yourself (right click goes back). The match's final kill plays the same way before the summary screen.
 - Minimap, kill feed, hit markers, damage direction arrows, grenade warnings, medals, scoreboard (Tab) and an end-of-match summary.
 - Recorded sound for every gun, reload, explosion, footstep and vehicle, loudness-matched and mixed in one table. Gunfire echoes differently on each map. You can hear enemy footsteps, sounds behind you are muffled, low health dulls your hearing, and a close blast leaves your ears ringing. See [sound credits](public/sfx/CREDITS.md).
 
@@ -77,6 +78,7 @@ The host's browser runs the match: bots, damage, score and killstreaks. Other pl
 | F | Enter or leave a tank or AA gun; leave a jet or the chopper gun; abort a drone. Hold F for mission actions |
 | 4, 5, 6 | UAV, airstrike, Chopper Gunner |
 | 7, 8, 9 | FPV drone, tank, jet |
+| Click / Space (while dead) | Watch the next player; right click for the previous |
 | Tab | Scoreboard |
 | M | Full map |
 | 1-6 (while dead, Ground War) | Choose your spawn |
@@ -109,6 +111,7 @@ Then open http://localhost:5178. `npm run build` writes a static site to `dist/`
 | `src/bots.js` | Soldier models and bot AI |
 | `src/vehicles.js` | Tank, jet, FPV drone, AA gun and attack chopper: models, handling, AI, HUDs; rockets, shells, bombs and flak; network copies |
 | `src/streaks.js` | Helicopter model and the airstrike flyover |
+| `src/spectate.js` | The death camera, the killcam and free spectate |
 | `src/effects.js` | Particles, tracers, impacts, explosions and decals |
 | `src/game.js` | Match rules, combat, scoring, and host and client roles |
 | `src/net.js` | PeerJS rooms, lobby, snapshots and networked soldiers |

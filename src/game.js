@@ -8,6 +8,7 @@ import { Jet } from './streaks.js';
 import { NetSoldier } from './net.js';
 import { Chopper, Tank, FighterJet, Drone, VehicleProxy, Projectiles, PROJ, VEHICLE_WEAPONS, hitSoldier, placeEmplacements, tankSpot } from './vehicles.js';
 import { createMode } from './modes.js';
+import { Spectator } from './spectate.js';
 
 const DEG = Math.PI / 180;
 const NAMES = ['Viper', 'Ghost', 'Havoc', 'Reaper', 'Nomad', 'Sarge', 'Hawk', 'Wolf', 'Rook', 'Blitz', 'Frost', 'Onyx',
@@ -61,6 +62,7 @@ export class Game {
     this.player = new Player(this);
     this.player.id = 0;
     this.jet = new Jet(scene);
+    this.spectator = new Spectator();
     this.bots = []; this.nets = []; this.soldiers = [this.player]; this.byId = new Map();
     this.grenades = []; this.pickups = []; this.vehicles = []; this.jobs = []; this.events = [];
     this.netNades = [];
@@ -150,6 +152,9 @@ export class Game {
     this.targeting = false;
     this.pickupId = 0;
     this.pendingCls = settings.cls;
+    this.lastKill = null;
+    this.outroT = 0;
+    this.spectator.reset();
     this.state = 'playing';
     this.hud.reset(this);
 
@@ -228,10 +233,39 @@ export class Game {
     for (const v of this.vehicles) v.remove();
     this.vehicles = [];
     this.projectiles.clear();
-    this.emit({ k: 'end', sc: this.teamScore });
+    this.emit({ k: 'end', sc: this.teamScore, lk: this.lastKill || null });
     this.net?.flush();
-    this.hud.showEnd(this);
     if (document.pointerLockElement) document.exitPointerLock();
+    if (!this.startOutro()) this.hud.showEnd(this);
+  }
+
+  // The final killcam: follow whoever got the last kill for a few seconds, then show
+  // the summary. Skipped when there was no kill or the shooter has since died.
+  startOutro(lk = this.lastKill) {
+    const killer = lk && this.byId.get(lk.a), victim = lk && this.byId.get(lk.v);
+    if (!killer || !victim || !killer.alive) return false;
+    this.outroT = 4.5;
+    this.spectator.begin(victim.pos, victim.yaw, killer);
+    this.hud.showOutro(killer, victim, lk.w, this.player);
+    return true;
+  }
+
+  // Driven by the frame loop while the state is 'ended' and an outro is running.
+  updateOutro(dt) {
+    if (!(this.outroT > 0)) return false;
+    this.time += dt;
+    for (const n of this.nets) n.update(dt);
+    if (this.authority) for (const b of this.bots) b.update(dt);
+    this.effects.update(dt);
+    this.spectator.update(dt, this, this.camera);
+    this.camera.updateMatrixWorld();
+    const L = this.audio.listener;
+    L.x = this.camera.position.x; L.y = this.camera.position.y; L.z = this.camera.position.z;
+    L.yaw = this.spectator.yaw;
+    this.audio.update(dt);
+    this.arsenal.holder.visible = false;
+    if ((this.outroT -= dt) <= 0) { this.outroT = 0; this.hud.hideOutro(); this.hud.showEnd(this); return false; }
+    return true;
   }
 
   pickSpawn(team, who = null) {
@@ -383,6 +417,7 @@ export class Game {
       this.popupFor(a, [['Assist', 25]]);
     }
     victim.damagers.clear();
+    if (valid) this.lastKill = { a: killer.id, v: victim.id, w: weapon };
     this.hud.feed(killer, victim, weapon, headshot, this.player);
     this.emit({ k: 'kill', a: killer ? killer.id : -1, v: victim.id, w: weapon, h: !!headshot });
     if (valid && this.teamScore[killer.team] >= this.settings.scoreLimit) this.end();
@@ -395,6 +430,7 @@ export class Game {
     this.deadT = 4;
     this.killer = killer && killer !== pl ? killer : null;
     this.deathYaw = pl.yaw;
+    this.spectator.begin(pl.pos, pl.yaw, this.killer);
     this.targeting = false;
     this.hud.hint('');
     this.hud.showDeath(this.killer, weapon, pl);
@@ -1140,7 +1176,11 @@ export class Game {
       case 'drop': if (Array.isArray(ev.p)) this.dropPickup(v3(ev.p), ev.id); break;
       case 'took': this.removePickup(ev.id); break;
       case 'roster': this.syncRoster(ev.r || []); break;
-      case 'end': if (Array.isArray(ev.sc)) this.teamScore = ev.sc.slice(0, 2); this.end(); break;
+      case 'end':
+        if (Array.isArray(ev.sc)) this.teamScore = ev.sc.slice(0, 2);
+        if (ev.lk) this.lastKill = ev.lk;
+        this.end();
+        break;
     }
   }
 
@@ -1221,6 +1261,8 @@ export class Game {
     } else {
       this.deadT -= dt;
       this.interact = null;
+      if (inp.jumpPressed || inp.firePressed) this.spectator.cycle(this, 1);
+      if (inp.adsPressed) this.spectator.cycle(this, -1);
       // Ground War: pick where to spawn with the number keys
       if (inp.digit && this.mode.kind === 'gw') {
         const o = this.mode.spawnOptions(pl.team)[inp.digit - 1];
@@ -1298,17 +1340,8 @@ export class Game {
   }
 
   deathCam(dt) {
-    const pl = this.player, cam = this.camera;
-    const k = Math.min(1, Math.max(0, (4 - this.deadT) / 0.6));
-    cam.position.set(pl.pos.x, pl.pos.y + 1.6 - 1.2 * k, pl.pos.z);
-    if (this.killer && this.killer.alive) {
-      _e.subVectors(this.killer.aimPoint(_c, false), cam.position);
-      const want = Math.atan2(-_e.x, -_e.z);
-      let d = want - this.deathYaw;
-      while (d > Math.PI) d -= 2 * Math.PI;
-      while (d < -Math.PI) d += 2 * Math.PI;
-      this.deathYaw += d * Math.min(1, dt * 3);
-      cam.rotation.set(Math.atan2(_e.y, Math.hypot(_e.x, _e.z)) * 0.8, this.deathYaw, 0.35 * k);
-    } else cam.rotation.set(-0.3 * k, this.deathYaw, 0.35 * k);
+    this.spectator.update(dt, this, this.camera);
+    this.deathYaw = this.spectator.yaw;
   }
+
 }
