@@ -5,6 +5,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { TEXTURES, MODELS } from './assetlist.js';
 import { addWind } from './nature.js';
+import { loadSoldierModel } from './soldier.js';
 
 const base = import.meta.env.BASE_URL;
 const texLoader = new THREE.TextureLoader();
@@ -109,6 +110,7 @@ export async function loadAssets(onProgress = () => {}) {
   const jobs = [
     ...[...new Set(Object.values(TEXTURES).map(t => t.id))].map(id => () => probe(id)),
     ...Object.entries(MODELS).map(([type, d]) => () => loadModel(type, d, loader)),
+    () => loadSoldierModel(loader),
   ];
   let done = 0;
   await Promise.all(jobs.map(j => j().catch((e) => console.warn('asset failed', e)).finally(() => onProgress(++done / jobs.length))));

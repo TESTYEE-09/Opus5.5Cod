@@ -1,3 +1,4 @@
+import { buildRigged, animateRigged, soldierReady } from './soldier.js';
 import * as THREE from 'three';
 import { moveBody, findPath, lineWalkable, overlaps, interest, randomWalkable, lineOfSight, walkable, SIZE, STEP } from './world.js';
 import { WEAPONS } from './weapons.js';
@@ -79,6 +80,7 @@ function matsFor(team) {
 
 // opts.officer: the Undercover target, in a peaked cap and no body armour
 export function buildSoldier(team, name, opts = {}) {
+  if (soldierReady()) return buildRigged(team, opts, nameTag(name, '#7fb4ff'));
   const L = TEAM_LOOK[team], T = matsFor(team);
   const skin = new THREE.MeshStandardMaterial({ color: new THREE.Color().setHSL(0.07, 0.35, 0.3 + Math.random() * 0.25), roughness: 0.7 });
   const accent = new THREE.MeshStandardMaterial({ color: L.accent, emissive: L.accent, emissiveIntensity: 0.45 });
@@ -189,6 +191,7 @@ export function setRelation(m, ally) {
 
 // crouchAmt runs 0..1 for crouching and on to 2 for prone
 export function animateSoldier(m, s, dt) {
+  if (m.rig) { animateRigged(m, s, dt); return; }
   const p = Math.max(0, Math.min(1, s.crouchAmt - 1)), c = Math.min(1, s.crouchAmt) * (1 - p);
   m.root.rotation.order = 'YXZ';
   m.root.position.copy(s.pos);
@@ -215,6 +218,7 @@ export function animateSoldier(m, s, dt) {
 }
 
 export function animateDeath(m, s, dt) {
+  if (m.rig) m.mixer.timeScale = 0;
   s.deathT += dt;
   const f = Math.min(1, s.deathT / 0.5);
   m.root.rotation.x = -f * f * 1.45 * s.fallDir;

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { flashTexture } from './effects.js';
 import { surface, R } from './textures.js';
 
@@ -159,21 +160,47 @@ function rail(g, y, z0, z1, w = 0.024) {
 }
 
 // open reflex sight: a thin hood around a big, nearly clear window
+// One-piece sight housing: a rounded outer frame with a rounded window cut out, extruded
+// along z. No separate bars, so no gaps at the corners.
+function roundRect(sh, w, h, r, hole = false) {
+  const x = -w / 2, y = -h / 2;
+  const p = hole ? new THREE.Path() : sh;
+  p.moveTo(x + r, y); p.lineTo(x + w - r, y); p.quadraticCurveTo(x + w, y, x + w, y + r);
+  p.lineTo(x + w, y + h - r); p.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  p.lineTo(x + r, y + h); p.quadraticCurveTo(x, y + h, x, y + h - r);
+  p.lineTo(x, y + r); p.quadraticCurveTo(x, y, x + r, y);
+  if (hole) sh.holes.push(p);
+}
+function frameGeo(w, h, t, depth, r = 0.006) {
+  const key = `f${w},${h},${t},${depth},${r}`;
+  if (geos[key]) return geos[key];
+  const sh = new THREE.Shape();
+  roundRect(sh, w, h, r);
+  roundRect(sh, w - t * 2, h - t * 2, Math.max(0.001, r - t * 0.6), true);
+  const g = new THREE.ExtrudeGeometry(sh, { depth, bevelEnabled: true, bevelThickness: 0.0012, bevelSize: 0.0008, bevelSegments: 2, curveSegments: 6 });
+  g.translate(0, 0, -depth / 2);
+  return (geos[key] = g);
+}
+
 function reflex(g, y, z, s) {
-  part(g, bx(0.032, 0.014, 0.06), M.metal, 0, y - s / 2 - 0.009, z);
-  const t = 0.0035;
-  part(g, sb(s + t * 2, t, 0.03), M.metal, 0, y + s / 2 + 0.004, z);
-  part(g, sb(t, s, 0.03), M.metal, -s / 2 - t / 2 - 0.004, y, z);
-  part(g, sb(t, s, 0.03), M.metal, s / 2 + t / 2 + 0.004, y, z);
-  part(g, new THREE.PlaneGeometry(s + 0.006, s + 0.006), M.glass, 0, y, z - 0.012);
+  const t = 0.0045, w = s + t * 2;
+  // base and mount, then the hood sitting on it, window and dot inside the hood
+  part(g, bx(0.034, 0.016, 0.066), M.metal, 0, y - w / 2 - 0.006, z);
+  part(g, sb(0.024, 0.01, 0.05), M.metal, 0, y - w / 2 - 0.016, z);
+  part(g, frameGeo(w, w, t, 0.034, 0.007), M.metal, 0, y, z);
+  part(g, sb(0.008, 0.006, 0.012), M.metal, w / 2 + 0.002, y + 0.004, z + 0.006);
+  part(g, new THREE.PlaneGeometry(s, s), M.glass, 0, y, z - 0.012);
   part(g, new THREE.CircleGeometry(0.0026, 14), M.dot, 0, y, z - 0.011);
 }
 
 function holo(g, y, z) {
-  part(g, bx(0.042, 0.014, 0.09), M.metal, 0, y - 0.033, z);
-  part(g, sb(0.05, 0.0035, 0.05), M.metal, 0, y + 0.027, z - 0.01);
-  for (const x of [-0.025, 0.025]) part(g, sb(0.0035, 0.056, 0.05), M.metal, x, y, z - 0.01);
-  part(g, new THREE.PlaneGeometry(0.048, 0.05), M.glass, 0, y, z - 0.035);
+  const w = 0.056, h = 0.062, t = 0.0045;
+  part(g, bx(0.046, 0.016, 0.1), M.metal, 0, y - h / 2 - 0.004, z);
+  part(g, frameGeo(w, h, t, 0.056, 0.006), M.metal, 0, y, z - 0.01);
+  // battery housing and buttons on the base, like the real sight
+  part(g, bx(0.02, 0.018, 0.04), M.metal, 0.03, y - h / 2 - 0.002, z + 0.02);
+  for (const bz of [0.028, 0.04]) part(g, cy(0.0028, 0.004, 8), M.poly, 0, y - h / 2 + 0.006, z + bz, Math.PI / 2);
+  part(g, new THREE.PlaneGeometry(w - t * 2, h - t * 2), M.glass, 0, y, z - 0.035);
   part(g, new THREE.RingGeometry(0.0045, 0.0053, 24), M.dot, 0, y, z - 0.034);
   part(g, new THREE.CircleGeometry(0.0013, 10), M.dot, 0, y, z - 0.034);
 }
@@ -204,6 +231,7 @@ function hand(parent, x, y, z) {
 }
 
 function arms(g, grip, fore) {
+  g.userData.grip = new THREE.Vector3(...grip); g.userData.fore = new THREE.Vector3(...fore);
   const gh = hand(g, ...grip);
   part(gh, bx(0.085, 0.085, 0.32), M.sleeve, 0.05, -0.08, 0.17, 0.5, 0.2, 0);
   part(gh, bx(0.07, 0.07, 0.04), M.cuff, 0.025, -0.035, 0.055, 0.5, 0.2, 0);
@@ -281,6 +309,39 @@ function rifleBody(g, furn, { stock = true } = {}) {
   part(mag, bx(0.034, 0.012, 0.076), M.poly, 0, -0.13, 0.02, 0.25);
   return { charge, mag };
 }
+
+// A weapon as a third-person soldier carries it: the viewmodel without its arms, merged into
+// one mesh per material and shared by every soldier holding that model. Materials are copies,
+// so the player's camo stays on the player's gun.
+const tpCache = {}, tpMats = new Map();
+export function thirdPersonGun(model) {
+  if (tpCache[model]) return tpCache[model];
+  const b = BUILD[model] || BUILD.ar;
+  const o = b(), g = o.root, skip = new Set([M.sleeve, M.cuff, M.glove, M.glass, M.dot, M.tri, M.reticle]);
+  g.updateMatrixWorld(true);
+  const by = new Map();
+  g.traverse((m) => {
+    if (!m.isMesh || skip.has(m.material) || !m.visible || m.material.blending === THREE.AdditiveBlending) return;
+    let p = m.parent, hidden = false;
+    while (p) { if (!p.visible) hidden = true; p = p.parent; }
+    if (hidden) return;
+    const geo = (m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone()).applyMatrix4(m.matrixWorld);
+    for (const a of Object.keys(geo.attributes)) if (!['position', 'normal', 'uv'].includes(a)) geo.deleteAttribute(a);
+    if (!geo.attributes.uv) geo.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(geo.attributes.position.count * 2), 2));
+    if (!tpMats.has(m.material)) tpMats.set(m.material, m.material.clone());
+    const k = tpMats.get(m.material);
+    (by.get(k) || by.set(k, []).get(k)).push(geo);
+  });
+  const parts = [...by].map(([material, geos]) => ({ material, geometry: mergeGeometries(geos) }));
+  const ud = g.userData;
+  return (tpCache[model] = {
+    parts, muzzle: new THREE.Vector3(0, o.muzzleY || 0.03, o.muzzleZ || -0.6),
+    grip: ud.grip || new THREE.Vector3(0, -0.1, 0.12), fore: ud.fore || new THREE.Vector3(0, -0.02, -0.3),
+  });
+}
+
+// reload scratch vectors: grip, pouch, entry, hand, temp
+const _RG = new THREE.Vector3(), _RP = new THREE.Vector3(), _RE = new THREE.Vector3(), _RH = new THREE.Vector3(), _RT = new THREE.Vector3();
 
 const BUILD = {
   ar() {
@@ -850,27 +911,61 @@ export class Arsenal {
       return;
     }
     const heavy = kind === 'belt';
-    const endT = empty ? 0.92 : 0.82;
-    const tilt = P(p, 0, 0.14) * (1 - P(p, endT, 1));
-    _r.z += (heavy ? 0.3 : 0.5) * tilt; _r.x += (heavy ? 0.3 : 0.16) * tilt; _r.y += 0.14 * tilt;
-    _p.y -= 0.035 * tilt; _p.x -= 0.03 * tilt;
+    const endT = empty ? 0.92 : 0.84;
+    // the gun cants toward you and dips while the magazine is changed, with a little settle
+    const tilt = P(p, 0, 0.12) * (1 - P(p, endT, 1));
+    const settle = Math.sin(Math.PI * P(p, endT - 0.04, 1)) * 0.25;
+    _r.z += (heavy ? 0.3 : 0.62) * tilt - 0.04 * settle; _r.x += (heavy ? 0.3 : 0.2) * tilt; _r.y += 0.2 * tilt;
+    _p.y -= 0.045 * tilt; _p.x -= 0.035 * tilt; _p.z += 0.02 * tilt;
     if (m.lid) m.lid.rotation.x = m.lidRot - 1.1 * P(p, 0.08, 0.18) * (1 - P(p, 0.62, 0.72));
-    // magazine: drops away, then a fresh one comes up and seats
-    const out = P(p, 0.16, 0.32), inn = P(p, 0.34, 0.52), seat = P(p, 0.52, 0.57);
-    m.mag.position.copy(m.magBase);
-    m.mag.rotation.x = m.magRot;
-    if (p < 0.33) { m.mag.position.y -= 0.34 * out * out; m.mag.position.z += 0.04 * out; m.mag.rotation.x += 0.5 * out; }
-    else { m.mag.position.y -= 0.3 * (1 - inn) + 0.014 * (1 - seat); m.mag.position.z += 0.03 * (1 - inn); m.mag.rotation.x -= 0.3 * (1 - inn); }
-    m.mag.visible = !(p > 0.31 && p < 0.35);
-    const bump = Math.sin(Math.PI * P(p, 0.52, 0.62));
-    _p.y += 0.012 * bump; _r.x -= 0.05 * bump;
-    // support hand: grip → mag → down → back up with the new mag → grip
-    _h.set(m.magBase.x - 0.005, m.magBase.y - 0.07, m.magBase.z + 0.02);
-    if (p < 0.16) off.lerp(_h, P(p, 0.05, 0.16));
-    else if (p < 0.34) off.copy(_h).add(_q.set(0, m.mag.position.y - m.magBase.y, m.mag.position.z - m.magBase.z));
-    else if (p < 0.6) off.copy(_h).add(_q.set(0, m.mag.position.y - m.magBase.y - 0.01 * bump, m.mag.position.z - m.magBase.z));
-    else off.lerpVectors(_h, m.offBase, P(p, 0.6, 0.74));
-    if (p > 0.1 && p < 0.7) m.off.rotation.z += 0.4 * Math.sin(Math.PI * P(p, 0.1, 0.7));
+    // the support hand's grip on the magazine, and where the magazine enters the well
+    const grip = _RG.set(m.magBase.x - 0.005, m.magBase.y - 0.07, m.magBase.z + 0.02);
+    const pouch = _RP.set(m.magBase.x - 0.12, m.magBase.y - 0.42, m.magBase.z + 0.12);
+    const mag = m.mag.position, mr = m.mag.rotation;
+    mag.copy(m.magBase); mr.x = m.magRot;
+    const T = empty
+      ? { reach: [0.06, 0.14], strip: [0.14, 0.2], away: [0.14, 0.34], back: [0.36, 0.5], insert: [0.5, 0.58], slap: [0.58, 0.64], home: [0.64, 0.74] }
+      : { reach: [0.08, 0.16], strip: [0.16, 0.26], away: [0.26, 0.4], back: [0.42, 0.54], insert: [0.54, 0.62], slap: [0.62, 0.68], home: [0.68, 0.8] };
+    const stripK = P(p, ...T.strip);
+    const insK = P(p, ...T.insert), slapK = Math.sin(Math.PI * P(p, ...T.slap));
+    // magazine offset below the well while it is in the hand: pulled straight down, then tilted
+    const held = (k) => _RT.set(0, -0.09 * k, 0.012 * k);
+    if (p < T.strip[1] || (empty && p < T.back[0])) {
+      if (empty && p >= T.strip[0]) {
+        // released: falls free, tumbling, and is gone
+        const t = (p - T.strip[0]) * r.dur;
+        mag.y -= 0.02 + 4.9 * t * t; mag.z += 0.12 * t; mag.x -= 0.05 * t; mr.x += 2.2 * t; mr.z = 1.4 * t;
+        m.mag.visible = mag.y > m.magBase.y - 0.6;
+      } else {
+        mag.add(held(stripK)); mr.x -= 0.1 * stripK;
+      }
+    } else if (p < T.away[1]) {
+      // tactical: the old magazine rides down to the pouch with the hand
+      const k = P(p, T.away[0], T.away[1]);
+      mag.copy(grip).lerp(pouch, k).add(_RT.set(0, 0.07, -0.02)); mr.x = m.magRot - 0.1 - 0.6 * k;
+      m.mag.visible = k < 0.9;
+    } else if (p < T.insert[0]) {
+      // a fresh magazine comes up from the pouch, nose tipped forward for the rock-in
+      const k = P(p, T.back[0], T.back[1]);
+      const entry = _RE.set(m.magBase.x, m.magBase.y - 0.075, m.magBase.z + 0.018);
+      mag.copy(pouch).add(_RT.set(0, 0.07, -0.02)).lerp(entry, k); mr.x = m.magRot - 0.7 + 0.45 * k;
+      m.mag.visible = p > T.back[0] + 0.01;
+    } else {
+      // rocks in: front edge first, then up into the well, then the slap seats it
+      mag.y -= 0.075 * (1 - insK) + 0.006 * (1 - P(p, ...T.slap));
+      mag.z += 0.018 * (1 - insK);
+      mr.x = m.magRot - 0.25 * (1 - insK) ** 2;
+      m.mag.visible = true;
+    }
+    _p.y += 0.014 * slapK; _r.x -= 0.06 * slapK; _r.z -= 0.03 * slapK;
+    // support hand follows the magazine while it holds it, otherwise its path
+    const handOnMag = _RH.copy(mag).add(_RT.set(-0.005, -0.07, 0.02));
+    if (p < T.reach[1]) off.lerp(handOnMag, P(p, ...T.reach));
+    else if (empty && p < T.back[0]) off.copy(pouch).add(_RT.set(0, -0.02 * P(p, T.away[0], T.back[0]), 0)).lerp(grip, 1 - P(p, T.reach[1], T.away[1]));
+    else if (p < T.slap[0]) off.copy(handOnMag);
+    else if (p < T.slap[1]) off.copy(handOnMag).add(_RT.set(0, -0.03 * (1 - slapK), 0.005));
+    else off.lerpVectors(handOnMag, m.offBase, P(p, ...T.home));
+    if (p > T.reach[0] && p < T.home[1]) m.off.rotation.z += 0.45 * Math.sin(Math.PI * P(p, T.reach[0], T.home[1]));
     // empty: rack the charging handle / bolt / slide
     if (empty) {
       const reach = P(p, 0.72, 0.8) * (1 - P(p, 0.86, 0.95));
