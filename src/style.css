@@ -162,8 +162,6 @@ button:hover { background: rgba(255,255,255,0.12); }
 button.on { border-color: var(--gold); color: var(--gold); }
 button.primary { display: block; width: 100%; margin-top: 20px; padding: 14px; font-size: 24px; letter-spacing: 6px; background: var(--gold); color: #1b1a12; border-color: var(--gold); }
 button.primary:hover { filter: brightness(1.1); }
-#pause button:not(.primary) { width: 100%; margin-top: 10px; }
-#pause .seg button { margin-top: 0; width: auto; }
 .controls { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 18px; font-size: 15px; opacity: 0.75; }
 .note { font-size: 14px; opacity: 0.6; margin: 12px 0 0; }
 #endTitle { text-align: center; }
@@ -302,15 +300,6 @@ label.check { display: flex; align-items: center; gap: 8px; }
 .camo-arctic { border-left-color: #e4e8ec; } .camo-tiger { border-left-color: #6a7a44; } .camo-crimson { border-left-color: #8a2a22; }
 .camo-gold { border-left-color: #d4a640; } .camo-diamond { border-left-color: #bfe8ff; } .camo-obsidian { border-left-color: #7a2aff; }
 
-.tree { display: flex; flex-direction: column; gap: 8px; }
-.tline { display: flex; align-items: stretch; gap: 6px; flex-wrap: wrap; }
-.tlabel { width: 78px; display: flex; align-items: center; gap: 6px; font-weight: 700; letter-spacing: 1px; opacity: 0.8; }
-.tarrow { display: flex; align-items: center; font-style: normal; opacity: 0.5; font-size: 20px; }
-.tnode { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 8px 10px; min-width: 150px; text-align: left; overflow: hidden; }
-.tnode span { font-size: 11px; opacity: 0.7; }
-.tnode em { font-style: normal; font-size: 12px; color: var(--gold); }
-.tnode.locked { opacity: 0.55; cursor: default; }
-.tnode u { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--gold); text-decoration: none; }
 #endXp .rp { color: #9fd0ff; }
 
 .seg.wrap { flex-wrap: wrap; }
@@ -318,3 +307,55 @@ label.check { display: flex; align-items: center; gap: 8px; }
 .seg button.locked { opacity: 0.45; }
 
 .vols label { display: flex; }
+
+/* ---------- tabbed menu and pause screen ---------- */
+.panel.wide { width: min(1120px, 100%); }
+.topbar { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
+.topbar h2 { margin: 0; }
+.topbar .rank { margin: 0 0 4px; }
+.pbtns { display: flex; gap: 8px; }
+.pbtns button { margin: 0; }
+.pbtns button.primary { width: auto; margin: 0; padding: 10px 34px; font-size: 20px; }
+.tabs { display: flex; gap: 2px; margin: 16px 0 4px; border-bottom: 1px solid var(--line); }
+.tabs button { background: transparent; border: none; border-bottom: 3px solid transparent; padding: 10px 18px; letter-spacing: 3px; opacity: 0.6; }
+.tabs button:hover { background: rgba(255,255,255,0.05); opacity: 1; }
+.tabs button.on { opacity: 1; color: var(--gold); border-bottom-color: var(--gold); }
+.note.live { color: var(--gold); opacity: 0.9; min-height: 18px; margin: 6px 0 0; }
+
+/* ---------- tech tree (War Thunder style) ---------- */
+.wthead { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin: 12px 0; }
+.wthead .note { margin: 0; flex: 1; min-width: 240px; }
+.nations { display: flex; gap: 4px; }
+.nations button { display: flex; align-items: center; gap: 8px; padding: 6px 14px; }
+.flag { width: 24px; height: 15px; display: inline-block; border: 1px solid rgba(255,255,255,0.3); }
+.flag.f0 { background: linear-gradient(#3c3b6e, #3c3b6e) 0 0 / 45% 54% no-repeat, repeating-linear-gradient(#b22234 0 2px, #fff 2px 4px); }
+.flag.f1 { background: linear-gradient(#fff 0 33%, #0039a6 33% 66%, #d52b1e 66%); }
+.wtgrid { display: grid; gap: 16px 12px; padding: 12px; border: 1px solid var(--line); background: linear-gradient(rgba(255,255,255,0.025), rgba(0,0,0,0.2)); }
+.wtline { display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 13px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; opacity: 0.75; }
+.wtrank { display: flex; align-items: center; justify-content: center; font: 700 22px Georgia, serif; opacity: 0.45; border-right: 1px solid var(--line); }
+.wtcell { position: relative; min-height: 104px; }
+.wtcell.arrow::before, .wtcell.pipe::before { content: ''; position: absolute; left: 50%; top: -16px; width: 2px; height: 16px; background: rgba(255,255,255,0.35); }
+.wtcell.pipe::before { height: calc(100% + 16px); }
+.wtcell.arrow::after { content: ''; position: absolute; left: calc(50% - 4px); top: -5px; border: 5px solid transparent; border-top-color: rgba(255,255,255,0.5); border-bottom: 0; }
+.wtc { width: 100%; height: 100%; display: grid; grid-template-columns: 1fr auto; align-content: start; gap: 1px 6px; padding: 8px 10px 12px; text-align: left; color: #cfd6db;
+  background: linear-gradient(180deg, #2b333a, #1c2126); border: 1px solid rgba(255,255,255,0.13); border-radius: 3px; position: relative; overflow: hidden; letter-spacing: 0.5px; }
+.wtc:hover { background: linear-gradient(180deg, #333c44, #20262b); }
+.wtc svg { grid-column: 1 / 3; width: 100%; height: 34px; fill: currentColor; margin-bottom: 4px; }
+.wtc b { font-size: 16px; color: #eef1e6; }
+.wtc .br { font-style: normal; font-size: 13px; opacity: 0.8; align-self: center; }
+.wtc span { grid-column: 1 / 3; font-size: 11px; opacity: 0.65; font-weight: 500; letter-spacing: 0; }
+.wtc em { grid-column: 1 / 3; font-style: normal; font-size: 12px; color: #9fd79f; margin-top: 3px; }
+.wtc.on { border-color: var(--gold); box-shadow: inset 0 0 0 1px var(--gold), 0 0 16px rgba(255,210,74,0.18); }
+.wtc.on em { color: var(--gold); }
+.wtc:disabled { opacity: 1; cursor: default; }
+.wtc.locked { background: linear-gradient(180deg, #202428, #15181b); color: #6f777d; }
+.wtc.locked b { color: #9aa1a6; }
+.wtc.locked em { color: #b8bcc0; }
+.wtc.cur { border-color: rgba(111,176,255,0.7); }
+.wtc.cur em { color: #9fd0ff; }
+.wtc u { position: absolute; left: 0; bottom: 0; height: 4px; background: linear-gradient(90deg, #3d7fe0, #6fb0ff); text-decoration: none; }
+.lineup { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 10px; padding: 8px 12px; background: rgba(0,0,0,0.3); border: 1px solid var(--line); font-weight: 600; }
+.lineup span { opacity: 0.6; letter-spacing: 2px; font-size: 13px; }
+.lineup b { display: flex; align-items: center; gap: 6px; font-size: 15px; }
+.lineup svg { width: 40px; height: 15px; fill: currentColor; }
+.lineup kbd { font-size: 11px; }

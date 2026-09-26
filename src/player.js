@@ -18,7 +18,7 @@ export class Player {
     this.alive = false;
     this.vehicle = null; this.inVehicle = false;
     this.lean = 0; this.leanOff = 0; this.prone = false; this.proneAmt = 0;
-    this.vcool = { drone: 0, tank: 0, jet: 0 };
+    this.vcool = { drone: 0, recon: 0, tank: 0, jet: 0, heli: 0 };
     this.damagers = new Map();
     this.resetStats();
   }
@@ -43,7 +43,7 @@ export class Player {
     this.recoilDebt = 0; this.lastShot = -99; this.punch = 0;
     this.bobPhase = 0; this.stepDist = 0; this.landDip = 0; this.hSpeed = 0;
     this.scopeSwayX = this.scopeSwayY = 0;
-    this.protect = 1.5;
+    this.protect = 1.5; this.spawnT = this.game.time;
     this.streak = 0;
     this.damagers.clear();
     this.body.onGround = true;

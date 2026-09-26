@@ -82,66 +82,79 @@
 <div id="loading"><b>FRONTLINE</b><span>Loading scanned assets</span><div class="bar"><i id="loadingBar"></i></div></div>
 
 <div id="menu" class="screen">
-  <div class="panel">
-    <h1>FRONTLINE</h1>
-    <p class="sub"><span id="modeName">Ground War</span> &middot; <span id="mapName">Crossroads</span> &middot; USA vs Russia</p>
-    <p id="rankLine" class="rank"></p>
-    <div id="daily" class="daily"></div>
-    <h3>Map</h3>
-    <div id="maps" class="cards maps"></div>
-    <h3>Mode</h3>
-    <div id="modesel" class="cards modes"></div>
+  <div class="panel wide">
+    <div class="topbar">
+      <div><h1>FRONTLINE</h1><p class="sub"><span id="modeName">Ground War</span> &middot; <span id="mapName">Crossroads</span> &middot; USA vs Russia</p></div>
+      <p id="rankLine" class="rank"></p>
+    </div>
+    <nav class="tabs" id="menuTabs"><button data-tab="play" class="on">PLAY</button><button data-tab="loadout">LOADOUT</button><button data-tab="armory">TECH TREE</button><button data-tab="settings">SETTINGS</button></nav>
+    <section class="tab" data-tab="play">
+      <div id="daily" class="daily"></div>
+      <h3>Map</h3>
+      <div id="maps" class="cards maps"></div>
+      <h3>Mode</h3>
+      <div id="modesel" class="cards modes"></div>
+      <div class="cols">
+        <div><h3>Enemy skill</h3><div id="diffs" class="seg"></div><p class="note">Bots adapt as the match goes: they flank campers, take cover when hurt and change kit to counter how you play.</p></div>
+        <div id="huntRow"><h3>FPV Hunt role</h3><div id="huntRole" class="seg"></div><p class="note">Hunter flies FPV + thermal recon drones (0). Hider has to survive 7 minutes.</p></div>
+      </div>
+      <div class="cols">
+        <div><h3>Callsign</h3><input id="callsign" class="text" maxlength="16" placeholder="Player" autocomplete="off"></div>
+        <div>
+          <h3>Multiplayer</h3>
+          <div class="seg"><button id="hostBtn">HOST</button><input id="joinCode" class="text code-in" maxlength="5" placeholder="CODE" autocomplete="off"><button id="joinBtn">JOIN</button></div>
+          <p id="mpMsg" class="note"></p>
+        </div>
+      </div>
+      <button id="deploy" class="primary">PLAY SOLO</button>
+      <div class="controls">
+        <span><kbd>WASD</kbd> move</span><span><kbd>Shift</kbd> sprint</span><span><kbd>C</kbd> crouch / slide</span>
+        <span><kbd>Space</kbd> jump</span><span><kbd>LMB</kbd> fire</span><span><kbd>RMB</kbd> aim</span>
+        <span><kbd>R</kbd> reload</span><span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> / wheel swap</span><span><kbd>G</kbd> hold to cook frag</span>
+        <span><kbd>Q</kbd><kbd>E</kbd> lean</span><span><kbd>Ctrl</kbd>/<kbd>Z</kbd> prone</span><span><kbd>V</kbd> knife</span>
+        <span><kbd>F</kbd> enter / exit vehicle</span><span><kbd>4</kbd><kbd>5</kbd><kbd>6</kbd> killstreaks</span>
+        <span><kbd>7</kbd> FPV <kbd>0</kbd> recon drone <kbd>8</kbd> ground vehicle <kbd>9</kbd> jet <kbd>H</kbd> helicopter</span>
+        <span><kbd>B</kbd> loadout in a match</span><span><kbd>Tab</kbd> scores</span>
+        <span><kbd>Shift</kbd><kbd>Shift</kbd> tactical sprint</span><span><kbd>Space</kbd> at a ledge: mantle</span>
+        <span><kbd>M</kbd> map</span><span>hold <kbd>F</kbd> objectives</span>
+      </div>
+    </section>
+    <div class="tabhost" id="menuHost"></div>
+  </div>
+</div>
+
+<!-- shared panes: mounted in the main menu or the pause screen, whichever is open -->
+<div id="panes" class="hidden">
+  <section id="paneLoadout" class="tab" data-tab="loadout">
     <h3>Class</h3>
     <div id="classes" class="cards"></div>
-    <div class="cols">
-      <div><h3>Weapons for this class</h3><div id="picks" class="seg wrap"></div><p class="note">New guns unlock as you rank up.</p></div>
-      <div id="huntRow"><h3>FPV Hunt role</h3><div id="huntRole" class="seg"></div><p class="note">Hunter flies FPV + thermal recon drones (0). Hider has to survive 7 minutes.</p></div>
-    </div>
-    <h3>Tech tree</h3>
-    <p class="note">Every match's XP is also research: it goes into the next vehicle of each line. Click an unlocked vehicle to take it into battle.</p>
-    <div id="tree" class="tree"></div>
+    <h3>Weapons for this class</h3>
+    <div id="picks" class="seg wrap"></div>
+    <p class="note">New guns unlock as you rank up.</p>
     <h3>Weapon camo</h3>
     <div id="camos" class="camos"></div>
+  </section>
+  <section id="paneArmory" class="tab" data-tab="armory">
+    <div id="tree" class="wt"></div>
+  </section>
+  <section id="paneSettings" class="tab" data-tab="settings">
     <div class="cols">
       <div>
-        <h3>Enemy skill</h3>
-        <div id="diffs" class="seg"></div>
-      </div>
-      <div>
-        <h3>Settings</h3>
+        <h3>Controls</h3>
         <label>Sensitivity <input id="sens" type="range" min="0.2" max="3" step="0.05"><output id="sensOut"></output></label>
         <label>Field of view <input id="fov" type="range" min="65" max="105" step="1"><output id="fovOut"></output></label>
+        <h3>Volume</h3>
         <div id="volBox" class="vols"></div>
-        <div class="setrow"><span>Graphics</span><div id="quality" class="seg"></div></div>
+      </div>
+      <div>
+        <h3>Graphics</h3>
+        <div class="setrow"><span>Quality</span><div id="quality" class="seg"></div></div>
         <label>Motion blur <input id="blur" type="range" min="0" max="1" step="0.05"><output id="blurOut"></output></label>
         <label>Render scale <input id="scale" type="range" min="0.5" max="1" step="0.05"><output id="scaleOut"></output></label>
         <label class="check"><input id="dynres" type="checkbox"> Dynamic resolution (holds 60 fps)</label>
       </div>
     </div>
-    <div class="cols">
-      <div>
-        <h3>Callsign</h3>
-        <input id="callsign" class="text" maxlength="16" placeholder="Player" autocomplete="off">
-      </div>
-      <div>
-        <h3>Multiplayer</h3>
-        <div class="seg"><button id="hostBtn">HOST</button><input id="joinCode" class="text code-in" maxlength="5" placeholder="CODE" autocomplete="off"><button id="joinBtn">JOIN</button></div>
-        <p id="mpMsg" class="note"></p>
-      </div>
-    </div>
-    <button id="deploy" class="primary">PLAY SOLO</button>
-    <div class="controls">
-      <span><kbd>WASD</kbd> move</span><span><kbd>Shift</kbd> sprint</span><span><kbd>C</kbd> crouch / slide</span>
-      <span><kbd>Space</kbd> jump</span><span><kbd>LMB</kbd> fire</span><span><kbd>RMB</kbd> aim</span>
-      <span><kbd>R</kbd> reload</span><span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> / wheel swap</span><span><kbd>G</kbd> hold to cook frag</span>
-      <span><kbd>Q</kbd><kbd>E</kbd> lean</span><span><kbd>Ctrl</kbd>/<kbd>Z</kbd> prone</span><span><kbd>V</kbd> knife</span>
-      <span><kbd>F</kbd> enter / exit vehicle</span><span><kbd>4</kbd><kbd>5</kbd><kbd>6</kbd> killstreaks</span>
-      <span><kbd>7</kbd> FPV drone <kbd>0</kbd> recon drone <kbd>8</kbd> tank <kbd>9</kbd> jet</span><span><kbd>Tab</kbd> scores</span>
-      <span><kbd>Shift</kbd><kbd>Shift</kbd> tactical sprint</span><span><kbd>Space</kbd> at a ledge: mantle</span>
-      <span><kbd>M</kbd> map</span><span>hold <kbd>F</kbd> objectives</span>
-    </div>
-    <p class="note">Ground War: capture the five flags, spawn on any your team holds, first to 400. Undercover: co-op, wear their uniform and don't get made. Shipment: 6 v 6 team deathmatch to 75. Bots fill empty slots in multiplayer.</p>
-  </div>
+  </section>
 </div>
 
 <div id="lobby" class="screen hidden">
@@ -166,17 +179,15 @@
 </div>
 
 <div id="pause" class="screen hidden">
-  <div class="panel small">
-    <h2 id="pauseTitle">PAUSED</h2>
-    <p id="pauseNote" class="note"></p>
-    <button id="resume" class="primary">RESUME</button>
-    <h3>Class for next spawn</h3>
-    <div id="pauseClasses" class="seg wrap"></div>
-    <label>Sensitivity <input id="sens2" type="range" min="0.2" max="3" step="0.05"><output id="sens2Out"></output></label>
-    <h3>Volume</h3>
-    <div id="volBox2" class="vols"></div>
-    <button id="quit">QUIT TO MENU</button>
+  <div class="panel wide">
+    <div class="topbar">
+      <div><h2 id="pauseTitle">PAUSED</h2><p id="pauseNote" class="note"></p></div>
+      <div class="pbtns"><button id="resume" class="primary">RESUME</button><button id="quit">QUIT</button></div>
+    </div>
     <p id="lockMsg" class="note"></p>
+    <nav class="tabs" id="pauseTabs"><button data-tab="loadout" class="on">LOADOUT</button><button data-tab="armory">TECH TREE</button><button data-tab="settings">SETTINGS</button></nav>
+    <p id="loadoutNote" class="note live"></p>
+    <div class="tabhost" id="pauseHost"></div>
   </div>
 </div>
 

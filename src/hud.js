@@ -474,7 +474,7 @@ export class Hud {
     }).join('') + `<div class="streak-count">Streak ${pl.streak}${next ? ` &middot; ${next.kills - pl.streak} to ${next.name}` : ''}</div>` +
       CALLS.map(c => {
         const cd = pl.vcool?.[c.id] || 0;
-        return `<div class="sk call ${cd > 0 ? '' : 'ready'}"><kbd>${c.key}</kbd><span>${c.id === 'drone' ? (game.player.fpv === 'drone10' ? '10" FPV' : '5" FPV') : c.id === 'recon' ? c.name : c.id === 'tank' ? vehicleName(game.settings.ground || 'apc', game.player.team) : c.id === 'jet' ? vehicleName(game.player.jetKind || 'attacker', game.player.team) : vehicleName(c.id, game.player.team)}</span><em>${cd > 0 ? `${Math.ceil(cd)}s` : 'READY'}</em></div>`;
+        return `<div class="sk call ${cd > 0 ? '' : 'ready'}"><kbd>${c.key}</kbd><span>${c.id === 'drone' ? (game.player.fpv === 'drone10' ? '10" FPV' : '5" FPV') : c.id === 'recon' ? c.name : c.id === 'tank' ? vehicleName(game.settings.ground || 'apc', game.player.team) : c.id === 'jet' ? vehicleName(game.player.jetKind || 'attacker', game.player.team) : c.id === 'heli' ? vehicleName('gunship', game.player.team) : vehicleName(c.id, game.player.team)}</span><em>${cd > 0 ? `${Math.ceil(cd)}s` : 'READY'}</em></div>`;
       }).join('');
 
     if (!pl.alive) $('respawnIn').textContent = `Respawning in ${Math.max(0, game.deadT).toFixed(1)}`;

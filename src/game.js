@@ -8,7 +8,7 @@ import { Player } from './player.js';
 import { Bot, DIFFICULTY } from './bots.js';
 import { Jet } from './streaks.js';
 import { NetSoldier } from './net.js';
-import { Chopper, Tank, FighterJet, Drone, ReconDrone, isDrone, VehicleProxy, Projectiles, PROJ, VEHICLE_WEAPONS, hitSoldier, placeEmplacements, tankSpot } from './vehicles.js';
+import { Chopper, Tank, FighterJet, AttackHeli, Drone, ReconDrone, isDrone, VehicleProxy, Projectiles, PROJ, VEHICLE_WEAPONS, hitSoldier, placeEmplacements, tankSpot } from './vehicles.js';
 import { createMode } from './modes.js';
 
 const DEG = Math.PI / 180;
@@ -32,6 +32,7 @@ export const CALLS = [
   { id: 'recon', name: 'Recon Drone', key: '0', cd: 20 },
   { id: 'tank', name: 'Tank', key: '8', cd: 75 },
   { id: 'jet', name: 'Jet', key: '9', cd: 75 },
+  { id: 'heli', name: 'Helicopter', key: 'H', cd: 60 },
 ];
 
 const _o = new THREE.Vector3(), _d = new THREE.Vector3(), _c = new THREE.Vector3(), _e = new THREE.Vector3();
@@ -142,7 +143,7 @@ export class Game {
     if (this.authority && !this.mapDef?.noVehicles && this.mode.kind !== 'hunt') this.vehicles.push(...placeEmplacements(this));
     this.aiCallT = [50 + Math.random() * 25, 50 + Math.random() * 25];
     this.vehicleSeq = 0;
-    pl.vcool = { drone: 0, recon: 0, tank: 0, jet: 0 };
+    pl.vcool = { drone: 0, recon: 0, tank: 0, jet: 0, heli: 0 };
     pl.fpv = settings.fpv === '10' ? 'drone10' : 'drone';
     pl.jetKind = settings.jet === 'attack' ? 'attacker' : 'jet';
 
@@ -181,6 +182,20 @@ export class Game {
 
   // the player's class with their weapon picks, as far as their rank allows
   kit(cls) { return loadoutFor(cls, this.settings.picks || {}, profile().level); }
+
+  // loadout picked mid-match (pause screen): vehicle choices at once, weapons now if this life
+  // is under 10 s old and no shot has been fired yet, otherwise at the next spawn
+  setLoadout(s) {
+    Object.assign(this.settings, { cls: s.cls, picks: s.picks, ground: s.ground, jet: s.jet, fpv: s.fpv, heli: s.heli, camo: s.camo });
+    this.pendingCls = s.cls;
+    const pl = this.player;
+    pl.fpv = s.fpv === '10' ? 'drone10' : 'drone';
+    pl.jetKind = s.jet === 'attack' ? 'attacker' : 'jet';
+    if (!pl.alive) return true;
+    if (pl.vehicle || this.time - pl.spawnT > 10 || pl.firedT > pl.spawnT) return false;
+    this.arsenal.equip(this.kit(s.cls));
+    return true;
+  }
 
   rebuild() {
     this.soldiers = [this.player, ...this.nets, ...this.bots];
@@ -898,11 +913,13 @@ export class Game {
       const gk = owner.isPlayer ? (this.settings.ground || 'apc') : ['apc', 'ifv', 'ifv', 'tank', 'tank', 'mbt'][Math.floor(Math.random() * 6)];
       v = new Tank(this, owner, id, s.x, s.z, s.yaw, gk);
     } else if (kind === 'jet') v = new FighterJet(this, owner, id, owner.isPlayer ? owner.jetKind || 'attacker' : Math.random() < 0.5 ? 'attacker' : 'jet');
+    else if (kind === 'heli') { const s = tankSpot(this, owner.team); v = new AttackHeli(this, owner, id, s.x, s.z + (owner.team ? -12 : 12), s.yaw); }
     else return null;
     this.vehicles.push(v);
     if (owner.isPlayer) this.enterVehicle(owner, v);
     if (kind === 'tank') this.announce(owner.team, `Friendly ${v.name} deployed`, `Enemy ${v.name} deployed!`);
     else if (kind === 'jet') this.announce(owner.team, 'Friendly jet inbound', 'Enemy jet inbound!');
+    else if (kind === 'heli') this.announce(owner.team, `Friendly ${v.name} up`, `Enemy ${v.name} in the air!`);
     return v;
   }
 
@@ -992,7 +1009,8 @@ export class Game {
       const r = Math.random();
       if (r < 0.45) this.callVehicle(owner, 'drone');
       else if (r < 0.75 && !has('tank')) this.callVehicle(owner, 'tank');
-      else if (!has('jet')) this.callVehicle(owner, 'jet');
+      else if (r < 0.87 && !has('jet')) this.callVehicle(owner, 'jet');
+      else if (!this.vehicles.some(v => v.alive && v.kind === 'gunship' && v.team === team)) this.callVehicle(owner, 'heli');
       else this.callVehicle(owner, 'drone');
     }
   }

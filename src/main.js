@@ -14,7 +14,7 @@ import { Net, cleanName } from './net.js';
 import { daily, describe } from './challenges.js';
 import { loadAssets, setAssetAnisotropy } from './assets.js';
 import { setThermal } from './soldier.js';
-import { TREE, unlocked, researching, progress, validChoice } from './research.js';
+import { TREE, NATIONS, RANKS, ICONS, unlocked, researching, progress, validChoice } from './research.js';
 
 const canvas = document.getElementById('game');
 const gfx = new Graphics(canvas);
@@ -68,7 +68,7 @@ function loadMapById(id) {
 const game = new Game({ renderer, scene, camera, wscene, audio, hud, loadMap: loadMapById });
 
 // ---------- settings ----------
-const defaults = { sens: 1, fov: 80, vol: 0.7, difficulty: 'regular', cls: 'assault', name: '', map: 'crossroads', mode: 'gw', quality: 'high', camo: 'none', picks: {}, fpv: '5', jet: 'attack', ground: 'apc', huntRole: 'hunter', blur: 0.3, scale: 1, dynres: true, volCats: {} };
+const defaults = { sens: 1, fov: 80, vol: 0.7, difficulty: 'regular', cls: 'assault', name: '', map: 'crossroads', mode: 'gw', quality: 'high', camo: 'none', picks: {}, fpv: '5', jet: 'attack', ground: 'apc', heli: 'heli', huntRole: 'hunter', blur: 0.3, scale: 1, dynres: true, volCats: {} };
 const matchRules = () => ({ scoreLimit: MODES[settings.mode].scoreLimit, timeLimit: MODES[settings.mode].timeLimit });
 let settings = { ...defaults };
 try { Object.assign(settings, JSON.parse(localStorage.getItem('frontline.settings') || '{}')); } catch { /* storage unavailable */ }
@@ -103,8 +103,6 @@ loadMapById(settings.map);
 function renderClassCards() {
   $('classes').innerHTML = Object.entries(CLASSES).map(([k, c]) =>
     `<button class="card${k === settings.cls ? ' on' : ''}" data-cls="${k}"><b>${c.name}</b><span>${c.desc}</span></button>`).join('');
-  $('pauseClasses').innerHTML = Object.entries(CLASSES).map(([k, c]) =>
-    `<button class="${k === (game.pendingCls || settings.cls) ? 'on' : ''}" data-cls="${k}">${c.name}</button>`).join('');
   $('diffs').innerHTML = Object.entries(DIFFICULTY).map(([k, d]) =>
     `<button class="${k === settings.difficulty ? 'on' : ''}" data-diff="${k}">${d.name}</button>`).join('');
   $('maps').innerHTML = Object.entries(MAPS).map(([k, m]) =>
@@ -135,15 +133,8 @@ function renderClassCards() {
     return `<button class="${on ? 'on' : ''}${lock ? ' locked' : ''}" data-slot="${slot}" data-w="${id}"${lock ? ' disabled' : ''}>${w.name}${lock ? ` · rank ${w.unlock}` : ''}</button>`; };
   $('picks').innerHTML = [cls.primary, ...(OPTIONS.primary[settings.cls] || [])].map(id => btn('primary', id)).join('') + '<i class="sep"></i>' +
     [cls.secondary, ...OPTIONS.secondary].map(id => btn('secondary', id)).join('');
-  // tech tree: lines of vehicles, the selected one per line, research progress
   for (const l of TREE) settings[l.setting] = validChoice(l, settings[l.setting]);
-  $('tree').innerHTML = TREE.map(l => `<div class="tline"><span class="tlabel">${l.line} <kbd>${l.key}</kbd></span>` + l.nodes.map((n, i) => {
-    const un = unlocked(n.id), sel = settings[l.setting] === n.id, cur = researching(l) === n, rp = progress(n.id);
-    const state = sel ? 'Selected' : un ? 'Unlocked' : cur ? `Researching ${Math.floor(rp / n.cost * 100)}%` : `${n.cost.toLocaleString()} RP`;
-    return `${i ? '<i class="tarrow">›</i>' : ''}<button class="tnode${sel ? ' on' : ''}${un ? '' : ' locked'}" data-line="${l.setting}" data-node="${n.id}"${un ? '' : ' disabled'}>` +
-      `<b>${n.names[0]}${n.names[1] !== n.names[0] ? ` / ${n.names[1]}` : ''}</b><span>${n.role}</span><em>${state}</em>` +
-      (un ? '' : `<u style="width:${Math.floor(rp / n.cost * 100)}%"></u>`) + '</button>';
-  }).join('') + '</div>').join('');
+  renderTree();
   $('huntRole').innerHTML = [['hunter', 'Hunter'], ['hider', 'Hider']].map(([k, n]) => `<button class="${settings.huntRole === k ? 'on' : ''}" data-role="${k}">${n}</button>`).join('');
   $('huntRow').style.opacity = settings.mode === 'hunt' ? 1 : 0.45;
   const dl = daily();
@@ -152,15 +143,64 @@ function renderClassCards() {
   $('deploy').textContent = MODES[settings.mode].coop ? 'PLAY SOLO MISSION' : 'PLAY SOLO';
 }
 
+// War Thunder style tree: a column per line, a row per rank, cards joined by research arrows
+let treeNation = 0;
+function renderTree() {
+  const lineup = TREE.map(l => l.nodes.find(n => n.id === settings[l.setting]));
+  let html = `<div class="wthead"><div class="nations">${NATIONS.map(n => `<button class="${n.id === treeNation ? 'on' : ''}" data-nation="${n.id}"><i class="flag f${n.id}"></i>${n.name}</button>`).join('')}</div>` +
+    '<p class="note">Every match\'s XP is also research: it goes into the next vehicle of each line at the same time. Click a researched vehicle to put it in your lineup.</p></div>';
+  html += `<div class="wtgrid" style="grid-template-columns: 44px repeat(${TREE.length}, 1fr)"><div></div>` + TREE.map(l => `<div class="wtline">${l.line}<kbd>${l.key}</kbd></div>`).join('');
+  RANKS.forEach((r, ri) => {
+    html += `<div class="wtrank">${r}</div>`;
+    for (const l of TREE) {
+      const n = l.nodes.find(x => x.rank === ri + 1);
+      if (!n) { html += `<div class="wtcell${l.nodes.some(x => x.rank < ri + 1) && l.nodes.some(x => x.rank > ri + 1) ? ' pipe' : ''}"></div>`; continue; }
+      const un = unlocked(n.id), sel = settings[l.setting] === n.id, cur = researching(l) === n, rp = progress(n.id), pct = n.cost ? Math.floor(rp / n.cost * 100) : 100;
+      const prev = l.nodes.some(x => x.rank < n.rank);
+      const state = sel ? 'IN LINEUP' : un ? 'Researched' : cur ? `Researching ${pct}%` : `${n.cost.toLocaleString()} RP`;
+      html += `<div class="wtcell${prev ? ' arrow' : ''}"><button class="wtc${sel ? ' on' : ''}${un ? '' : ' locked'}${cur ? ' cur' : ''}" data-line="${l.setting}" data-node="${n.id}"${un ? '' : ' disabled'} title="${n.role}">` +
+        `<svg viewBox="0 0 64 24" aria-hidden="true">${ICONS[n.icon]}</svg><b>${n.names[treeNation]}</b><span>${n.role}</span>` +
+        `<i class="br">${n.br}</i><em>${state}</em>${un ? '' : `<u style="width:${pct}%"></u>`}</button></div>`;
+    }
+  });
+  html += '</div><div class="lineup"><span>In battle:</span>' + lineup.map((n, i) => n && unlocked(n.id)
+    ? `<b><svg viewBox="0 0 64 24" aria-hidden="true">${ICONS[n.icon]}</svg>${n.names[game.player.team ?? 0]}<kbd>${TREE[i].key}</kbd></b>` : '').join('') + '</div>';
+  $('tree').innerHTML = html;
+}
+
+// a loadout change made during a match: straight away if you only just spawned, else next life
+function loadoutChanged() {
+  if (game.state !== 'playing') { $('loadoutNote').textContent = ''; return; }
+  const now = game.setLoadout(settings);
+  $('loadoutNote').textContent = now ? 'Loadout changed: you have it now.' : 'Saved: you get the new loadout when you next spawn.';
+}
+
+// tabs: the loadout, tech tree and settings panes move between the menu and the pause screen
+const tabState = { menu: 'play', pause: 'loadout' };
+function showTab(screen, tab) {
+  tabState[screen] = tab;
+  const host = $(screen === 'menu' ? 'menuHost' : 'pauseHost');
+  for (const id of ['paneLoadout', 'paneArmory', 'paneSettings']) host.appendChild($(id));
+  const panel = host.closest('.panel');
+  for (const b of panel.querySelectorAll('.tabs [data-tab]')) b.classList.toggle('on', b.dataset.tab === tab);
+  for (const sec of panel.querySelectorAll('section.tab')) sec.classList.toggle('hidden', sec.dataset.tab !== tab);
+  if (screen === 'pause') $('loadoutNote').classList.toggle('hidden', tab !== 'loadout' && tab !== 'armory');
+}
+$('menuTabs').addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) { audio.init(); audio.ui(); showTab('menu', b.dataset.tab); } });
+$('pauseTabs').addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) { audio.ui(); showTab('pause', b.dataset.tab); } });
+showTab('menu', 'play');
+
 $('picks').addEventListener('click', (e) => {
   const b = e.target.closest('[data-w]');
   if (!b || b.disabled) return;
-  (settings.picks[settings.cls] ||= {})[b.dataset.slot] = b.dataset.w; save(); audio.init(); audio.ui(); renderClassCards();
+  (settings.picks[settings.cls] ||= {})[b.dataset.slot] = b.dataset.w; save(); audio.init(); audio.ui(); loadoutChanged(); renderClassCards();
 });
 $('tree').addEventListener('click', (e) => {
+  const nb = e.target.closest('[data-nation]');
+  if (nb) { treeNation = +nb.dataset.nation; audio.ui(); renderTree(); return; }
   const b = e.target.closest('[data-node]');
   if (!b || b.disabled) return;
-  settings[b.dataset.line] = b.dataset.node; save(); audio.init(); audio.ui(); renderClassCards();
+  settings[b.dataset.line] = b.dataset.node; save(); audio.init(); audio.ui(); loadoutChanged(); renderClassCards();
 });
 $('huntRole').addEventListener('click', (e) => {
   const b = e.target.closest('[data-role]');
@@ -177,12 +217,7 @@ $('camos').addEventListener('click', (e) => {
 $('classes').addEventListener('click', (e) => {
   const b = e.target.closest('[data-cls]');
   if (!b) return;
-  settings.cls = b.dataset.cls; save(); audio.init(); audio.ui(); renderClassCards();
-});
-$('pauseClasses').addEventListener('click', (e) => {
-  const b = e.target.closest('[data-cls]');
-  if (!b) return;
-  settings.cls = game.pendingCls = b.dataset.cls; save(); audio.ui(); renderClassCards();
+  settings.cls = b.dataset.cls; save(); audio.init(); audio.ui(); loadoutChanged(); renderClassCards();
 });
 $('diffs').addEventListener('click', (e) => {
   const b = e.target.closest('[data-diff]');
@@ -225,24 +260,22 @@ function bindRange(id, key, fmt) {
     out.textContent = fmt(settings[key]);
     if (key === 'vol') audio.setVolume(settings.vol);
     applyGfx();
-    if (id === 'sens2') { $('sens').value = settings.sens; $('sensOut').textContent = fmt(settings.sens); }
-    if (id === 'sens') { $('sens2').value = settings.sens; $('sens2Out').textContent = fmt(settings.sens); }
+    if (game.state === 'playing') { game.settings.sens = settings.sens; game.settings.fov = settings.fov; }
     save();
   });
 }
 bindRange('sens', 'sens', v => v.toFixed(2));
-bindRange('sens2', 'sens', v => v.toFixed(2));
 bindRange('fov', 'fov', v => String(v));
 bindRange('blur', 'blur', v => v ? `${Math.round(v * 100)}%` : 'Off');
 bindRange('scale', 'scale', v => `${Math.round(v * 100)}%`);
 $('dynres').checked = settings.dynres;
 $('dynres').addEventListener('change', () => { settings.dynres = $('dynres').checked; save(); applyGfx(); });
-// per-category volume sliders, in the menu and the pause screen (kept in step)
+// per-category volume sliders
 function volSliders(box) {
   $(box).innerHTML = [['vol', 'Master']].concat(Object.entries(VOL_CATS)).map(([c, n]) =>
     `<label>${n} <input type="range" min="0" max="1.5" step="0.05" data-vc="${c}"><output></output></label>`).join('');
 }
-volSliders('volBox'); volSliders('volBox2');
+volSliders('volBox');
 function syncVol() {
   for (const el of document.querySelectorAll('[data-vc]')) {
     const c = el.dataset.vc, v = c === 'vol' ? settings.vol : settings.volCats[c] ?? 1;
@@ -266,6 +299,12 @@ function lock() {
     const p = canvas.requestPointerLock();
     if (p && p.catch) p.catch(() => { $('lockMsg').textContent = 'The browser refused the mouse lock. Wait a second and press Resume again.'; });
   } catch { $('lockMsg').textContent = 'The browser refused the mouse lock. Press Resume again.'; }
+}
+
+function openPause() {
+  $('pause').classList.remove('hidden');
+  $('loadoutNote').textContent = game.player.alive && game.time - (game.player.spawnT ?? -99) < 10 ? 'You only just spawned: loadout changes apply straight away.' : 'Loadout changes apply when you next spawn.';
+  showTab('pause', tabState.pause);
 }
 
 function hideScreens() {
@@ -294,6 +333,7 @@ function toMenu(msg) {
   $('death').classList.add('hidden');
   $('scoreboard').classList.add('hidden');
   $('menu').classList.remove('hidden');
+  showTab('menu', tabState.menu);
   renderClassCards();
   if (document.pointerLockElement) document.exitPointerLock();
 }
@@ -328,7 +368,7 @@ const net = new Net(game, {
     renderClassCards();
     $('pauseTitle').textContent = 'MATCH STARTED';
     $('pauseNote').textContent = 'Click Resume to take control. The match keeps running while this screen is open.';
-    $('pause').classList.remove('hidden');
+    openPause();
   },
   error(msg) { $('lobbyMsg').textContent = msg; },
   closed(msg) { toMenu(msg); },
@@ -401,7 +441,7 @@ document.addEventListener('pointerlockchange', () => {
     renderClassCards();
     $('pauseTitle').textContent = 'PAUSED';
     $('pauseNote').textContent = net.active ? 'This is a multiplayer match, so it keeps running while you are paused.' : '';
-    $('pause').classList.remove('hidden');
+    openPause();
   }
   keys.clear(); mouse.clear();
 });
@@ -409,11 +449,13 @@ document.addEventListener('pointerlockchange', () => {
 // ---------- input ----------
 const keys = new Set(), pressed = new Set(), mouse = new Set(), mousePressed = new Set();
 let mdx = 0, mdy = 0, wheel = 0;
-const GAME_KEYS = new Set(['Tab', 'Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyC', 'KeyG', 'KeyV', 'KeyR', 'KeyQ', 'KeyE', 'KeyF', 'KeyZ', 'KeyM',
+const GAME_KEYS = new Set(['Tab', 'Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyC', 'KeyG', 'KeyV', 'KeyR', 'KeyQ', 'KeyE', 'KeyF', 'KeyZ', 'KeyM', 'KeyH', 'KeyB',
   'ControlLeft', 'ControlRight', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9']);
 
 addEventListener('keydown', (e) => {
   if (!locked) return;
+  // B: open the loadout mid-match (the pause screen, on its loadout tab)
+  if (e.code === 'KeyB' && game.state === 'playing') { e.preventDefault(); tabState.pause = 'loadout'; document.exitPointerLock(); return; }
   if (GAME_KEYS.has(e.code)) e.preventDefault();
   if (!e.repeat) pressed.add(e.code);
   keys.add(e.code);
@@ -435,7 +477,7 @@ function readInput() {
   if (pressed.has('Digit3') && n > 2) switchTo = 2;
   if (wheel !== 0 && n) switchTo = (ars.cur + (wheel > 0 ? 1 : n - 1)) % n;
   const streak = pressed.has('Digit4') ? 'uav' : pressed.has('Digit5') ? 'airstrike' : pressed.has('Digit6') ? 'chopper' : null;
-  const call = pressed.has('Digit0') ? 'recon' : pressed.has('Digit7') ? 'drone' : pressed.has('Digit8') ? 'tank' : pressed.has('Digit9') ? 'jet' : null;
+  const call = pressed.has('KeyH') ? 'heli' : pressed.has('Digit0') ? 'recon' : pressed.has('Digit7') ? 'drone' : pressed.has('Digit8') ? 'tank' : pressed.has('Digit9') ? 'jet' : null;
   let digit = 0;
   for (let d = 1; d <= 9 && !digit; d++) if (pressed.has(`Digit${d}`)) digit = d;
   if (pressed.has('KeyM')) hud.toggleMap();
@@ -516,4 +558,4 @@ function frame(ts) {
 requestAnimationFrame(frame);
 
 // hook for automated screenshots in dev and test builds only
-if (import.meta.env.DEV || import.meta.env.VITE_TEST_HOOK) window.__fl = { game, THREE, deploy, settings, loadMapById, gfx, atmo, audio, CLASSES, sites };
+if (import.meta.env.DEV || import.meta.env.VITE_TEST_HOOK) window.__fl = { game, THREE, deploy, settings, loadMapById, gfx, atmo, audio, CLASSES, sites, world: await import("./world.js") };

@@ -26,7 +26,7 @@ const se = (t, a, b, n) => {
   return [a * Math.sign(c) * Math.abs(c) ** (2 / n), b * Math.sign(s) * Math.abs(s) ** (2 / n)];
 };
 
-// Fuselage loft along -z (nose) to +z (tail). sections: [z, halfWidth, top, bottom, yCentre, n]
+// Fuselage loft along -z (nose) to +z (tail), faces wound outward. sections: [z, halfWidth, top, bottom, yCentre, n]
 export function loft(sections, seg = 24, capEnds = true) {
   const pos = [], uv = [], idx = [];
   sections.forEach(([z, w, top, bot, yc, n = 2.2], i) => {
@@ -41,7 +41,7 @@ export function loft(sections, seg = 24, capEnds = true) {
   const R = seg + 1;
   for (let i = 0; i < sections.length - 1; i++) for (let k = 0; k < seg; k++) {
     const a = i * R + k, b = a + 1, c = a + R, d = c + 1;
-    idx.push(a, c, b, b, c, d);
+    idx.push(a, b, c, b, d, c);
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
@@ -52,7 +52,7 @@ export function loft(sections, seg = 24, capEnds = true) {
     const last = sections.length - 1, [z, , , , yc] = sections[last];
     const ci = pos.length / 3;
     pos.push(0, yc, z); uv.push(0, 0);
-    for (let k = 0; k < seg; k++) idx.push(last * R + k + 1, last * R + k, ci);
+    for (let k = 0; k < seg; k++) idx.push(last * R + k, last * R + k + 1, ci);
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
     g.setIndex(idx);

@@ -269,7 +269,7 @@ export class Net {
         const r = d.r;
         if (!Array.isArray(r) || r.length < 15) break;
         const vid = num(r[0], -1), kind = String(r[1]);
-        if (!['tank', 'apc', 'ifv', 'mbt', 'jet', 'attacker', 'drone', 'drone10', 'recon', 'heli'].includes(kind) || Math.floor((vid - 10000) / 100) !== id || g.deadVehicles.has(vid)) break;
+        if (!['tank', 'apc', 'ifv', 'mbt', 'jet', 'attacker', 'drone', 'drone10', 'recon', 'heli', 'gunship'].includes(kind) || Math.floor((vid - 10000) / 100) !== id || g.deadVehicles.has(vid)) break;
         let v = g.vehicles.find(x => x.id === vid);
         if (!v) { v = new VehicleProxy(g, vid, kind, s.team); v.owner = s; g.vehicles.push(v); }
         if (!v.isProxy || v.owner !== s) break;
