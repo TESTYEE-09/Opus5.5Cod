@@ -36,7 +36,10 @@ A browser first-person shooter in the style of Call of Duty, built with three.js
 - Lean around corners with Q and E, and go prone with Ctrl or Z. Prone halves your spread and recoil and shrinks you to a low target.
 - Mantle: jump at a ledge up to about 2 m high and you climb onto it. Double-tap Shift for a tactical sprint.
 - Press M for the full map: flags, the mission objective, your team and vehicles.
-- Rank: every match's score, plus a bonus for a win or a finished mission, earns XP toward 55 ranks, from Private to Commander. Your rank shows in the menu and after each match.
+- Rank: every match's score, plus a bonus for a win or a finished mission, earns XP toward 55 ranks, from Private to Commander. Score comes from kills, assists, captures and completed objectives, so all of those feed your rank. Your rank shows in the menu and after each match.
+- **Custom loadouts**: five of your own kits sit alongside the ten fixed classes (the fixed ones stay, because Undercover and Ground War need the Operator and launcher kits). Press **Edit loadouts** on the menu to pick a primary, a secondary and an optional launcher, bolt on four attachments and choose three perks. Everything above your rank is locked, and a locked pick falls back to the slot's default when you deploy rather than refusing to spawn. Your loadouts are kept in this browser.
+  - Attachments are stat changes, not decoration: a **reflex** raises the gun faster, a **4x scope** swaps in a full-screen reticle and real magnification for a slower aim, a **suppressor** makes you quiet and invisible to minimaps but cuts your effective range, a **long barrel** holds damage further out, an **extended mag** carries half again as many rounds for a slower reload, a **fast mag** reloads quicker, a **foregrip** cuts recoil, and a **laser** tightens hip fire.
+  - Perks, one per slot: **Lightweight** (10% faster on foot) or **Quiet Boots** (much harder to hear); **Quickdraw** (quarter-faster reload, 20% faster aim) or **Bandolier** (an extra grenade and half again as much reserve ammo); **Steady** (15% less recoil) or **Ghost** (enemy UAVs and minimaps never show you).
 - Sights: open reflex and holographic sights with clear glass and thin frames, glowing dots on the iron sights, and full-screen scope reticles for the sniper and marksman rifles.
 - Graphics: procedural textures with normal maps, a physically based lighting model lit from an image of the sky, soft sun shadows, bloom, filmic tone mapping, sharpening and a colour grade. High and Ultra add sun shafts through buildings and cranes, and Ultra adds ambient occlusion. Wet floors carry planar reflections, rippled by the rain and fading with the puddles. Floodlights get fake volumetric beams and real spot lights. Shipping containers have frames, door hardware and weathered company logos. The big maps are drawn in 64 m chunks that are culled by the camera, by the sun's shadow camera and by the fog, with small props and far soldiers hidden at distance. Low, Medium, High and Ultra presets are in the menu.
 - Effects: detailed vehicles, trees and props; per-surface bullet impacts (sparks on metal, splinters on wood, dust on stone); layered explosions; ejected brass; blood; snow, dust and rain (with splashes) in the air.
@@ -102,6 +105,7 @@ Then open http://localhost:5178. `npm run build` writes a static site to `dist/`
 | `src/modes.js` | Team Deathmatch, Ground War (flags, spawns, scoring) and Undercover (suspicion, alarms, the mission chain) |
 | `src/reflect.js` | Planar reflections for rain-wet floors |
 | `src/rank.js` | XP and career rank |
+| `src/loadout.js` | Custom loadouts: weapon choices, attachment stat deltas, perks and level unlocks |
 | `src/props.js` | Vehicles, trees, lamps and other detailed props, merged into a few meshes |
 | `src/textures.js` | Procedural colour and normal-map textures |
 | `src/atmosphere.js` | Sky, sun, fog, image-based lighting, rain, snow, dust and lightning |

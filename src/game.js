@@ -9,6 +9,7 @@ import { NetSoldier } from './net.js';
 import { Chopper, Tank, FighterJet, Drone, VehicleProxy, Projectiles, PROJ, VEHICLE_WEAPONS, hitSoldier, placeEmplacements, tankSpot } from './vehicles.js';
 import { createMode } from './modes.js';
 import { Spectator } from './spectate.js';
+import { loadLoadouts, toClass } from './loadout.js';
 
 const DEG = Math.PI / 180;
 const NAMES = ['Viper', 'Ghost', 'Havoc', 'Reaper', 'Nomad', 'Sarge', 'Hawk', 'Wolf', 'Rook', 'Blitz', 'Frost', 'Onyx',
@@ -86,6 +87,19 @@ export class Game {
   }
 
   get authority() { return this.role !== 'client'; }
+
+  // A class id is either one of the fixed CLASSES or 'custom0'..'custom4', a saved loadout.
+  classFor(id) {
+    const m = /^custom(\d)$/.exec(String(id ?? ''));
+    if (m) {
+      const l = loadLoadouts()[+m[1]];
+      if (l) return toClass(l);
+    }
+    return CLASSES[id] || CLASSES.assault;
+  }
+
+  // perks only exist for the local player; remote soldiers carry a ghost flag instead
+  hidden(s) { return s === this.player ? !!this.arsenal.perks?.has('ghost') : !!s.ghost; }
   emit(ev) { if (this.role === 'host') this.events.push(ev); }
 
   // ---------- match flow ----------
@@ -120,7 +134,7 @@ export class Game {
     pl.resetStats();
     for (const r of roster) {
       if (r.me) continue;
-      if (this.role === 'client') this.nets.push(new NetSoldier(this, r.id, r.team, r.name, r.human, false));
+      if (this.role === 'client') { const n = new NetSoldier(this, r.id, r.team, r.name, r.human, false); n.ghost = !!r.g; this.nets.push(n); }
       else this.nets.push(new NetSoldier(this, r.id, r.team, r.name, true, true));
     }
     if (this.authority) {
@@ -159,12 +173,14 @@ export class Game {
     this.hud.reset(this);
 
     if (this.role === 'client') {
-      pl.spawn(me, me.yaw, CLASSES[settings.cls]);
+      pl.spawn(me, me.yaw, this.classFor(settings.cls));
+      this.sentGhost = this.arsenal.perks?.has('ghost') ? 1 : 0;
+      this.net.send({ t: 'kit', g: this.sentGhost });
       for (const n of this.nets) { const r = roster.find(x => x.id === n.id); n.pos.set(r.x, 0, r.z); n.tgt.copy(n.pos); }
       return;
     }
     const sp = this.pickSpawn(pl.team, pl);
-    pl.spawn(sp, sp.yaw, CLASSES[settings.cls]);
+    pl.spawn(sp, sp.yaw, this.classFor(settings.cls));
     for (const n of this.nets) { const s = this.pickSpawn(n.team, n); n.place(s.x, 0, s.z, s.yaw); }
     for (const b of this.bots) { const s = this.mode.initialSpot?.(b) || this.pickSpawn(b.team, b); b.spawn(s, s.yaw); }
   }
@@ -185,7 +201,7 @@ export class Game {
   }
 
   rosterList() {
-    return this.soldiers.map(s => ({ id: s.id, name: s.name, team: s.team, human: !!(s.isPlayer || s.human), x: r2(s.pos.x), z: r2(s.pos.z), yaw: r2(s.yaw) }));
+    return this.soldiers.map(s => ({ id: s.id, name: s.name, team: s.team, human: !!(s.isPlayer || s.human), g: this.hidden(s) ? 1 : 0, x: r2(s.pos.x), z: r2(s.pos.z), yaw: r2(s.yaw) }));
   }
 
   // host: a player joined or left mid-match
@@ -295,6 +311,15 @@ export class Game {
     }
     const s = this.pickSpawn(bot.team, bot);
     bot.spawn(s, s.yaw);
+  }
+
+  // A client's Ghost perk can change between spawns, so resend it when it does.
+  syncKit() {
+    if (this.role !== 'client') return;
+    const g = this.arsenal.perks?.has('ghost') ? 1 : 0;
+    if (g === this.sentGhost) return;
+    this.sentGhost = g;
+    this.net.send({ t: 'kit', g });
   }
 
   // ---------- queries ----------
@@ -522,7 +547,7 @@ export class Game {
     for (const [o, dmg] of objHits) this.hitObject(o, dmg, pl, false);
     if (this.role === 'client') {
       for (const [e, r] of hits) this.net.send({ t: 'hit', id: e.id, d: Math.round(r.dmg * 10) / 10, h: r.head, w: def.name });
-      this.net.send({ t: 'fire', m: arr(muzzle), e: sent, key: def.model });
+      this.net.send({ t: 'fire', m: arr(muzzle), e: sent, key: def.model, sd: def.silent ? 1 : 0 });
     } else for (const [e, r] of hits) this.damage(e, r.dmg, pl, def.name, r.head, pl.pos);
     const fx = this.effects;
     fx.muzzleLight.position.copy(muzzle); fx.muzzleLight.intensity = 6; fx.muzzleT = 0.05;
@@ -1172,7 +1197,7 @@ export class Game {
         if (own) this.audio.beep(); else this.audio.alarm();
         break;
       }
-      case 'spawn': if (mine) { pl.spawn({ x: ev.x, z: ev.z }, ev.yaw, CLASSES[this.pendingCls]); this.hud.hideDeath(); } break;
+      case 'spawn': if (mine) { pl.spawn({ x: ev.x, z: ev.z }, ev.yaw, this.classFor(this.pendingCls)); this.syncKit(); this.hud.hideDeath(); } break;
       case 'drop': if (Array.isArray(ev.p)) this.dropPickup(v3(ev.p), ev.id); break;
       case 'took': this.removePickup(ev.id); break;
       case 'roster': this.syncRoster(ev.r || []); break;
@@ -1190,6 +1215,7 @@ export class Game {
     for (const r of list) {
       if (r.id === this.player.id || this.byId.has(r.id)) continue;
       const n = new NetSoldier(this, r.id, r.team, r.name, r.human, false);
+      n.ghost = !!r.g;
       n.pos.set(r.x, 0, r.z); n.tgt.copy(n.pos);
       this.nets.push(n);
     }
@@ -1270,7 +1296,8 @@ export class Game {
       }
       if (this.authority && this.deadT <= 0) {
         const sp = this.pickSpawn(pl.team, pl);
-        pl.spawn(sp, sp.yaw, CLASSES[this.pendingCls]);
+        pl.spawn(sp, sp.yaw, this.classFor(this.pendingCls));
+        this.syncKit();
         this.hud.hideDeath();
       }
     }

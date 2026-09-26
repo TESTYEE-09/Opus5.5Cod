@@ -177,7 +177,7 @@ export class Hud {
     for (const e of game.soldiers) {
       if (!e.alive || e === pl) continue;
       const [x, z] = P(e.pos.x, e.pos.z);
-      if (e.team === pl.team) { g.fillStyle = '#6fb0ff'; g.beginPath(); g.arc(x, z, 3, 0, 7); g.fill(); } else if (uav || game.time - e.firedT < 1.2) { g.fillStyle = '#ff4a3a'; g.beginPath(); g.arc(x, z, 3, 0, 7); g.fill(); }
+      if (e.team === pl.team) { g.fillStyle = '#6fb0ff'; g.beginPath(); g.arc(x, z, 3, 0, 7); g.fill(); } else if (!game.hidden(e) && (uav || game.time - e.firedT < 1.2)) { g.fillStyle = '#ff4a3a'; g.beginPath(); g.arc(x, z, 3, 0, 7); g.fill(); }
     }
     for (const v of game.vehicles) {
       if (!v.alive || (v.team !== pl.team && !uav && v.kind === 'drone')) continue;
@@ -529,7 +529,7 @@ export class Hud {
         g.lineTo(e.pos.x - fx * 1.1 + fz * 1.1, e.pos.z - fz * 1.1 - fx * 1.1);
         g.lineTo(e.pos.x - fx * 1.1 - fz * 1.1, e.pos.z - fz * 1.1 + fx * 1.1);
         g.fill();
-      } else if (uav || game.time - e.firedT < 1.2) {
+      } else if (!game.hidden(e) && (uav || game.time - e.firedT < 1.2)) {
         g.fillStyle = '#ff4a3a';
         g.beginPath(); g.arc(e.pos.x, e.pos.z, 1.2, 0, Math.PI * 2); g.fill();
       }

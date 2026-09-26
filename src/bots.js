@@ -565,7 +565,7 @@ export class Bot {
     if (this.goal && Math.hypot(this.goal.x - this.pos.x, this.goal.z - this.pos.z) < 1.5) this.goal = null;
     if (g.uav[this.team] > 0 && Math.random() < dt * 0.5) {
       const e = g.nearestEnemy(this);
-      if (e) this.hear(e, e.pos);
+      if (e && !g.hidden(e)) this.hear(e, e.pos);
     }
   }
 

@@ -289,3 +289,22 @@ button:disabled { opacity: 0.5; cursor: default; }
 #outro.show { display: block; }
 #outro .t { font-size: 40px; font-weight: 700; letter-spacing: 0.16em; color: #ffd24a; }
 #outro .s { margin-top: 6px; font-size: 19px; letter-spacing: 0.06em; }
+
+.editrow { display: flex; align-items: center; gap: 12px; margin: 8px 0 4px; }
+#kit .panel { max-width: 900px; }
+#kitBody { margin-top: 6px; }
+.kitgrp { margin: 14px 0 6px; }
+.kitgrp > h4 {
+  margin: 0 0 6px; font-size: 13px; font-weight: 600; letter-spacing: 0.14em;
+  text-transform: uppercase; color: #ffd24a; opacity: 0.85;
+}
+.kitopts { display: flex; flex-wrap: wrap; gap: 6px; }
+.kitopts button {
+  flex: 1 1 150px; text-align: left; padding: 7px 10px; line-height: 1.25;
+}
+.kitopts button b { display: block; font-size: 14px; }
+.kitopts button span { display: block; font-size: 11px; opacity: 0.6; }
+.kitopts button.on { outline: 2px solid #ffd24a; }
+.kitopts button[disabled] { opacity: 0.35; cursor: not-allowed; }
+.kitopts button[disabled] span::after { content: ''; }
+.kitsum { margin-top: 12px; font-size: 13px; opacity: 0.75; line-height: 1.5; }

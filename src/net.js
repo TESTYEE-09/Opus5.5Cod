@@ -323,13 +323,17 @@ export class Net {
       }
       case 'fire': {
         if (!s.alive) break;
-        const silent = SILENT.has(String(d.key));
+        const silent = !!d.sd || SILENT.has(String(d.key));
         if (!silent) s.firedT = g.time;
         s.shotT = g.time;
         g.noise(s, s.pos, silent ? 6 : 45);
         g.remoteShot(s, d);
         break;
       }
+      case 'kit':
+        // the only perk the host has to know about: Ghost keeps them off enemy minimaps
+        if (s.ghost !== !!d.g) { s.ghost = !!d.g; g.emit({ k: 'roster', r: g.rosterList() }); }
+        break;
       case 'act':
         if (s.alive) g.mode.act(s, String(d.id));
         break;
