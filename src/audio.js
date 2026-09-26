@@ -35,10 +35,18 @@ const MIX = {
   heartbeat: -17, jet: -3, heli: -6, stepSelf: -24, stepOther: -13, land: -16, hurt: -12,
   hit: -15, head: -16, kill: -12, impact: -21, scrape: -17, ui: -18, pickup: -15, streak: -12, friendly: -13, alarm: -12,
 };
+// volume categories the player can set, by MIX key (anything else is 'world')
+export const VOL_CATS = { weapons: 'Weapons', explosions: 'Explosions', vehicles: 'Vehicles', ui: 'UI & voice', world: 'World' };
+const CAT_OF = {
+  gunSelf: 'weapons', gunNear: 'weapons', gunFar: 'weapons', casings: 'weapons', reload: 'weapons', dry: 'weapons', bolt: 'weapons', flyby: 'weapons',
+  explosion: 'explosions', explosionFar: 'explosions', jet: 'vehicles', heli: 'vehicles',
+  hit: 'ui', head: 'ui', kill: 'ui', ui: 'ui', pickup: 'ui', streak: 'ui', friendly: 'ui', alarm: 'ui', hurt: 'ui', heartbeat: 'ui',
+};
 const CAP = { impact: 6, step: 10, casings: 4, flyby: 3, bounce: 4, flak: 6 };
 
 export class Sfx {
   constructor() {
+    this.catVol = {};
     this.ctx = null;
     this.buffers = {};
     this.norm = {};
@@ -68,6 +76,12 @@ export class Sfx {
     this.lp = ctx.createBiquadFilter(); this.lp.type = 'lowpass'; this.lp.frequency.value = 20000; this.lp.Q.value = 0.5;
     this.world.connect(this.lp).connect(this.master);
     this.uiBus = ctx.createGain(); this.uiBus.connect(this.master);
+    // one bus per volume category, in front of the world / ui chains
+    this.bus = {};
+    for (const c of Object.keys(VOL_CATS)) {
+      this.bus[c] = ctx.createGain(); this.bus[c].gain.value = this.catVol[c] ?? 1;
+      this.bus[c].connect(c === 'ui' ? this.uiBus : this.world);
+    }
     this.ambGain = ctx.createGain(); this.ambGain.gain.value = 0; this.ambGain.connect(this.world);
     // reverb send
     this.verb = ctx.createConvolver();
@@ -91,6 +105,7 @@ export class Sfx {
   }
 
   setVolume(v) { this.volume = v; if (this.master) this.master.gain.value = v; }
+  setCategory(cat, v) { this.catVol[cat] = v; if (this.bus?.[cat]) this.bus[cat].gain.value = v; }
 
   // map acoustics: reverb length, wet level, reverb brightness, and the ambient bed
   setEnvironment(env) {
@@ -202,7 +217,8 @@ export class Sfx {
     node.connect(g);
     const p = ctx.createStereoPanner();
     p.pan.value = (o.pan ?? 0) * 0.85;
-    g.connect(p).connect(o.ui ? this.uiBus : this.world);
+    const cat = CAT_OF[o.mix] || 'world';
+    g.connect(p).connect(o.ui && cat === 'world' ? this.uiBus : this.bus[cat]);
     if (o.send) { const s = ctx.createGain(); s.gain.value = o.send; p.connect(s).connect(this.verbIn); }
     const t = ctx.currentTime + (o.when || 0);
     src.start(t, o.offset || 0);
@@ -411,7 +427,7 @@ export class Sfx {
     if (!this.ctx) return nop;
     const ctx = this.ctx, out = ctx.createGain(), pan = ctx.createStereoPanner(), lp = ctx.createBiquadFilter();
     lp.type = 'lowpass'; out.gain.value = 0;
-    lp.connect(out).connect(pan).connect(this.world);
+    lp.connect(out).connect(pan).connect(this.bus.vehicles);
     const srcs = [], oscs = [];
     const osc = (type, f, g) => {
       const o = ctx.createOscillator(); o.type = type; o.frequency.value = f;

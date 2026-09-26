@@ -316,3 +316,5 @@ label.check { display: flex; align-items: center; gap: 8px; }
 .seg.wrap { flex-wrap: wrap; }
 .seg .sep { width: 12px; }
 .seg button.locked { opacity: 0.45; }
+
+.vols label { display: flex; }

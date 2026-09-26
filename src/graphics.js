@@ -131,7 +131,7 @@ export class Graphics {
     setAnisotropy(Math.min(8, r.capabilities.getMaxAnisotropy()));
     this.q = null;
     this.override = null;
-    this.blurAmount = 0.5; // 0..1 from settings
+    this.blurAmount = 0.3; // 0..1 from settings
     this.renderScale = 1; // user render scale, 0.5..1
     this.dynamic = true; // lower the resolution when frames run long
     this.dynScale = 1;
@@ -226,13 +226,15 @@ export class Graphics {
   // Dynamic resolution: average the frame time and step the scale down when it runs over
   // ~60 fps budget, back up when there is headroom. Checked twice a second.
   dynamicRes(dt) {
-    this.frameMs += (dt * 1000 - this.frameMs) * 0.1;
-    if ((this.dynT += dt) < 0.5) return;
+    // slow average and a wide dead band: the resolution changes rarely, so the image
+    // does not visibly pulse
+    this.frameMs += (dt * 1000 - this.frameMs) * 0.03;
+    if ((this.dynT += dt) < 2) return;
     this.dynT = 0;
     let s = this.dynScale;
     if (!this.dynamic) s = 1;
-    else if (this.frameMs > 19) s = Math.max(0.6, s - 0.1);
-    else if (this.frameMs < 13) s = Math.min(1, s + 0.05);
+    else if (this.frameMs > 21) s = Math.max(0.65, s - 0.05);
+    else if (this.frameMs < 12 && s < 1) s = Math.min(1, s + 0.05);
     if (s !== this.dynScale) { this.dynScale = s; this.resize(); }
   }
 

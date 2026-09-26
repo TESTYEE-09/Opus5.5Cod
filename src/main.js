@@ -4,7 +4,7 @@ import { MAPS, MODES } from './maps.js';
 import { profile } from './rank.js';
 import { Graphics, QUALITY } from './graphics.js';
 import { Atmosphere } from './atmosphere.js';
-import { Sfx } from './audio.js';
+import { Sfx, VOL_CATS } from './audio.js';
 import { Hud } from './hud.js';
 import { Game } from './game.js';
 import { CLASSES, CAMO_MATS, OPTIONS, WEAPONS } from './weapons.js';
@@ -68,11 +68,13 @@ function loadMapById(id) {
 const game = new Game({ renderer, scene, camera, wscene, audio, hud, loadMap: loadMapById });
 
 // ---------- settings ----------
-const defaults = { sens: 1, fov: 80, vol: 0.7, difficulty: 'regular', cls: 'assault', name: '', map: 'crossroads', mode: 'gw', quality: 'high', camo: 'none', picks: {}, fpv: '5', jet: 'attack', ground: 'apc', huntRole: 'hunter', blur: 0.5, scale: 1, dynres: true };
+const defaults = { sens: 1, fov: 80, vol: 0.7, difficulty: 'regular', cls: 'assault', name: '', map: 'crossroads', mode: 'gw', quality: 'high', camo: 'none', picks: {}, fpv: '5', jet: 'attack', ground: 'apc', huntRole: 'hunter', blur: 0.3, scale: 1, dynres: true, volCats: {} };
 const matchRules = () => ({ scoreLimit: MODES[settings.mode].scoreLimit, timeLimit: MODES[settings.mode].timeLimit });
 let settings = { ...defaults };
 try { Object.assign(settings, JSON.parse(localStorage.getItem('frontline.settings') || '{}')); } catch { /* storage unavailable */ }
 if (!CLASSES[settings.cls]) settings.cls = 'assault';
+// one-time: the old 50% motion blur default felt smeary
+if (!settings.v3) { if (settings.blur === 0.5) settings.blur = 0.3; settings.v3 = true; }
 if (!DIFFICULTY[settings.difficulty]) settings.difficulty = 'regular';
 if (!MAPS[settings.map]) settings.map = 'crossroads';
 const fixMode = () => { if (!MAPS[settings.map].modes.includes(settings.mode)) settings.mode = MAPS[settings.map].modes[0]; };
@@ -80,6 +82,7 @@ fixMode();
 if (!QUALITY[settings.quality]) settings.quality = 'high';
 const save = () => { try { localStorage.setItem('frontline.settings', JSON.stringify(settings)); } catch { /* storage unavailable */ } };
 audio.setVolume(settings.vol);
+for (const [c, v] of Object.entries(settings.volCats || {})) audio.setCategory(c, v);
 
 function $(id) { return document.getElementById(id); }
 
@@ -113,6 +116,8 @@ function renderClassCards() {
   const modes = MAPS[settings.map].modes;
   $('modesel').innerHTML = Object.entries(MODES).map(([k, m]) =>
     `<button class="card${k === settings.mode ? ' on' : ''}${modes.includes(k) ? '' : ' off'}" data-mode="${k}"><b>${m.name}</b><span>${modes.includes(k) ? m.desc : `Not on ${MAPS[settings.map].name}`}</span></button>`).join('');
+  $('lobbyRole').innerHTML = [['hunter', 'Hunter'], ['hider', 'Hider']].map(([k, n]) => `<button class="${settings.huntRole === k ? 'on' : ''}" data-lrole="${k}"${net.active && !net.isHost ? ' disabled' : ''}>${n}</button>`).join('');
+  $('lobbyHunt').style.display = settings.mode === 'hunt' ? '' : 'none';
   $('lobbyGm').innerHTML = Object.entries(MODES).filter(([k]) => modes.includes(k)).map(([k, m]) =>
     `<button class="${k === settings.mode ? 'on' : ''}" data-gm="${k}"${net.active && !net.isHost ? ' disabled' : ''}>${m.name}</button>`).join('');
   $('modeName').textContent = MODES[settings.mode].name;
@@ -197,6 +202,7 @@ function chooseMode(k) {
   renderClassCards();
 }
 $('modesel').addEventListener('click', (e) => { const b = e.target.closest('[data-mode]'); if (b) chooseMode(b.dataset.mode); });
+$('lobbyRole').addEventListener('click', (e) => { const b = e.target.closest('[data-lrole]'); if (b && net.isHost) { settings.huntRole = b.dataset.lrole; save(); renderClassCards(); } });
 $('lobbyGm').addEventListener('click', (e) => { const b = e.target.closest('[data-gm]'); if (b && net.isHost) chooseMode(b.dataset.gm); });
 $('maps').addEventListener('click', (e) => { const b = e.target.closest('[data-map]'); if (b) chooseMap(b.dataset.map); });
 $('lobbyMaps').addEventListener('click', (e) => { const b = e.target.closest('[data-map]'); if (b && net.isHost) chooseMap(b.dataset.map); });
@@ -231,7 +237,26 @@ bindRange('blur', 'blur', v => v ? `${Math.round(v * 100)}%` : 'Off');
 bindRange('scale', 'scale', v => `${Math.round(v * 100)}%`);
 $('dynres').checked = settings.dynres;
 $('dynres').addEventListener('change', () => { settings.dynres = $('dynres').checked; save(); applyGfx(); });
-bindRange('vol', 'vol', v => `${Math.round(v * 100)}`);
+// per-category volume sliders, in the menu and the pause screen (kept in step)
+function volSliders(box) {
+  $(box).innerHTML = [['vol', 'Master']].concat(Object.entries(VOL_CATS)).map(([c, n]) =>
+    `<label>${n} <input type="range" min="0" max="1.5" step="0.05" data-vc="${c}"><output></output></label>`).join('');
+}
+volSliders('volBox'); volSliders('volBox2');
+function syncVol() {
+  for (const el of document.querySelectorAll('[data-vc]')) {
+    const c = el.dataset.vc, v = c === 'vol' ? settings.vol : settings.volCats[c] ?? 1;
+    el.value = v; el.nextElementSibling.textContent = `${Math.round(v * 100)}`;
+  }
+}
+document.addEventListener('input', (e) => {
+  const c = e.target.dataset?.vc;
+  if (!c) return;
+  const v = parseFloat(e.target.value);
+  if (c === 'vol') { settings.vol = v; audio.setVolume(v); } else { settings.volCats[c] = v; audio.setCategory(c, v); }
+  save(); syncVol();
+});
+syncVol();
 
 // ---------- pointer lock & screens ----------
 let locked = false;
