@@ -13,6 +13,7 @@ import { DIFFICULTY } from './bots.js';
 import { Net, cleanName } from './net.js';
 import { daily, describe } from './challenges.js';
 import { loadAssets, setAssetAnisotropy } from './assets.js';
+import { setThermal } from './soldier.js';
 
 const canvas = document.getElementById('game');
 const gfx = new Graphics(canvas);
@@ -66,7 +67,7 @@ function loadMapById(id) {
 const game = new Game({ renderer, scene, camera, wscene, audio, hud, loadMap: loadMapById });
 
 // ---------- settings ----------
-const defaults = { sens: 1, fov: 80, vol: 0.7, difficulty: 'regular', cls: 'assault', name: '', map: 'crossroads', mode: 'gw', quality: 'high', camo: 'none', blur: 0.5, scale: 1, dynres: true };
+const defaults = { sens: 1, fov: 80, vol: 0.7, difficulty: 'regular', cls: 'assault', name: '', map: 'crossroads', mode: 'gw', quality: 'high', camo: 'none', fpv: '5', huntRole: 'hunter', blur: 0.5, scale: 1, dynres: true };
 const matchRules = () => ({ scoreLimit: MODES[settings.mode].scoreLimit, timeLimit: MODES[settings.mode].timeLimit });
 let settings = { ...defaults };
 try { Object.assign(settings, JSON.parse(localStorage.getItem('frontline.settings') || '{}')); } catch { /* storage unavailable */ }
@@ -122,11 +123,25 @@ function renderClassCards() {
   $('camos').innerHTML = CAMOS.map(c => `<button class="camo camo-${c.id}${c.id === settings.camo ? ' on' : ''}${c.rank > pr.level ? ' locked' : ''}" data-camo="${c.id}"${c.rank > pr.level ? ' disabled' : ''}>` +
     `<b>${c.name}</b><span>${c.rank > pr.level ? `Rank ${c.rank}` : c.id === settings.camo ? 'Equipped' : 'Unlocked'}</span></button>`).join('');
   applyCamo(settings.camo, CAMO_MATS);
+  $('fpvSize').innerHTML = [['5', '5-inch'], ['10', '10-inch']].map(([k, n]) => `<button class="${settings.fpv === k ? 'on' : ''}" data-fpv="${k}">${n}</button>`).join('');
+  $('huntRole').innerHTML = [['hunter', 'Hunter'], ['hider', 'Hider']].map(([k, n]) => `<button class="${settings.huntRole === k ? 'on' : ''}" data-role="${k}">${n}</button>`).join('');
+  $('huntRow').style.opacity = settings.mode === 'hunt' ? 1 : 0.45;
   const dl = daily();
   $('daily').innerHTML = `<h3>Daily challenges${dl.streak > 1 ? ` &middot; ${dl.streak}-day streak` : ''}${dl.bonusReady ? ' &middot; <b>first match today: double XP</b>' : ''}</h3>` +
     dl.list.map(c => `<div class="chal${c.done ? ' done' : ''}"><span>${describe(c)}</span><i style="width:${Math.round(c.have / c.goal * 100)}%"></i><b>${c.done ? 'DONE' : `${c.have}/${c.goal}`} &middot; ${c.xp.toLocaleString()} XP</b></div>`).join('');
   $('deploy').textContent = MODES[settings.mode].coop ? 'PLAY SOLO MISSION' : 'PLAY SOLO';
 }
+
+$('fpvSize').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-fpv]');
+  if (!b) return;
+  settings.fpv = b.dataset.fpv; save(); audio.init(); audio.ui(); renderClassCards();
+});
+$('huntRole').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-role]');
+  if (!b) return;
+  settings.huntRole = b.dataset.role; save(); audio.init(); audio.ui(); renderClassCards();
+});
 
 $('camos').addEventListener('click', (e) => {
   const b = e.target.closest('[data-camo]');
@@ -375,7 +390,7 @@ function readInput() {
   if (pressed.has('Digit3') && n > 2) switchTo = 2;
   if (wheel !== 0 && n) switchTo = (ars.cur + (wheel > 0 ? 1 : n - 1)) % n;
   const streak = pressed.has('Digit4') ? 'uav' : pressed.has('Digit5') ? 'airstrike' : pressed.has('Digit6') ? 'chopper' : null;
-  const call = pressed.has('Digit7') ? 'drone' : pressed.has('Digit8') ? 'tank' : pressed.has('Digit9') ? 'jet' : null;
+  const call = pressed.has('Digit0') ? 'recon' : pressed.has('Digit7') ? 'drone' : pressed.has('Digit8') ? 'tank' : pressed.has('Digit9') ? 'jet' : null;
   let digit = 0;
   for (let d = 1; d <= 9 && !digit; d++) if (pressed.has(`Digit${d}`)) digit = d;
   if (pressed.has('KeyM')) hud.toggleMap();
@@ -447,6 +462,7 @@ function frame(ts) {
   const d = game.arsenal.w?.def;
   const scoped = playing && pl.alive && !veh && d && (d.scope || d.overlay) && game.arsenal.adsEase() > 0.92;
   gfx.override = veh ? veh.grade() : scoped ? { vignette: 0.1, fringe: 0, grain: 0.02 } : null;
+  setThermal(!!gfx.override?.thermal);
   gfx.render(playing && pl.alive && !veh, dt, veh ? hurt * 0.3 : hurt, Math.min(0.8, game.flashT * 2.2));
 }
 requestAnimationFrame(frame);

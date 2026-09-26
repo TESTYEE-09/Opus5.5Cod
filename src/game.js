@@ -7,7 +7,7 @@ import { Player } from './player.js';
 import { Bot, DIFFICULTY } from './bots.js';
 import { Jet } from './streaks.js';
 import { NetSoldier } from './net.js';
-import { Chopper, Tank, FighterJet, Drone, VehicleProxy, Projectiles, PROJ, VEHICLE_WEAPONS, hitSoldier, placeEmplacements, tankSpot } from './vehicles.js';
+import { Chopper, Tank, FighterJet, Drone, ReconDrone, isDrone, VehicleProxy, Projectiles, PROJ, VEHICLE_WEAPONS, hitSoldier, placeEmplacements, tankSpot } from './vehicles.js';
 import { createMode } from './modes.js';
 
 const DEG = Math.PI / 180;
@@ -28,6 +28,7 @@ export const STREAKS = [
 // vehicles anyone can call in, each on its own cooldown
 export const CALLS = [
   { id: 'drone', name: 'FPV Drone', key: '7', cd: 30 },
+  { id: 'recon', name: 'Recon Drone', key: '0', cd: 20 },
   { id: 'tank', name: 'Tank', key: '8', cd: 75 },
   { id: 'jet', name: 'Jet', key: '9', cd: 75 },
 ];
@@ -111,7 +112,7 @@ export class Game {
     this.audio.siren(false);
     this.mapDef = this.loadMap?.(settings.map) || this.mapDef;
     this.mode = createMode(settings.mode, this);
-    roster ||= [{ id: 0, name: settings.name || 'You', team: 0, me: true }];
+    roster ||= [{ id: 0, name: settings.name || 'You', team: settings.mode === 'hunt' && settings.huntRole === 'hider' ? 1 : 0, me: true }];
     this.spawnChoice = null;
 
     const pl = this.player, me = roster.find(r => r.me);
@@ -137,10 +138,11 @@ export class Game {
       });
     }
     this.rebuild();
-    if (this.authority && !this.mapDef?.noVehicles) this.vehicles.push(...placeEmplacements(this));
+    if (this.authority && !this.mapDef?.noVehicles && this.mode.kind !== 'hunt') this.vehicles.push(...placeEmplacements(this));
     this.aiCallT = [50 + Math.random() * 25, 50 + Math.random() * 25];
     this.vehicleSeq = 0;
-    pl.vcool = { drone: 0, tank: 0, jet: 0 };
+    pl.vcool = { drone: 0, recon: 0, tank: 0, jet: 0 };
+    pl.fpv = settings.fpv === '10' ? 'drone10' : 'drone';
 
     this.teamScore = settings.score ? settings.score.slice() : [0, 0];
     this.timeLeft = settings.timeLeft ?? settings.timeLimit;
@@ -170,7 +172,7 @@ export class Game {
     const roster = (msg.roster || []).map(r => ({ ...r, me: r.id === myId }));
     if (!roster.some(r => r.me)) return;
     const rules = msg.rules || {};
-    this.startMatch({ ...this.settings, map: typeof rules.map === 'string' ? rules.map : 'crossroads', mode: ['tdm', 'gw', 'uc'].includes(rules.mode) ? rules.mode : 'tdm', scoreLimit: rules.scoreLimit, timeLimit: rules.timeLimit, timeLeft: rules.timeLeft, score: msg.score }, roster);
+    this.startMatch({ ...this.settings, map: typeof rules.map === 'string' ? rules.map : 'crossroads', mode: ['tdm', 'gw', 'uc', 'hunt'].includes(rules.mode) ? rules.mode : 'tdm', scoreLimit: rules.scoreLimit, timeLimit: rules.timeLimit, timeLeft: rules.timeLeft, score: msg.score }, roster);
     if (msg.m) this.mode.applyNet(msg.m);
     if (Array.isArray(msg.br)) for (const id of msg.br.slice(0, 5000)) breakObject(Number(id));
   }
@@ -875,12 +877,16 @@ export class Game {
   callVehicle(owner, kind) {
     const id = this.nextVehicleId();
     let v;
-    if (kind === 'drone') {
+    if (kind === 'drone' && owner.fpv === undefined) owner.fpv = Math.random() < 0.3 ? 'drone10' : 'drone';
+    if (kind === 'drone' && owner.fpv === 'drone10') kind = 'drone10';
+    if (kind === 'recon') {
+      v = new ReconDrone(this, owner, id, new THREE.Vector3(owner.pos.x, owner.pos.y + 1.2, owner.pos.z), owner.yaw);
+    } else if (isDrone(kind)) {
       const yaw = owner.yaw, fx = -Math.sin(yaw), fz = -Math.cos(yaw);
       const eye = new THREE.Vector3(owner.pos.x, owner.pos.y + (owner.isPlayer ? owner.eyeHeight : 1.5) - 0.2, owner.pos.z);
       const h = raycastWorld(eye, _e.set(fx, 0, fz), 1.2);
       const k = h ? Math.max(0.2, h.t - 0.4) : 0.8;
-      v = new Drone(this, owner, id, eye.add(_e.set(fx * k, 0, fz * k)), yaw);
+      v = new Drone(this, owner, id, eye.add(_e.set(fx * k, 0, fz * k)), yaw, kind);
     } else if (kind === 'tank') {
       const s = tankSpot(this, owner.team);
       v = new Tank(this, owner, id, s.x, s.z, s.yaw);
@@ -893,9 +899,10 @@ export class Game {
     return v;
   }
 
-  callAllowed(kind) {
+  callAllowed(kind, owner = this.player) {
     if (!this.mode.calls) return false;
-    return !this.mapDef?.noVehicles || kind === 'drone';
+    if (this.mode.allowCall && !this.mode.allowCall(kind, owner)) return false;
+    return !this.mapDef?.noVehicles || kind === 'drone' || kind === 'recon';
   }
 
   playerCall(kind) {
@@ -951,7 +958,7 @@ export class Game {
   exitVehicle() {
     const pl = this.player, v = pl.vehicle;
     if (!v) return;
-    if (v.kind === 'drone') { v.detonate(null); return; }
+    if (v.kind === 'drone' || v.kind === 'drone10') { v.detonate(null); return; }
     this.leftVehicle(pl, v);
   }
 

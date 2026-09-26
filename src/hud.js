@@ -118,6 +118,7 @@ export class Hud {
       }
       return;
     }
+    if (m.kind !== 'uc') return;
     // Undercover: the objective, clamped to the screen edge
     const mk = m.marker();
     if (mk) {
@@ -178,10 +179,10 @@ export class Hud {
     for (const e of game.soldiers) {
       if (!e.alive || e === pl) continue;
       const [x, z] = P(e.pos.x, e.pos.z);
-      if (e.team === pl.team) { g.fillStyle = '#6fb0ff'; g.beginPath(); g.arc(x, z, 3, 0, 7); g.fill(); } else if (uav || game.time - e.firedT < 1.2) { g.fillStyle = '#ff4a3a'; g.beginPath(); g.arc(x, z, 3, 0, 7); g.fill(); }
+      if (e.team === pl.team) { g.fillStyle = '#6fb0ff'; g.beginPath(); g.arc(x, z, 3, 0, 7); g.fill(); } else if (uav || e.marked > game.time || game.time - e.firedT < 1.2) { g.fillStyle = '#ff4a3a'; g.beginPath(); g.arc(x, z, 3, 0, 7); g.fill(); }
     }
     for (const v of game.vehicles) {
-      if (!v.alive || (v.team !== pl.team && !uav && v.kind === 'drone')) continue;
+      if (!v.alive || (v.team !== pl.team && !uav && v.spec?.drone)) continue;
       const [x, z] = P(v.pos.x, v.pos.z);
       g.fillStyle = v.team === pl.team ? '#6fb0ff' : '#ff4a3a'; g.fillRect(x - 4, z - 4, 8, 8);
     }
@@ -471,7 +472,7 @@ export class Hud {
     }).join('') + `<div class="streak-count">Streak ${pl.streak}${next ? ` &middot; ${next.kills - pl.streak} to ${next.name}` : ''}</div>` +
       CALLS.map(c => {
         const cd = pl.vcool?.[c.id] || 0;
-        return `<div class="sk call ${cd > 0 ? '' : 'ready'}"><kbd>${c.key}</kbd><span>${c.id === 'drone' ? c.name : vehicleName(c.id, game.player.team)}</span><em>${cd > 0 ? `${Math.ceil(cd)}s` : 'READY'}</em></div>`;
+        return `<div class="sk call ${cd > 0 ? '' : 'ready'}"><kbd>${c.key}</kbd><span>${c.id === 'drone' ? (game.player.fpv === 'drone10' ? '10" FPV' : '5" FPV') : c.id === 'recon' ? c.name : vehicleName(c.id, game.player.team)}</span><em>${cd > 0 ? `${Math.ceil(cd)}s` : 'READY'}</em></div>`;
       }).join('');
 
     if (!pl.alive) $('respawnIn').textContent = `Respawning in ${Math.max(0, game.deadT).toFixed(1)}`;
@@ -512,13 +513,13 @@ export class Hud {
         g.lineTo(e.pos.x - fx * 1.1 + fz * 1.1, e.pos.z - fz * 1.1 - fx * 1.1);
         g.lineTo(e.pos.x - fx * 1.1 - fz * 1.1, e.pos.z - fz * 1.1 + fx * 1.1);
         g.fill();
-      } else if (uav || game.time - e.firedT < 1.2) {
+      } else if (uav || e.marked > game.time || game.time - e.firedT < 1.2) {
         g.fillStyle = '#ff4a3a';
         g.beginPath(); g.arc(e.pos.x, e.pos.z, 1.2, 0, Math.PI * 2); g.fill();
       }
     }
     for (const v of game.vehicles) {
-      if (!v.alive || (v.kind === 'drone' && v.team !== pl.team && !uav)) continue;
+      if (!v.alive || (v.spec?.drone && v.team !== pl.team && !uav)) continue;
       g.fillStyle = v.team === pl.team ? '#6fb0ff' : '#ff4a3a';
       g.fillRect(v.pos.x - 1.8, v.pos.z - 1.8, 3.6, 3.6);
     }

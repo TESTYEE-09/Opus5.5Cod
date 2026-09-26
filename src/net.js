@@ -233,7 +233,8 @@ export class Net {
   startGame(settings) {
     const members = this.members();
     const coop = this.mode === 'coop' || settings.mode === 'uc';
-    const humans = members.map((m, i) => ({ id: m.id, name: m.name, team: coop ? 0 : i % 2, me: m.id === 0 }));
+    const swap = settings.mode === 'hunt' && settings.huntRole === 'hider' ? 1 : 0;
+    const humans = members.map((m, i) => ({ id: m.id, name: m.name, team: coop ? 0 : (i + swap) % 2, me: m.id === 0 }));
     for (const h of humans) if (h.id) this.clients.get(h.id).team = h.team;
     this.game.startMatch({ ...settings, name: this.name }, humans);
     for (const id of this.clients.keys()) this.sendStart(id);
@@ -268,7 +269,7 @@ export class Net {
         const r = d.r;
         if (!Array.isArray(r) || r.length < 15) break;
         const vid = num(r[0], -1), kind = String(r[1]);
-        if (!['tank', 'jet', 'drone', 'heli'].includes(kind) || Math.floor((vid - 10000) / 100) !== id || g.deadVehicles.has(vid)) break;
+        if (!['tank', 'jet', 'drone', 'drone10', 'recon', 'heli'].includes(kind) || Math.floor((vid - 10000) / 100) !== id || g.deadVehicles.has(vid)) break;
         let v = g.vehicles.find(x => x.id === vid);
         if (!v) { v = new VehicleProxy(g, vid, kind, s.team); v.owner = s; g.vehicles.push(v); }
         if (!v.isProxy || v.owner !== s) break;

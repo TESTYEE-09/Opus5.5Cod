@@ -775,7 +775,7 @@ export const MAPS = {
   },
   crossroads: {
     name: 'Crossroads', desc: '600 m of desert: the town at the junction, walled villages, farmland, five flags.', seed: 7, hills: 48, size: BIG, teamSize: 12, land: 'desert', relief: 11, ramp: 18,
-    modes: ['gw', 'uc'],
+    modes: ['gw', 'uc', 'hunt'],
     layout(B, M) {
       groundWar(B, M, {
         theme: 'desert', seed: 7, roads: this.roads,
@@ -800,7 +800,7 @@ export const MAPS = {
   },
   harbor: {
     name: 'Harbor', desc: 'A 600 m port at sunset: container yards, warehouses, gantry cranes, five flags.', seed: 21, size: BIG, teamSize: 12, land: 'port', relief: 4, ramp: 14,
-    modes: ['gw', 'uc'],
+    modes: ['gw', 'uc', 'hunt'],
     layout(B, M) {
       groundWar(B, M, {
         theme: 'harbor', seed: 21, roads: this.roads,
@@ -828,7 +828,7 @@ export const MAPS = {
   },
   outpost: {
     name: 'Outpost', desc: 'A 600 m snowbound valley: the mountain base, cabins, pine forest, five flags.', seed: 33, hills: 75, size: BIG, teamSize: 12, land: 'snow', relief: 16, ridges: true, ramp: 20,
-    modes: ['gw', 'uc'],
+    modes: ['gw', 'uc', 'hunt'],
     layout(B, M) {
       groundWar(B, M, {
         theme: 'snow', seed: 33, roads: this.roads,
@@ -859,5 +859,6 @@ export const MAPS = {
 export const MODES = {
   tdm: { name: 'Team Deathmatch', short: 'TDM', desc: 'First team to 75 kills.', scoreLimit: 75, timeLimit: 600 },
   gw: { name: 'Ground War', short: 'GROUND WAR', desc: 'Hold the five flags. Spawn on any flag your team owns. Tanks, jets and drones.', scoreLimit: 400, timeLimit: 1200 },
+  hunt: { name: 'FPV Hunt', short: 'HUNT', desc: '1 v 1. One hides somewhere on the map; the other hunts them with FPV and thermal recon drones. Survive 7 minutes or get found.', scoreLimit: 99, timeLimit: 420 },
   uc: { name: 'Undercover', short: 'UNDERCOVER', desc: 'Co-op. You wear their uniform: move quietly, finish the mission chain, get out.', scoreLimit: 9999, timeLimit: 1800, coop: true },
 };

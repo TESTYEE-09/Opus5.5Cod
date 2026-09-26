@@ -335,7 +335,7 @@ export class Bot {
       const p = e.aimPoint(_b, false);
       const dx = p.x - eye.x, dz = p.z - eye.z;
       const dist = Math.hypot(dx, dz, p.y - eye.y);
-      if (dist > (e.isVehicle ? (e.kind === 'drone' ? (e === this.target ? 45 : 28) : e.air && this.launcher === 'stinger' && this.rockets > 0 ? 220 : 70) : 85)) continue;
+      if (dist > (e.isVehicle ? (e.spec?.drone ? (e === this.target ? 45 : 28) : e.air && this.launcher === 'stinger' && this.rockets > 0 ? 220 : 70) : 85)) continue;
       const hd = Math.hypot(dx, dz) || 1;
       const dot = (dx * fx + dz * fz) / hd;
       if (e !== this.target && dot < 0.2 && dist > 6) continue;
@@ -351,7 +351,7 @@ export class Bot {
           this.reactT = g.diff.react * (0.7 + Math.random() * 0.6) + (dist > 40 ? 0.25 : 0) + (this.kit === 'sniper' ? 0.3 : 0);
           this.err = g.diff.err * (1 + dist / 45);
           // a small, fast FPV drone takes a moment to pick out and is hard to track
-          if (best.kind === 'drone') { this.reactT += 0.5 + Math.random() * 0.5; this.err *= 3; }
+          if (best.spec?.drone) { this.reactT += 0.5 + Math.random() * 0.5; this.err *= 3; }
         }
       }
       this.target = best;
@@ -474,12 +474,12 @@ export class Bot {
     const facing = this.faceToward(aim.x, aim.z, dt, D.turn);
     this.pitch = Math.atan2(aim.y - eye.y, Math.hypot(aim.x - eye.x, aim.z - eye.z));
 
-    this.err = Math.max(D.min * (t.kind === 'drone' ? 3.5 : 1), this.err * Math.exp(-D.learn * (t.kind === 'drone' ? 0.35 : 1) * dt));
+    this.err = Math.max(D.min * (t.spec?.drone ? 3.5 : 1), this.err * Math.exp(-D.learn * (t.spec?.drone ? 0.35 : 1) * dt));
     this.reactT -= dt;
 
     // launchers against vehicles: RPG at anything slow, Stinger at aircraft
     if (t.isVehicle && this.rockets > 0 && this.rocketCd <= 0 && this.reactT <= 0 && facing < 0.2 &&
-        ((this.launcher === 'stinger' && t.air && t.kind !== 'drone' && Math.random() < 0.5) || (this.launcher === 'rpg' && (t.kind === 'tank' || t.kind === 'aa' || t.kind === 'heli') && dist < 90))) {
+        ((this.launcher === 'stinger' && t.air && !t.spec?.drone && Math.random() < 0.5) || (this.launcher === 'rpg' && (t.kind === 'tank' || t.kind === 'aa' || t.kind === 'heli') && dist < 90))) {
       this.rockets--; this.rocketCd = this.launcher === 'stinger' ? 14 : 5;
       g.botLaunch(this, t, this.launcher);
       return false;

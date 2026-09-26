@@ -541,7 +541,87 @@ export class Undercover extends Tdm {
   }
 }
 
+// ---------- FPV Hunt ----------
+// 1 v 1 on a big map. The hider starts somewhere far from the hunter and has a head start;
+// the hunter stays back and flies FPV drones (5 or 10 inch) and a slow recon drone with a
+// thermal camera. The hider wins by surviving the clock, the hunter by killing them.
+// Solo, a bot plays the other role: it hides in cover, or it hunts with drones.
+export const HUNTER = 0, HIDER = 1;
+const HEAD_START = 45;
+export class Hunt extends Tdm {
+  constructor(game) {
+    super(game);
+    this.kind = 'hunt';
+    this.hideSpot = null; this.lastLaunch = 0; this.reconUp = false; this.over = false;
+    this.told = false;
+  }
+  get calls() { return true; }
+  get headStart() { return Math.max(0, HEAD_START - this.game.time); }
+  teamBots(team, humans) { return humans ? 0 : 1; }
+  aiCalls() { return false; }
+  allowCall(kind, owner) { return owner?.team === HUNTER && this.headStart <= 0 && (kind === 'drone' || kind === 'recon'); }
+  respawnDelay(s) { return s.team === HUNTER ? 5 : 9999; }
+
+  pickSpawn(team) {
+    if (team === HUNTER) { const b = spawns[0].find(s => !s.fwd) || spawns[0][0]; return b; }
+    if (!this.hideSpot) {
+      const b = spawns[0].find(s => !s.fwd) || spawns[0][0];
+      for (let n = 0; n < 200; n++) {
+        const p = randomWalkable(20, SIZE - 20);
+        if (p && Math.hypot(p.x - b.x, p.z - b.z) > SIZE * 0.45) { this.hideSpot = { x: p.x, z: p.z, yaw: Math.random() * 6.28 }; break; }
+      }
+      this.hideSpot ||= { x: SIZE / 2, z: SIZE * 0.8, yaw: 0 };
+    }
+    return this.hideSpot;
+  }
+
+  // a bot hider finds cover near its start and stays low; a bot hunter stays at base
+  botGoal(bot) {
+    if (bot.team === HUNTER) return { x: bot.pos.x, z: bot.pos.z, wait: 30 };
+    if (!this.cover) this.cover = spotNear(this.hideSpot?.x ?? bot.pos.x, this.hideSpot?.z ?? bot.pos.z, 10, 45) || { x: bot.pos.x, z: bot.pos.z };
+    return { x: this.cover.x, z: this.cover.z, wait: 60, pace: 0.6 };
+  }
+
+  update(dt) {
+    const g = this.game;
+    if (this.over) return;
+    if (!this.told) {
+      this.told = true;
+      const me = g.player;
+      g.hud.toast(me.team === HUNTER ? `Hunt them down. Drones in ${HEAD_START}s (7 FPV, 0 recon)` : 'Hide. Survive the clock. Shoot drones down.');
+    }
+    const hider = g.soldiers.find(s => s.team === HIDER);
+    for (const b of g.bots) if (b.team === HIDER && b.alive && this.cover && Math.hypot(b.pos.x - this.cover.x, b.pos.z - this.cover.z) < 2) b.crouched = true;
+    // bot hunter: keeps a recon drone up over the rough area and sends FPVs at what it finds
+    const hb = g.bots.find(b => b.team === HUNTER && b.alive && !b.vehicle);
+    if (hb && hider && this.headStart <= 0) {
+      const guess = this.guess ||= { x: hider.pos.x + (Math.random() - 0.5) * 140, z: hider.pos.z + (Math.random() - 0.5) * 140 };
+      if (hider.marked > g.time) { guess.x = hider.pos.x; guess.z = hider.pos.z; }
+      const mine = g.vehicles.filter(v => v.alive && v.owner === hb);
+      if (!mine.some(v => v.kind === 'recon')) { const r = g.callVehicle(hb, 'recon'); if (r) r.search = guess; }
+      if (g.time - this.lastLaunch > 22 && mine.filter(v => v.spec.drone && !v.spec.recon).length < 1) {
+        this.lastLaunch = g.time;
+        const d = g.callVehicle(hb, 'drone');
+        if (d) { d.search = guess; d.searchR = 70; d.needSight = true; }
+      }
+      // the guess drifts toward the truth as the search goes on
+      guess.x += (hider.pos.x - guess.x) * dt * 0.01; guess.z += (hider.pos.z - guess.z) * dt * 0.01;
+    }
+    if (g.timeLeft <= 0.5 && g.teamScore[HUNTER] === 0) { g.teamScore[HIDER] = Math.max(1, g.teamScore[HIDER]); this.over = true; g.end(); }
+  }
+
+  onKill(killer, victim) {
+    if (victim.team === HIDER && !this.over) {
+      this.over = true;
+      const g = this.game;
+      g.teamScore[HUNTER] = 1; g.teamScore[HIDER] = 0;
+      setTimeout(() => g.end(), 1500);
+    }
+  }
+}
+
 export function createMode(kind, game) {
+  if (kind === 'hunt') return new Hunt(game);
   if (kind === 'gw') return new GroundWar(game);
   if (kind === 'uc') return new Undercover(game);
   return new Tdm(game);

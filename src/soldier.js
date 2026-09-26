@@ -156,3 +156,11 @@ export function animateRigged(m, s, dt) {
   ik(b.LeftArm, b.LeftForeArm, b.LeftHand, fore, _pole.clone());
   m.tag.position.y = 2.2 - 0.5 * c - 1.2 * p;
 }
+
+// thermal camera: every soldier's suit glows white-hot while it is on
+let thermalOn = false;
+export function setThermal(on) {
+  if (on === thermalOn) return;
+  thermalOn = on;
+  for (const m of Object.values(teamMats)) { m.emissive.set(on ? 0xffffff : 0x000000); m.emissiveIntensity = on ? 1.6 : 1; }
+}
