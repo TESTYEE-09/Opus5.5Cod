@@ -100,6 +100,18 @@ export const PROPS = {
       k.part(box(0.05, 0.08, 0.2), 'metal', 0x202224, s * (w + 0.04), 1.12, -h * 0.35);
     }
     k.part(box(W * 0.55, 0.16, 0.05), 'metal', 0x2a2b2d, 0, 0.62, -h - 0.02);
+    // panel detail: wheel arches, door seams, B pillars, grille and number plates
+    const seam = burnt ? 0x100e0c : 0x121314;
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) k.part(torus(0.4, 0.05, Math.PI), 'rough', 0x0c0c0c, sx * (w * 0.985), 0.4, sz * L * 0.31, 0, Math.PI / 2, 0);
+      for (const z of style === 2 ? [-h * 0.12] : [-h * 0.18, h * 0.3]) k.part(box(0.012, 0.55, 0.012), 'rough', seam, sx * (w + 0.002), 0.78, z);
+      if (style !== 2) k.part(box(0.05, 0.46, 0.09), pk, paint, sx * w * 0.83, 1.33, h * 0.05);
+    }
+    if (!burnt) {
+      k.part(box(W * 0.42, 0.14, 0.04), 'rough', 0x0e0f10, 0, 0.8, -h - 0.015);
+      k.part(box(0.46, 0.12, 0.02), 'paint', 0xe8e6de, 0, 0.55, -h - 0.05);
+      k.part(box(0.46, 0.12, 0.02), 'paint', 0xe8e6de, 0, 0.62, h + 0.02);
+    }
     for (const z of [-1, 1]) k.part(box(W * 1.01, 0.16, 0.18), 'metal', burnt ? 0x221f1c : 0x2a2b2d, 0, 0.46, z * (h - 0.02));
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
       const x = sx * (w - 0.12), z = sz * L * 0.31;

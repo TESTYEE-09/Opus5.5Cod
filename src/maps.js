@@ -499,14 +499,18 @@ function base(B, T, nation) {
 }
 
 // ---------- scenery beyond the fence ----------
+// Houses beyond the fence, seen through it: real buildings with doors, windows and cornices,
+// one or two storeys, drawn but not solid.
 function townRing(api, rnd, n, mats, rise = 22) {
+  const vis = { ...api, box: (x0, y0, z0, x1, y1, z1, m) => api.box(x0, y0, z0, x1, y1, z1, m, false), obj: () => -1 };
   for (let i = 0; i < n; i++) {
-    const side = i % 4, along = -30 + rnd() * (SIZE + 60), dist = 6 + rnd() * 34;
-    const w = 6 + rnd() * 12, d = 6 + rnd() * 12, h = 4 + rnd() * rise;
+    const side = i % 4, along = -30 + rnd() * (SIZE + 60), dist = 8 + rnd() * 40;
+    const w = Math.round(7 + rnd() * 8), d = Math.round(6 + rnd() * 7), h = 3.2 + (rnd() < 0.35 ? 3 : 0) + rnd() * Math.min(rise, 1.5);
     let x, z;
     if (side === 0) { x = along; z = -dist - d; } else if (side === 1) { x = along; z = SIZE + dist; } else if (side === 2) { x = -dist - w; z = along; } else { x = SIZE + dist; z = along; }
-    api.box(x, 0, z, x + w, h, z + d, mats[Math.floor(rnd() * mats.length)], false);
-    if (rnd() < 0.5) api.box(x + 0.5, h, z + 0.5, x + w - 0.5, h + 0.4, z + d - 0.5, 'roof', false);
+    const v = { r: Array.from({ length: 12 }, rnd) };
+    const mat = mats[Math.floor(rnd() * mats.length)];
+    building(vis, x, z, x + w, z + d, h, openings(v, x, z, x + w, z + d, v.r), mat === 'backdrop' ? 'plaster' : mat, { floor: null, destr: false });
   }
 }
 
@@ -537,7 +541,7 @@ function forest(api, rnd, n, r0, r1, o = {}) {
 const perSide = (n) => Math.round(n * SIZE / 160);
 
 function crossBackdrop(api, rnd) {
-  townRing(api, rnd, perSide(40), ['backdrop', 'plaster', 'plaster2'], 6);
+  townRing(api, rnd, perSide(22), ['plaster', 'plaster2', 'brick'], 6);
   for (let n = 0; n < perSide(24); n++) api.prop('palm', rnd() < 0.5 ? -3 - rnd() * 4 : SIZE + 3 + rnd() * 4, rnd() * SIZE, { h: 7 + rnd() * 3 });
   villages(api, rnd, 26, ['plaster', 'plaster2', 'backdrop'], 'olive');
   for (let n = 0; n < 16; n++) {
@@ -675,9 +679,9 @@ function groundWar(B, M, o) {
   scatter(ops, T, rnd, [C - 100, C - 100, C + 100, C - 1], 26, taken);
   for (const k of ['A', 'B']) {
     const [x, z] = FLAG_POS[k];
-    scatter(ops, T, rnd, [x - 55, z - 50, x + 55, Math.min(z + 50, C - 1)], 18, taken, T.village);
+    scatter(ops, T, rnd, [x - 55, z - 50, x + 55, Math.min(z + 50, C - 1)], 24, taken, T.village);
   }
-  scatter(ops, T, rnd, [8, 38, SIZE - 8, C - 1], o.country ?? 120, taken, T.country);
+  scatter(ops, T, rnd, [8, 38, SIZE - 8, C - 1], o.country ?? 165, taken, T.country);
   for (const S of [B, M]) for (const f of ops) f(S);
 }
 
@@ -785,6 +789,7 @@ export const MAPS = {
       });
     },
     backdrop: crossBackdrop,
+    perimeter: { fence: true },
     ground: { recipe: 'dirt', ts: 8 },
     roads: gwRoads('road', 'track'),
     patches: [{ x0: BC - 4, z0: BC - 4, x1: BC + 4, z1: BC + 4 }],
@@ -807,7 +812,7 @@ export const MAPS = {
         town: harborHalf,
         centre(b) { b.prop('crane', 40, 40); container(b, 37, 38.78, false, 'containerR', 'containerW'); },
         townInterest: [[40, 32], [15, 17], [30, 20], [41, 20], [47, 14], [64, 15], [64, 24], [71, 26], [24, 33], [10, 27], [55, 32], [35, 29]],
-        country: 110,
+        country: 145,
       });
     },
     backdrop: harborBackdrop,
@@ -835,11 +840,11 @@ export const MAPS = {
         town: outpostHalf,
         centre(b) { b.prop('antenna', 40, 40, { h: 15 }); b.box(39.6, 0, 39.6, 40.4, 15, 40.4, 'invis'); b.box(39.3, 0, 40.8, 40.7, 1, 41.6, 'invis'); },
         townInterest: [[40, 32], [12, 16], [32, 26], [58, 14], [46, 21], [22, 28], [66, 26], [8, 30], [52, 32], [30, 16]],
-        country: 130,
+        country: 170,
       });
     },
     backdrop: outpostBackdrop,
-    perimeter: { mat: 'concrete', h: 4.5 },
+    perimeter: { fence: true },
     ground: { recipe: 'snow', ts: 7, normal: 1.2, rough: 0.8 },
     roads: gwRoads('mud', 'mud'),
     minimap: { ground: [150, 158, 168], road: [96, 90, 84], low: [110, 110, 104], high: [200, 204, 210] },

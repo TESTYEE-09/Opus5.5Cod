@@ -317,7 +317,7 @@ export class Hud {
     $('deathBy').innerHTML = killer ? `Killed by <b class="${killer.team === pl.team ? 'ally' : 'enemy'}">${esc(killer.name)}</b> &middot; ${esc(weapon)}` : `You killed yourself &middot; ${esc(weapon)}`;
   }
 
-  hideDeath() { $('death').classList.add('hidden'); }
+  hideDeath() { $('death').classList.add('hidden'); $('killcam').classList.remove('show'); }
 
   showEnd(game) {
     const a = game.teamScore[game.player.team], e = game.teamScore[1 - game.player.team];

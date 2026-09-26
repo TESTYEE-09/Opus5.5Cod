@@ -17,9 +17,15 @@ const KITS = [
   [['ar', 0.26], ['scar', 0.1], ['smg', 0.12], ['mp5', 0.08], ['burst', 0.1], ['lmg', 0.07], ['shotgun', 0.06], ['aa12', 0.03], ['dmr', 0.08], ['sniper', 0.06], ['barrett', 0.04]],
   [['ak', 0.36], ['smg', 0.12], ['mp5', 0.06], ['burst', 0.06], ['pkm', 0.08], ['lmg', 0.02], ['shotgun', 0.06], ['aa12', 0.03], ['svd', 0.1], ['sniper', 0.07], ['barrett', 0.04]],
 ];
-function pickKit(team = 0) {
-  let r = Math.random();
-  for (const [k, w] of KITS[team] || KITS[0]) if ((r -= w) <= 0) return k;
+// kit counters: more scopes against a human who kills at range, more SMGs and shotguns
+// against one who fights up close
+const LONG = new Set(['sniper', 'dmr', 'svd', 'barrett', 'scar']), CLOSE = new Set(['smg', 'mp5', 'shotgun', 'aa12']);
+function pickKit(team = 0, A = null) {
+  const tot = A ? A.long + A.close + 3 : 0;
+  const w = (k, x) => x * (A ? (LONG.has(k) ? 1 + 1.6 * A.long / tot : CLOSE.has(k) ? 1 + 1.4 * A.close / tot : 1) : 1);
+  const list = KITS[team] || KITS[0], sum = list.reduce((a, [k, x]) => a + w(k, x), 0);
+  let r = Math.random() * sum;
+  for (const [k, x] of list) if ((r -= w(k, x)) <= 0) return k;
   return 'ar';
 }
 
@@ -264,7 +270,8 @@ export class Bot {
   }
 
   spawn(p, yaw) {
-    this.kit = pickKit(this.team);
+    const A = this.game.adapt;
+    this.kit = pickKit(this.team, A);
     this.def = WEAPONS[this.kit];
     this.mag = this.def.mag;
     this.pos.set(p.x, 0, p.z);
@@ -281,7 +288,10 @@ export class Bot {
     this.grenades = 1; this.nadeCool = 3;
     // about a third of bots carry a launcher for vehicles
     const lr = Math.random();
-    this.launcher = lr < 0.17 ? 'rpg' : lr < 0.25 ? 'stinger' : null;
+    // and more launchers when the humans have been killing from vehicles or the air
+    const heavy = A ? Math.min(0.25, A.vehicle * 0.025) : 0, air = A ? Math.min(0.2, A.air * 0.04) : 0;
+    this.launcher = lr < 0.17 + heavy ? 'rpg' : lr < 0.25 + heavy + air ? 'stinger' : null;
+    this.suppress = 0; this.lastHurt = -99; this.cover = null; this.flank = null;
     this.rockets = this.launcher === 'rpg' ? 2 : this.launcher ? 1 : 0; this.rocketCd = 2;
     this.walkPhase = 0; this.flashT = 0;
     this.deathT = 0;
@@ -299,7 +309,14 @@ export class Bot {
 
   eye(out) { return out.set(this.pos.x, this.pos.y + 1.6 - 0.5 * this.crouchAmt, this.pos.z); }
 
+  // rounds snapping past: duck, lose accuracy, and head for cover once it builds up
+  suppressedBy(shooter) {
+    this.suppress = Math.min(1, this.suppress + 0.3);
+    if (!this.visible && shooter?.alive) this.hear(shooter, shooter.pos);
+  }
+
   hurtBy(attacker) {
+    this.lastHurt = this.game.time;
     if (this.game.mode.kind === 'uc' && this.team === 1 && !this.hostile && attacker) this.game.mode.alert(this, attacker, attacker.pos);
     if (attacker?.vehicle?.alive) attacker = attacker.vehicle;
     if (!attacker || attacker === this || !attacker.alive || (attacker.isVehicle && (attacker.air || (attacker.kind === 'aa' && !attacker.driver)))) return;
@@ -352,8 +369,13 @@ export class Bot {
       if (best !== this.target || !this.visible) {
         const dist = this.pos.distanceTo(best.pos);
         if (best !== this.target || g.time - this.lastSeenT > 1.5) {
-          this.reactT = g.diff.react * (0.7 + Math.random() * 0.6) + (dist > 40 ? 0.25 : 0) + (this.kit === 'sniper' ? 0.3 : 0);
-          this.err = g.diff.err * (1 + dist / 45);
+          const sk = g.adapt?.skill || 1;
+          this.reactT = (g.diff.react * (0.7 + Math.random() * 0.6) + (dist > 40 ? 0.25 : 0) + (this.kit === 'sniper' ? 0.3 : 0)) / sk;
+          this.err = g.diff.err * (1 + dist / 45) / sk;
+          // call it out: squadmates close by who have nothing to shoot at turn toward it
+          if (best !== this.target) for (const o of g.bots) {
+            if (o !== this && o.alive && o.team === this.team && !o.visible && o.pos.distanceTo(this.pos) < 35) o.hear(best, best.pos);
+          }
           // a small, fast FPV drone takes a moment to pick out and is hard to track
           if (best.spec?.drone) { this.reactT += 0.5 + Math.random() * 0.5; this.err *= 3; }
         }
@@ -378,6 +400,8 @@ export class Bot {
       return;
     }
     if (this.protect > 0) this.protect -= dt;
+    this.suppress = Math.max(0, this.suppress - dt * 0.45);
+    if (g.time - this.lastHurt > 5 && this.health < 100) this.health = Math.min(100, this.health + 30 * dt);
     if ((this.senseT -= dt) <= 0) { this.senseT = 0.1 + Math.random() * 0.08; this.sense(); }
     if (this.reloadT > 0 && (this.reloadT -= dt) <= 0) this.mag = this.def.mag;
     if (this.nadeCool > 0) this.nadeCool -= dt;
@@ -398,8 +422,11 @@ export class Bot {
       this.wish.copy(_v);
       speed = 6;
       this.faceToward(this.pos.x + _v.x, this.pos.z + _v.z, dt, 6);
+    } else if (this.cover || (this.target?.alive && this.visible && (this.health < 45 || this.suppress > 0.8) && this.findCover())) {
+      crouch = this.takeCover(dt);
+      speed = 5.2;
     } else if (this.target && this.target.alive && this.visible) {
-      crouch = this.engage(dt);
+      crouch = this.engage(dt) || this.suppress > 0.35;
       speed = this.kit === 'shotgun' ? 4.8 : 3;
     } else if (this.target && this.target.alive && g.time - this.lastSeenT < 8) {
       this.hunt(dt);
@@ -475,7 +502,7 @@ export class Bot {
     const aim = t.aimPoint(_b, head);
     const eye = this.eye(_a);
     const dist = eye.distanceTo(aim);
-    const facing = this.faceToward(aim.x, aim.z, dt, D.turn);
+    const facing = this.faceToward(aim.x, aim.z, dt, D.turn * (g.adapt?.skill || 1));
     this.pitch = Math.atan2(aim.y - eye.y, Math.hypot(aim.x - eye.x, aim.z - eye.z));
 
     this.err = Math.max(D.min * (t.spec?.drone ? 3.5 : 1), this.err * Math.exp(-D.learn * (t.spec?.drone ? 0.35 : 1) * dt));
@@ -538,7 +565,7 @@ export class Bot {
     const o = this.eye(new THREE.Vector3());
     const tvel = this.target.vel ? Math.hypot(this.target.vel.x, this.target.vel.z) : 0;
     const slide = this.target.isPlayer && this.target.slideT > 0 ? 0.5 : 0;
-    const e = (this.err + tvel * 0.07 + slide) * (0.35 + dist / 28);
+    const e = (this.err + tvel * 0.07 + slide) * (0.35 + dist / 28) * (1 + this.suppress * 1.2);
     const pellets = d.pellets || 1;
     for (let i = 0; i < pellets; i++) {
       _dir.set(aim.x + (Math.random() - 0.5) * 2 * e, aim.y + (Math.random() - 0.5) * 1.6 * e, aim.z + (Math.random() - 0.5) * 2 * e).sub(o);
@@ -553,6 +580,37 @@ export class Bot {
     g.effects.flash(muzzle, 0.5);
     g.audio.shot(d.model, this.pos);
     g.noise(this, this.pos, 45);
+  }
+
+  // somewhere within 14 m the threat cannot see, not closer to it than we are now
+  findCover() {
+    if (this.coverCd > this.game.time) return false;
+    this.coverCd = this.game.time + 4;
+    const t = this.target, te = t.aimPoint(_b, true), td = this.pos.distanceTo(t.pos);
+    let best = null, bd = Infinity;
+    for (let i = 0; i < 14; i++) {
+      const a = Math.random() * Math.PI * 2, r = 3 + Math.random() * 11;
+      const x = this.pos.x + Math.cos(a) * r, z = this.pos.z + Math.sin(a) * r;
+      if (!walkable(Math.floor(x), Math.floor(z)) || overlaps(x, z, 0.4, STEP, 1.7)) continue;
+      if (Math.hypot(t.pos.x - x, t.pos.z - z) < td * 0.8) continue;
+      if (lineOfSight(_a.set(x, this.pos.y + 1.1, z), te)) continue;
+      if (r < bd) { bd = r; best = { x, z, t: 0 }; }
+    }
+    this.cover = best;
+    return !!best;
+  }
+
+  // run to cover, crouch there and heal, then go back to the fight
+  takeCover(dt) {
+    const c = this.cover;
+    const d = Math.hypot(c.x - this.pos.x, c.z - this.pos.z);
+    if (d > 0.8) { this.goTo(c.x, c.z, dt, 1.1, true); c.t += dt * 0.25; }
+    else {
+      c.t += dt;
+      if (this.target?.alive) this.faceToward(this.lastKnown.x, this.lastKnown.z, dt, 4);
+    }
+    if (c.t > 7 || (d <= 0.8 && this.health > 85 && this.suppress < 0.3) || !this.target?.alive) { this.cover = null; this.path = null; }
+    return d <= 0.8;
   }
 
   hunt(dt) {
@@ -570,7 +628,12 @@ export class Bot {
     const g = this.game;
     if (!this.goal) this.pickGoal();
     this.goTo(this.goal.x, this.goal.z, dt, 0.85, true);
-    if (this.goal && Math.hypot(this.goal.x - this.pos.x, this.goal.z - this.pos.z) < 1.5) this.goal = null;
+    if (this.goal && Math.hypot(this.goal.x - this.pos.x, this.goal.z - this.pos.z) < 1.5) {
+      this.goal = null;
+      // round the flank: now push in on where the camper was
+      if (this.flank?.alive) { this.hear(this.flank, this.flank.pos); if (this.grenades > 0) { this.grenades--; g.botThrow(this, this.flank.pos); } }
+      this.flank = null;
+    }
     if (g.uav[this.team] > 0 && Math.random() < dt * 0.5) {
       const e = g.nearestEnemy(this);
       if (e) this.hear(e, e.pos);
@@ -581,6 +644,13 @@ export class Bot {
     const g = this.game, intel = g.intel[this.team];
     const mg = g.mode.botGoal(this);
     if (mg) { this.goal = mg; this.path = null; return; }
+    // a camping human: go round the side and come at them from a new angle
+    const cp = g.adapt?.camper;
+    if (cp && cp.team !== this.team && Math.random() < 0.6) {
+      const dx = cp.pos.x - this.pos.x, dz = cp.pos.z - this.pos.z, d = Math.hypot(dx, dz) || 1, side = Math.random() < 0.5 ? 1 : -1;
+      const f = openSpot(cp.pos.x - dx / d * 12 + (-dz / d) * 26 * side, cp.pos.z - dz / d * 12 + (dx / d) * 26 * side);
+      if (f) { this.goal = f; this.flank = cp; this.path = null; return; }
+    }
     const r = Math.random();
     if (intel.length && r < 0.45) {
       const i = intel[Math.floor(Math.random() * intel.length)];

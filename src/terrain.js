@@ -65,8 +65,9 @@ export function buildTerrain(o) {
   }
   const s = o.seed || 1, ramp = o.ramp || 16;
   for (let k = 0; k < W; k++) for (let i = 0; i < W; i++) {
-    // broad rolling land, medium hummocks, fine lumps; optional ridge lines
-    let n = vnoise(i / 90, k / 90, s) * 0.55 + vnoise(i / 34, k / 34, s + 1) * 0.3 + vnoise(i / 11, k / 11, s + 2) * 0.1 + vnoise(i / 4, k / 4, s + 3) * 0.05;
+    // broad rolling land and gentle hummocks; optional ridge lines
+    // (no small-scale lumps: they made the whole map look pock-marked)
+    let n = vnoise(i / 110, k / 110, s) * 0.62 + vnoise(i / 42, k / 42, s + 1) * 0.3 + vnoise(i / 16, k / 16, s + 2) * 0.06;
     if (o.ridges) n = n * 0.6 + (1 - Math.abs(vnoise(i / 70, k / 70, s + 4) * 2 - 1)) ** 2 * 0.55;
     const edge = smooth(4, 40, Math.min(i, k, G - i, G - k));
     const pad = smooth(0, ramp, D[k * W + i]);

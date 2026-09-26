@@ -50,7 +50,7 @@ function camoTexture(kind) {
   return t;
 }
 const camoCache = {};
-const camoFor = (k) => (camoCache[k] ||= camoTexture(k));
+export const camoFor = (k) => (camoCache[k] ||= camoTexture(k));
 
 function bodyMat(team, officer) {
   const key = officer ? 'off' : team;

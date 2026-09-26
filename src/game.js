@@ -153,9 +153,12 @@ export class Game {
     this.uav = [0, 0];
     this.intel = [[], []];
     this.firstBlood = false;
+    // how the humans have been playing, for the bots to adapt to (see adaptKill, watchCampers)
+    this.adapt = { skill: 1, long: 0, close: 0, vehicle: 0, air: 0, camper: null, campT: 0, watch: new Map() };
     this.targeting = false;
     this.pickupId = 0;
     this.pendingCls = settings.cls;
+    this.finalT = 0;
     this.state = 'playing';
     this.hud.reset(this);
 
@@ -387,6 +390,7 @@ export class Game {
     else { victim.die(); this.dropPickup(victim.pos); }
     const valid = killer && killer !== victim && killer.team !== victim.team && !killer.isVehicle;
     this.mode.onKill(killer, victim, weapon);
+    if (valid) this.adaptKill(killer, victim, weapon);
     if (valid) {
       killer.kills++;
       killer.score += 100;
@@ -409,7 +413,11 @@ export class Game {
     victim.damagers.clear();
     this.hud.feed(killer, victim, weapon, headshot, this.player);
     this.emit({ k: 'kill', a: killer ? killer.id : -1, v: victim.id, w: weapon, h: !!headshot });
-    if (valid && this.teamScore[killer.team] >= this.settings.scoreLimit) this.end();
+    // the winning kill plays out in slow motion before the end screen
+    if (valid && this.teamScore[killer.team] >= this.settings.scoreLimit && !(this.finalT > 0)) {
+      this.finalT = 1.6;
+      this.hud.banner('FINAL KILL', `${killer.name} ends it`, killer.team === this.player.team ? 'ally' : 'enemy');
+    }
   }
 
   localDeath(killer, weapon) {
@@ -515,6 +523,7 @@ export class Game {
       }
     }
     for (const [o, dmg] of objHits) this.hitObject(o, dmg, pl, false);
+    if (this.authority) this.suppress(pl, _o, _fwd, 300);
     if (this.role === 'client') {
       for (const [e, r] of hits) this.net.send({ t: 'hit', id: e.id, d: Math.round(r.dmg * 10) / 10, h: r.head, w: def.name });
       this.net.send({ t: 'fire', m: arr(muzzle), e: sent, key: def.model });
@@ -575,6 +584,46 @@ export class Game {
       else if (this.role === 'client' && v.local) this.net.send({ t: 'fire', m: arr(o), e: [[...arr(end), kind, ...(normal ? arr(normal) : [])]], key });
     }
     this.whizz(o, dir, h);
+  }
+
+  // rounds cracking past enemy bots pin them down: they duck, aim worse and look for cover
+  suppress(shooter, o, dir, maxT) {
+    for (const b of this.bots) {
+      if (!b.alive || b.team === shooter.team) continue;
+      _e.set(b.pos.x - o.x, b.pos.y + 1.2 - o.y, b.pos.z - o.z);
+      const t = _e.dot(dir);
+      if (t < 2 || t > maxT) continue;
+      if (_e.addScaledVector(dir, -t).length() < 2.6) b.suppressedBy(shooter);
+    }
+  }
+
+  // After each kill involving a human: the bots' skill drifts with how the fight is going
+  // (a human on a run makes them sharper, a struggling one eases them off), and they note
+  // whether that human kills at range, up close or from vehicles, to pick kit against it.
+  adaptKill(killer, victim, weapon) {
+    const A = this.adapt, human = (s) => s && (s.isPlayer || s.human);
+    if (human(killer) && !human(victim)) {
+      A.skill = Math.min(1.35, A.skill + 0.025 + Math.min(killer.streak, 10) * 0.004);
+      const d = killer.pos.distanceTo(victim.pos);
+      if (killer.vehicle || VEHICLE_WEAPONS.has(weapon)) { A.vehicle++; if (killer.vehicle?.air) A.air++; }
+      else if (d > 45) A.long++;
+      else if (d < 14) A.close++;
+    } else if (human(victim) && !human(killer)) A.skill = Math.max(0.8, A.skill - 0.045);
+  }
+
+  // a human who stays within 9 m of one spot for 25 s while fighting is camping: the bots flank
+  watchCampers(dt) {
+    const A = this.adapt;
+    if ((A.campT -= dt) > 0) return;
+    A.campT = 1;
+    A.camper = null;
+    for (const s of this.soldiers) {
+      if (!(s.isPlayer || s.human) || !s.alive || s.inVehicle) { A.watch.delete(s); continue; }
+      let w = A.watch.get(s);
+      if (!w || Math.hypot(w.x - s.pos.x, w.z - s.pos.z) > 9) A.watch.set(s, w = { x: s.pos.x, z: s.pos.z, t: 0 });
+      else w.t += 1;
+      if (w.t > 25 && this.time - s.firedT < 20) A.camper = s;
+    }
   }
 
   // blood mist, plus a splat on whatever is just behind the target
@@ -1206,6 +1255,11 @@ export class Game {
   // ---------- frame ----------
   update(dt, inp) {
     if (this.state !== 'playing') return;
+    if (this.finalT > 0) {
+      this.finalT -= dt;
+      if (this.finalT <= 0) { this.end(); return; }
+      dt *= 0.25;
+    }
     const pl = this.player, ars = this.arsenal;
     this.time += dt;
     this.timeLeft = Math.max(0, this.timeLeft - dt);
@@ -1292,6 +1346,7 @@ export class Game {
         b.update(b.far && b.alive ? Math.min(0.1, dt * 2) : dt);
       }
       this.mode.update(dt);
+      this.watchCampers(dt);
       this.updateGrenades(dt);
       for (let i = this.jobs.length - 1; i >= 0; i--) {
         if (this.jobs[i].t <= this.time) { const j = this.jobs[i]; this.jobs.splice(i, 1); j.fn(); }
@@ -1344,12 +1399,33 @@ export class Game {
     this.net?.tick(dt);
   }
 
+  // First a moment on your own body turning to face the killer, then the killcam: live, over the
+  // killer's shoulder (or behind their vehicle) until you respawn.
   deathCam(dt) {
-    const pl = this.player, cam = this.camera;
+    const pl = this.player, cam = this.camera, kc = document.getElementById('killcam');
     const k = Math.min(1, Math.max(0, (4 - this.deadT) / 0.6));
+    const killer = this.killer, veh = killer?.vehicle?.alive ? killer.vehicle : killer?.isVehicle ? killer : null;
+    if (killer?.alive && 4 - this.deadT > 1.3) {
+      kc.classList.add('show'); this.killcamOn = true;
+      kc.innerHTML = `KILLCAM &middot; <b>${killer.name}</b>${killer.health !== undefined && !veh ? ` &middot; ${Math.ceil(killer.health)} HP` : ''}`;
+      if (veh) {
+        const f = _fwd.set(0, 0, -1).applyQuaternion(veh.quat);
+        f.y = 0; if (f.lengthSq() < 1e-4) f.set(0, 0, -1); f.normalize();
+        const back = veh.air ? 22 : 11;
+        cam.position.copy(veh.pos).addScaledVector(f, -back); cam.position.y = veh.pos.y + (veh.air ? 6 : 4.5);
+        cam.lookAt(_c.copy(veh.pos).addScaledVector(f, 30));
+      } else {
+        const eye = killer.aimPoint(_c, true), yaw = killer.yaw || 0, pitch = killer.pitch || 0;
+        const fx = -Math.sin(yaw), fz = -Math.cos(yaw), rx = Math.cos(yaw), rz = -Math.sin(yaw);
+        cam.position.set(eye.x - fx * 1.1 + rx * 0.45, eye.y + 0.25, eye.z - fz * 1.1 + rz * 0.45);
+        cam.rotation.set(pitch * 0.9, yaw, 0);
+      }
+      return;
+    }
+    kc.classList.remove('show'); this.killcamOn = false;
     cam.position.set(pl.pos.x, pl.pos.y + 1.6 - 1.2 * k, pl.pos.z);
-    if (this.killer && this.killer.alive) {
-      _e.subVectors(this.killer.aimPoint(_c, false), cam.position);
+    if (killer && killer.alive) {
+      _e.subVectors(killer.aimPoint(_c, false), cam.position);
       const want = Math.atan2(-_e.x, -_e.z);
       let d = want - this.deathYaw;
       while (d > Math.PI) d -= 2 * Math.PI;

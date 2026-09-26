@@ -851,7 +851,7 @@ export function loadMap(scene, def) {
   def.layout(api, mirrorApi(api));
 
   const per = def.perimeter || {};
-  const pm = per.mat || 'wall', ph = per.h || 6;
+  const pm = per.fence ? 'invis' : per.mat || 'wall', ph = per.fence ? 6 : per.h || 6;
   const E = SIZE, E1 = SIZE - 1;
   addBox(0, 0, 0, E, ph, 1, pm); addBox(0, 0, E1, E, ph, E, pm);
   if (per.quay) {
@@ -1020,6 +1020,8 @@ export function loadMap(scene, def) {
     group.add(mesh); floors.push(mesh);
   }
 
+  if (per.fence) group.add(buildFence(def));
+
   // lamp light pools on the ground (only drawn when the map is dark enough to need them)
   if (def.look?.pools) {
     const pm2 = new THREE.MeshBasicMaterial({ map: poolTex(), color: def.look.poolColor || 0xffb060, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3, opacity: def.look.pools });
@@ -1065,6 +1067,54 @@ export function loadMap(scene, def) {
   if (reflection) reflection.hide = floors;
   scene.add(group);
   return def;
+}
+
+// The boundary on the open maps: a 2.6 m chain-link fence on steel posts with two strands of
+// barbed wire, so the country beyond stays in view. Collision is the invisible 6 m wall.
+function chainLink() {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d');
+  g.strokeStyle = '#c8ccd0'; g.lineWidth = 3;
+  g.beginPath(); g.moveTo(0, 32); g.lineTo(32, 0); g.lineTo(64, 32); g.lineTo(32, 64); g.closePath(); g.stroke();
+  g.beginPath(); g.moveTo(-32, 32); g.lineTo(0, 0); g.moveTo(96, 32); g.lineTo(64, 0); g.moveTo(-32, 32); g.lineTo(0, 64); g.moveTo(96, 32); g.lineTo(64, 64); g.stroke();
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4;
+  return t;
+}
+function buildFence(def) {
+  const out = new THREE.Group(), H = 2.6, E = SIZE;
+  const steel = new THREE.MeshStandardMaterial({ color: 0x8e9398, roughness: 0.45, metalness: 0.8 });
+  const net = new THREE.MeshStandardMaterial({ color: 0x9aa0a4, alphaMap: chainLink(), alphaTest: 0.35, transparent: false, side: THREE.DoubleSide, roughness: 0.5, metalness: 0.7 });
+  net.alphaMap.repeat.set(E / 0.4, H / 0.4);
+  materials.push(steel, net);
+  const sides = [[0, 0.6, E, 0.6], [0, E - 0.6, E, E - 0.6], [0.6, 0, 0.6, E], [E - 0.6, 0, E - 0.6, E]];
+  const postGeo = new THREE.CylinderGeometry(0.045, 0.05, H + 0.5, 8), n = Math.ceil(E / 3) + 1;
+  const posts = new THREE.InstancedMesh(postGeo, steel, n * 4);
+  const m = new THREE.Matrix4();
+  let k = 0;
+  for (const [x0, z0, x1, z1] of sides) {
+    const len = Math.hypot(x1 - x0, z1 - z0), along = x1 !== x0;
+    const panel = new THREE.Mesh(new THREE.PlaneGeometry(len, H), net);
+    panel.position.set((x0 + x1) / 2, H / 2 + 0.05, (z0 + z1) / 2);
+    if (!along) panel.rotation.y = Math.PI / 2;
+    panel.castShadow = true;
+    out.add(panel);
+    for (const y of [H + 0.02, H + 0.22, H + 0.4]) {
+      const wire = new THREE.Mesh(new THREE.CylinderGeometry(y > H + 0.1 ? 0.008 : 0.025, y > H + 0.1 ? 0.008 : 0.025, len, 5), steel);
+      wire.rotation.set(along ? 0 : Math.PI / 2, 0, along ? Math.PI / 2 : 0);
+      wire.position.set((x0 + x1) / 2, y, (z0 + z1) / 2);
+      out.add(wire);
+    }
+    for (let i = 0; i < n; i++) {
+      const t = i / (n - 1);
+      m.makeTranslation(x0 + (x1 - x0) * t, (H + 0.5) / 2, z0 + (z1 - z0) * t);
+      posts.setMatrixAt(k++, m);
+    }
+  }
+  posts.count = k; posts.castShadow = true;
+  out.add(posts);
+  void def;
+  return out;
 }
 
 // Small scanned clutter (crates, jerrycans, bags, boxes) along the foot of walls, so streets

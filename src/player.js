@@ -1,3 +1,4 @@
+import { setSleeves } from './weapons.js';
 import * as THREE from 'three';
 import { moveBody, overlaps, raycastWorld, groundAt, STEP } from './world.js';
 
@@ -48,6 +49,7 @@ export class Player {
     this.damagers.clear();
     this.body.onGround = true;
     this.body.h = STAND_H;
+    setSleeves(this.game.mode?.lookFor?.(this) ?? this.team);
     this.game.arsenal.equip(cls);
   }
 

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { camoFor } from './soldier.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { flashTexture } from './effects.js';
@@ -174,6 +175,61 @@ const M = {
   shell: std({ color: 0xa02a20, roughness: 0.5, metalness: 0.1 }),
 };
 M.tube = M.metal.clone(); M.tube.side = THREE.DoubleSide;
+
+// Reflex and holographic sight glass. The reticle is collimated: it is drawn where the view ray
+// through the glass lines up with the sight's axis, so like a real one it sits on the point of
+// aim at infinity and stays put when the head (or the gun, in the hand) moves, and at the hip
+// you look past it. A small crisp dot (about 2 MOA scaled up for screens) with a faint bloom,
+// or the holo's 65 MOA ring and dot; the glass has the faint blue-green tint and amber edge
+// reflection of the coating.
+function lensMat(holoRet) {
+  return new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false,
+    uniforms: { holo: { value: holoRet ? 1 : 0 }, bright: { value: 1 } },
+    vertexShader: `varying vec3 vView; varying vec3 vAxis; varying vec3 vUpA; varying vec2 vUv;
+      void main() {
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        vView = mv.xyz; vUv = uv;
+        vAxis = normalize((modelViewMatrix * vec4(0.0, 0.0, -1.0, 0.0)).xyz);
+        vUpA = normalize((modelViewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: `uniform float holo; uniform float bright; varying vec3 vView; varying vec3 vAxis; varying vec3 vUpA; varying vec2 vUv;
+      void main() {
+        vec3 v = normalize(vView);
+        float c = dot(v, vAxis);
+        vec3 d = v - vAxis * c;
+        vec3 rt = normalize(cross(vAxis, vUpA));
+        vec2 q = vec2(dot(d, rt), dot(d, vUpA));
+        float r = length(q);
+        float ret, halo;
+        if (holo > 0.5) {
+          float ring = smoothstep(0.0011, 0.0005, abs(r - 0.0105));
+          float dotc = smoothstep(0.0011, 0.0006, r);
+          float ticks = (smoothstep(0.0006, 0.0002, abs(q.x)) * step(0.0105, abs(q.y)) * step(abs(q.y), 0.0135))
+                      + (smoothstep(0.0006, 0.0002, abs(q.y)) * step(0.0105, abs(q.x)) * step(abs(q.x), 0.0135));
+          ret = max(max(ring, dotc), ticks * 0.9);
+          halo = exp(-pow((r - 0.0105) / 0.0022, 2.0)) * 0.12 + exp(-r * r / 0.0000045) * 0.15;
+        } else {
+          ret = smoothstep(0.0019, 0.0011, r);
+          halo = exp(-r * r / 0.000012) * 0.22;
+        }
+        ret *= step(0.0, c);
+        halo *= step(0.0, c);
+        float e = length(vUv - 0.5) * 2.0;
+        vec3 glass = mix(vec3(0.55, 0.78, 0.86), vec3(1.0, 0.55, 0.25), smoothstep(0.55, 1.0, e));
+        float ga = 0.035 + smoothstep(0.6, 1.0, e) * 0.09;
+        vec3 red = vec3(3.2, 0.18, 0.08) * bright;
+        float a = max(ga, max(ret, halo));
+        vec3 col = (glass * ga * (1.0 - ret) + red * (ret + halo)) / max(a, 1e-4);
+        gl_FragColor = vec4(col, a);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }`,
+  });
+}
+M.reflexLens = lensMat(false);
+M.holoLens = lensMat(true);
 // the parts a camo repaints
 export const CAMO_MATS = [M.poly, M.tan, M.od, M.wood];
 
@@ -242,8 +298,7 @@ function reflex(g, y, z, s) {
   part(g, sb(0.024, 0.01, 0.05), M.metal, 0, y - w / 2 - 0.016, z);
   part(g, frameGeo(w, w, t, 0.034, 0.007), M.metal, 0, y, z);
   part(g, sb(0.008, 0.006, 0.012), M.metal, w / 2 + 0.002, y + 0.004, z + 0.006);
-  part(g, new THREE.PlaneGeometry(s, s), M.glass, 0, y, z - 0.012);
-  part(g, new THREE.CircleGeometry(0.0026, 14), M.dot, 0, y, z - 0.011);
+  part(g, new THREE.PlaneGeometry(s, s), M.reflexLens, 0, y, z - 0.012);
 }
 
 function holo(g, y, z) {
@@ -253,9 +308,7 @@ function holo(g, y, z) {
   // battery housing and buttons on the base, like the real sight
   part(g, bx(0.02, 0.018, 0.04), M.metal, 0.03, y - h / 2 - 0.002, z + 0.02);
   for (const bz of [0.028, 0.04]) part(g, cy(0.0028, 0.004, 8), M.poly, 0, y - h / 2 + 0.006, z + bz, Math.PI / 2);
-  part(g, new THREE.PlaneGeometry(w - t * 2, h - t * 2), M.glass, 0, y, z - 0.035);
-  part(g, new THREE.RingGeometry(0.0045, 0.0053, 24), M.dot, 0, y, z - 0.034);
-  part(g, new THREE.CircleGeometry(0.0013, 10), M.dot, 0, y, z - 0.034);
+  part(g, new THREE.PlaneGeometry(w - t * 2, h - t * 2), M.holoLens, 0, y, z - 0.035);
 }
 
 // glowing dots on iron sights so the front post is easy to find
@@ -275,6 +328,30 @@ function scope(g, y, zRear, len, r, reticle = false) {
   for (const z of [zRear - 0.04, zRear - len + 0.07]) part(g, bx(0.03, 0.03, 0.02), M.metal, 0, y - r - 0.01, z);
 }
 
+// Forearm in the uniform: a tapered sleeve (wrist to elbow along +z) in the team's camo with a
+// couple of fabric folds; the glove's cuff is a short collar over the wrist.
+const sleeveGeo = (len) => (geos[`sl${len}`] ||= new THREE.CylinderGeometry(0.047, 0.035, len, 18, 4).rotateX(Math.PI / 2));
+const foldGeo = (r) => (geos[`fo${r}`] ||= new THREE.TorusGeometry(r, 0.0045, 6, 18));
+const cuffGeo = () => (geos.cuff ||= new THREE.CylinderGeometry(0.039, 0.037, 0.04, 16).rotateX(Math.PI / 2));
+function sleeve(parent, len, x, y, z, rx = 0, ry = 0, rz = 0) {
+  const g = group(parent, x, y, z, rx);
+  g.rotation.set(rx, ry, rz);
+  part(g, sleeveGeo(len), M.sleeve, 0, 0, 0);
+  for (const k of [-0.18, 0.08, 0.3]) {
+    const r = 0.041 + k * 0.012 / 0.5;
+    part(g, foldGeo(Math.round(r * 1000) / 1000), M.sleeve, 0, 0, k * len, 0, 0, k * 3).scale.set(1, 0.92, 1);
+  }
+  return g;
+}
+// the viewmodel wears the player's own uniform: MultiCam for the US, EMR for Russia
+const sleeveTex = {};
+export function setSleeves(team) {
+  const k = team ? 'emr' : 'ocp';
+  sleeveTex[k] ||= Object.assign(camoFor(k).clone(), { needsUpdate: true });
+  sleeveTex[k].repeat.set(0.9, 1.6);
+  if (M.sleeve.map !== sleeveTex[k]) { M.sleeve.map = sleeveTex[k]; M.sleeve.color.set(0xd8d8d8); M.sleeve.needsUpdate = true; }
+}
+
 function hand(parent, x, y, z) {
   const h = group(parent, x, y, z);
   part(h, bx(0.052, 0.08, 0.088), M.glove, 0.005, 0, 0);
@@ -286,14 +363,14 @@ function hand(parent, x, y, z) {
 function arms(g, grip, fore) {
   g.userData.grip = new THREE.Vector3(...grip); g.userData.fore = new THREE.Vector3(...fore);
   const gh = hand(g, ...grip);
-  part(gh, bx(0.085, 0.085, 0.32), M.sleeve, 0.05, -0.08, 0.17, 0.5, 0.2, 0);
-  part(gh, bx(0.07, 0.07, 0.04), M.cuff, 0.025, -0.035, 0.055, 0.5, 0.2, 0);
+  sleeve(gh, 0.32, 0.05, -0.08, 0.17, 0.5, 0.2, 0);
+  part(gh, cuffGeo(), M.cuff, 0.025, -0.035, 0.055, 0.5, 0.2, 0);
   const off = group(g, ...fore);
   part(off, bx(0.064, 0.05, 0.11), M.glove, -0.01, -0.045, 0);
   for (let i = 0; i < 4; i++) part(off, bx(0.018, 0.048, 0.022), M.glove, 0.03, -0.026, -0.042 + i * 0.026);
   part(off, bx(0.02, 0.04, 0.06), M.glove, -0.042, -0.02, 0.005);
-  part(off, bx(0.085, 0.085, 0.36), M.sleeve, -0.09, -0.12, 0.17, 0.55, -0.5, 0);
-  part(off, bx(0.07, 0.07, 0.04), M.cuff, -0.04, -0.07, 0.05, 0.55, -0.5, 0);
+  sleeve(off, 0.36, -0.09, -0.12, 0.17, 0.55, -0.5, 0);
+  part(off, cuffGeo(), M.cuff, -0.04, -0.07, 0.05, 0.55, -0.5, 0);
   return off;
 }
 
@@ -370,7 +447,7 @@ const tpCache = {}, tpMats = new Map();
 export function thirdPersonGun(model) {
   if (tpCache[model]) return tpCache[model];
   const b = BUILD[model] || BUILD.ar;
-  const o = b(), g = o.root, skip = new Set([M.sleeve, M.cuff, M.glove, M.glass, M.dot, M.tri, M.reticle]);
+  const o = b(), g = o.root, skip = new Set([M.sleeve, M.cuff, M.glove, M.glass, M.dot, M.tri, M.reticle, M.reflexLens, M.holoLens]);
   g.updateMatrixWorld(true);
   const by = new Map();
   g.traverse((m) => {
@@ -548,10 +625,10 @@ const BUILD = {
     part(mag, bx(0.031, 0.012, 0.042), M.poly, 0, -0.054, 0);
     const gh = group(g, 0.005, -0.06, 0.05);
     part(gh, bx(0.06, 0.085, 0.09), M.glove, 0, 0, 0);
-    part(gh, bx(0.085, 0.085, 0.4), M.sleeve, 0.055, -0.09, 0.2, 0.5, 0.15, 0);
+    sleeve(gh, 0.4, 0.055, -0.09, 0.2, 0.5, 0.15, 0);
     const off = group(g, -0.03, -0.07, 0.04);
     part(off, bx(0.05, 0.08, 0.08), M.glove, 0, 0, 0);
-    part(off, bx(0.085, 0.085, 0.42), M.sleeve, -0.07, -0.09, 0.21, 0.5, -0.35, 0);
+    sleeve(off, 0.42, -0.07, -0.09, 0.21, 0.5, -0.35, 0);
     if (sup) { part(g, cy(0.016, 0.17, 14), M.metal, 0, 0.034, -0.23); part(g, cy(0.017, 0.015, 14), M.steel, 0, 0.034, -0.31); }
     return finish(g, { mag, off, slide, muzzleZ: sup ? -0.32 : -0.145, muzzleY: 0.034, sightY: 0.058, sightZ: 0, adsDist: 0.36, hip: new THREE.Vector3(0.11, -0.14, -0.4), flashSize: sup ? 0.04 : 0.12, eject: new THREE.Vector3(0.025, 0.045, -0.02) });
   },
@@ -648,10 +725,10 @@ const BUILD = {
     mag.visible = false;
     const gh = group(g, 0.005, -0.06, 0.06);
     part(gh, bx(0.06, 0.085, 0.09), M.glove, 0, 0, 0);
-    part(gh, bx(0.085, 0.085, 0.4), M.sleeve, 0.055, -0.09, 0.2, 0.5, 0.15, 0);
+    sleeve(gh, 0.4, 0.055, -0.09, 0.2, 0.5, 0.15, 0);
     const off = group(g, -0.03, -0.07, 0.05);
     part(off, bx(0.05, 0.08, 0.08), M.glove, 0, 0, 0);
-    part(off, bx(0.085, 0.085, 0.42), M.sleeve, -0.07, -0.09, 0.21, 0.5, -0.35, 0);
+    sleeve(off, 0.42, -0.07, -0.09, 0.21, 0.5, -0.35, 0);
     return finish(g, { mag, off, cyl, loader: true, muzzleZ: -0.275, muzzleY: 0.03, sightY: 0.058, sightZ: 0, adsDist: 0.38, hip: new THREE.Vector3(0.11, -0.14, -0.42), flashSize: 0.16, eject: new THREE.Vector3(0, 0.02, -0.035) });
   },
   rpg() {
@@ -698,7 +775,7 @@ function buildKnife() {
   part(g, bx(0.05, 0.012, 0.012), M.metal, 0, 0, -0.06);
   part(g, sb(0.005, 0.03, 0.17), M.blade, 0, 0.003, -0.15);
   part(g, bx(0.06, 0.085, 0.09), M.glove, 0, -0.01, 0.01);
-  part(g, bx(0.085, 0.085, 0.42), M.sleeve, 0.03, -0.1, 0.22, 0.45, 0, 0);
+  sleeve(g, 0.42, 0.03, -0.1, 0.22, 0.45, 0, 0);
   g.visible = false;
   return g;
 }
@@ -709,7 +786,7 @@ function buildNade() {
   part(g, bx(0.02, 0.03, 0.02), M.metal, 0, 0.04, 0);
   part(g, bx(0.01, 0.04, 0.012), M.steel, 0.015, 0.02, 0, 0, 0, -0.3);
   part(g, bx(0.06, 0.085, 0.09), M.glove, 0, -0.04, 0.03);
-  part(g, bx(0.085, 0.085, 0.42), M.sleeve, -0.03, -0.12, 0.24, 0.45, 0, 0);
+  sleeve(g, 0.42, -0.03, -0.12, 0.24, 0.45, 0, 0);
   g.visible = false;
   return g;
 }

@@ -545,7 +545,7 @@ function frame(ts) {
   }
   const pl = game.player, playing = game.state === 'playing';
   const veh = playing && pl.alive ? pl.vehicle : null;
-  const hurt = playing ? (pl.alive ? Math.max(0, (45 - pl.health) / 45) * 0.8 : 0.7) : 0;
+  const hurt = playing ? (pl.alive ? Math.max(0, (45 - pl.health) / 45) * 0.8 : game.killcamOn ? 0.12 : 0.7) : 0;
   const d = game.arsenal.w?.def;
   const scoped = playing && pl.alive && !veh && d && (d.scope || d.overlay) && game.arsenal.adsEase() > 0.92;
   gfx.override = veh ? veh.grade() : scoped ? { vignette: 0.1, fringe: 0, grain: 0.02 } : null;
@@ -558,4 +558,11 @@ function frame(ts) {
 requestAnimationFrame(frame);
 
 // hook for automated screenshots in dev and test builds only
-if (import.meta.env.DEV || import.meta.env.VITE_TEST_HOOK) window.__fl = { game, THREE, deploy, settings, loadMapById, gfx, atmo, audio, CLASSES, sites, world: await import("./world.js") };
+if (import.meta.env.DEV || import.meta.env.VITE_TEST_HOOK) {
+  // scripted play for automated checks: step(n, i => input) runs n frames of 1/60 s
+  const blank = () => ({ forward: 0, back: 0, left: 0, right: 0, sprint: false, fire: false, firePressed: false, ads: false, adsPressed: false, reload: false, jumpPressed: false, jump: false,
+    crouchPressed: false, pronePressed: false, leanL: false, leanR: false, usePressed: false, use: false, digit: 0, melee: false, nade: false, nadePressed: false, switchTo: null, streak: null, call: null, dx: 0, dy: 0 });
+  const step = (n, fn) => { for (let i = 0; i < n; i++) game.update(1 / 60, Object.assign(blank(), fn ? fn(i) : {})); };
+  const cam = (x, y, z, tx, ty, tz) => { game.state = 'ended'; camera.position.set(x, y, z); camera.lookAt(tx, ty, tz); camera.fov = 70; camera.updateProjectionMatrix(); game.arsenal.holder.visible = false; };
+  window.__fl = { game, THREE, deploy, settings, loadMapById, gfx, atmo, audio, CLASSES, sites, world: await import('./world.js'), step, cam };
+}

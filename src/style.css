@@ -132,7 +132,7 @@ tbody tr:nth-child(odd) { background: rgba(255,255,255,0.04); }
 tr.me { color: var(--gold); }
 tr.dead { opacity: 0.5; }
 
-#death { position: fixed; left: 50%; top: 32%; transform: translateX(-50%); text-align: center; pointer-events: none; text-shadow: 0 2px 4px #000; }
+#death { position: fixed; left: 50%; bottom: 12%; transform: translateX(-50%); text-align: center; pointer-events: none; text-shadow: 0 2px 4px #000; }
 #death h2 { font-size: 40px; letter-spacing: 6px; margin: 0; color: var(--enemy); }
 #death p { font-size: 20px; margin: 6px 0; font-weight: 600; }
 
@@ -359,3 +359,8 @@ label.check { display: flex; align-items: center; gap: 8px; }
 .lineup b { display: flex; align-items: center; gap: 6px; font-size: 15px; }
 .lineup svg { width: 40px; height: 15px; fill: currentColor; }
 .lineup kbd { font-size: 11px; }
+
+#killcam { position: fixed; left: 50%; top: 104px; transform: translateX(-50%); padding: 6px 18px; font-size: 20px; font-weight: 700; letter-spacing: 4px; color: #fff;
+  background: linear-gradient(90deg, rgba(160,20,10,0), rgba(160,20,10,0.75), rgba(160,20,10,0)); pointer-events: none; opacity: 0; transition: opacity 0.2s; z-index: 5; }
+#killcam.show { opacity: 1; }
+#killcam b { color: var(--gold); }
