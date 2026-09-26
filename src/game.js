@@ -10,6 +10,7 @@ import { Chopper, Tank, FighterJet, Drone, VehicleProxy, Projectiles, PROJ, VEHI
 import { createMode } from './modes.js';
 import { Spectator } from './spectate.js';
 import { loadLoadouts, toClass } from './loadout.js';
+import { Rewind, verifyHit, claimTime } from './rewind.js';
 
 const DEG = Math.PI / 180;
 const NAMES = ['Viper', 'Ghost', 'Havoc', 'Reaper', 'Nomad', 'Sarge', 'Hawk', 'Wolf', 'Rook', 'Blitz', 'Frost', 'Onyx',
@@ -322,6 +323,15 @@ export class Game {
     this.net.send({ t: 'kit', g });
   }
 
+  // A client says it hit something. Rewind to the moment that client was drawing and
+  // check the shot could have connected before applying it.
+  applyClientHit(shooter, victim, dmg, weapon, head, sentAt) {
+    if (victim.isVehicle) { this.damage(victim, dmg, shooter, weapon, head, shooter.pos); return; }
+    const why = verifyHit(this, shooter, victim, dmg, weapon, head, claimTime(this.time, sentAt));
+    if (why) { this.rejected = (this.rejected || 0) + 1; return; }
+    this.damage(victim, dmg, shooter, weapon, head, shooter.pos);
+  }
+
   // ---------- queries ----------
   // who may shoot at whom: `who` (a bot) lets Undercover keep the calm garrison off disguised players
   targetsFor(team, who = null) {
@@ -546,7 +556,7 @@ export class Game {
     }
     for (const [o, dmg] of objHits) this.hitObject(o, dmg, pl, false);
     if (this.role === 'client') {
-      for (const [e, r] of hits) this.net.send({ t: 'hit', id: e.id, d: Math.round(r.dmg * 10) / 10, h: r.head, w: def.name });
+      for (const [e, r] of hits) this.net.send({ t: 'hit', ack: this.net.ack, id: e.id, d: Math.round(r.dmg * 10) / 10, h: r.head, w: def.name });
       this.net.send({ t: 'fire', m: arr(muzzle), e: sent, key: def.model, sd: def.silent ? 1 : 0 });
     } else for (const [e, r] of hits) this.damage(e, r.dmg, pl, def.name, r.head, pl.pos);
     const fx = this.effects;
@@ -589,7 +599,7 @@ export class Game {
       const head = h.zone === 'head';
       const amt = h.entity.isVehicle ? dmg : dmg * (head ? 1.5 : 1);
       if (this.authority) this.damage(h.entity, amt, shooter, weapon, head, v.pos, { streak: true });
-      else this.net.send({ t: 'hit', id: h.entity.id, d: Math.min(250, amt), h: head, w: weapon });
+      else this.net.send({ t: 'hit', ack: this.net.ack, id: h.entity.id, d: Math.min(250, amt), h: head, w: weapon });
       if (!h.entity.isVehicle) { this.bleed(end, dir); kind = 2; } else this.effects.impact(end, dir.clone().negate(), 'metal');
     } else if (h.world) {
       this.effects.impact(end, h.world.normal, materialAt(end, h.world.normal));
@@ -643,7 +653,7 @@ export class Game {
     this.audio.stab();
     this.bleed(best.aimPoint(_c, false), _fwd);
     pl.vel.x += _fwd.x * 4; pl.vel.z += _fwd.z * 4;
-    if (this.role === 'client') this.net.send({ t: 'hit', id: best.id, d: 200, h: false, w: 'Knife' });
+    if (this.role === 'client') this.net.send({ t: 'hit', ack: this.net.ack, id: best.id, d: 200, h: false, w: 'Knife' });
     else this.damage(best, 200, pl, 'Knife', false, pl.pos);
   }
 
@@ -1116,7 +1126,7 @@ export class Game {
   }
 
   // ---------- client: apply what the host sends ----------
-  applySnapshot(d) {
+  applySnapshot(d, at = 0) {
     if (typeof d.tl === 'number') this.timeLeft = d.tl;
     if (Array.isArray(d.sc)) this.teamScore = d.sc.slice(0, 2);
     if (Array.isArray(d.uav)) this.uav = d.uav.slice(0, 2);
@@ -1130,8 +1140,7 @@ export class Game {
       if (s === pl) { if (pl.alive && alive) pl.health = hp; continue; }
       if (alive && !s.alive) s.place(x, y, z, yaw);
       else if (!alive && s.alive) s.die();
-      s.setState(x, y, z, yaw, pitch, c);
-      s.leanT = typeof ln === 'number' ? ln : 0;
+      s.setState(x, y, z, yaw, pitch, c, typeof ln === 'number' ? ln : 0, at);
       s.setInVehicle(!!iv);
       s.health = hp;
     }
@@ -1227,6 +1236,7 @@ export class Game {
     if (this.state !== 'playing') return;
     const pl = this.player, ars = this.arsenal;
     this.time += dt;
+    this.netTime = this.net?.active && !this.authority ? this.net.hostNow() : this.time;
     this.timeLeft = Math.max(0, this.timeLeft - dt);
     if (this.authority && this.timeLeft <= 0) { if (this.mode.kind === 'uc') this.mode.finish(false); else this.end(); return; }
     this.pathBudget = 4;
@@ -1321,6 +1331,10 @@ export class Game {
     }
     if (this.authority && this.bots.length) this.aiCalls(dt);
     for (const n of this.nets) n.update(dt);
+    // the host keeps a short ring of every soldier, to rewind on a client's hit claim
+    if (this.role === 'host' && this.net.clients.size) {
+      for (const so of this.soldiers) (so.rewind ||= new Rewind()).push(this.time, so);
+    }
     for (const v of this.vehicles) v.update(dt);
     this.vehicles = this.vehicles.filter(v => v.alive || v.persistent);
     this.projectiles.update(dt);

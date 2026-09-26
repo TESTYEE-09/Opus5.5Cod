@@ -7,6 +7,7 @@ import { buildSoldier, setRelation, animateSoldier, animateDeath } from './bots.
 import { VehicleProxy, PROJ } from './vehicles.js';
 import { objects, brokenIds } from './world.js';
 import { SILENT } from './game.js';
+import { RENDER_DELAY } from './rewind.js';
 
 const PREFIX = 'frontline-opus55cod-';
 const RATE = 1 / 20;
@@ -37,6 +38,8 @@ export class NetSoldier {
   }
 
   place(x, y, z, yaw) {
+    this.hist && (this.hist.length = 0);
+    this.rewind?.clear();
     this.pos.set(x, y, z); this.tgt.set(x, y, z);
     this.yaw = this.tYaw = yaw;
     this.alive = true; this.health = 100; this.protect = 1.5; this.lastHurt = -99;
@@ -45,8 +48,44 @@ export class NetSoldier {
     r.visible = true; r.rotation.set(0, yaw, 0); r.position.copy(this.pos);
   }
 
-  setState(x, y, z, yaw, pitch, crouch) {
-    this.tgt.set(x, y, z); this.tYaw = yaw; this.pitch = pitch; this.tCrouch = crouch;
+  // The host's copies chase the newest state, because the host is the authority and
+  // must not lag. A client's copies go into a buffer and are drawn RENDER_DELAY in the
+  // past, between the two samples that bracket render time, so jitter never shows.
+  setState(x, y, z, yaw, pitch, crouch, lean = 0, now = 0) {
+    this.tgt.set(x, y, z); this.tYaw = yaw; this.pitch = pitch; this.tCrouch = crouch; this.leanT = lean;
+    if (this.isRemote) return;
+    const b = this.hist ||= [];
+    // a snapshot that arrives out of order would drag the buffer backwards
+    if (b.length && now <= b[b.length - 1].t) return;
+    b.push({ t: now, x, y, z, yaw, pitch, c: crouch, lean });
+    while (b.length > 2 && now - b[0].t > 1) b.shift();
+  }
+
+  // Position and pose at `t`. Between two samples it interpolates; past the newest -
+  // the buffer starved, which a stalled connection does - it carries on at the last
+  // known speed for a short while rather than freezing and then snapping.
+  sampleAt(t) {
+    const b = this.hist;
+    if (!b || !b.length) return null;
+    if (b.length === 1 || t <= b[0].t) return { ...b[0], speed: 0 };
+    const last = b[b.length - 1];
+    if (t >= last.t) {
+      const prev = b[b.length - 2];
+      const gap = Math.max(1e-3, last.t - prev.t);
+      const over = Math.min(t - last.t, 0.2);
+      const vx = (last.x - prev.x) / gap, vz = (last.z - prev.z) / gap;
+      return { ...last, x: last.x + vx * over, z: last.z + vz * over, speed: Math.hypot(vx, vz), starved: true };
+    }
+    let i = b.length - 1;
+    while (i > 0 && b[i - 1].t > t) i--;
+    const a = b[i - 1], c = b[i];
+    const k = (t - a.t) / Math.max(1e-6, c.t - a.t);
+    return {
+      t, x: a.x + (c.x - a.x) * k, y: a.y + (c.y - a.y) * k, z: a.z + (c.z - a.z) * k,
+      yaw: a.yaw + wrap(c.yaw - a.yaw) * k, pitch: a.pitch + (c.pitch - a.pitch) * k,
+      c: a.c + (c.c - a.c) * k, lean: a.lean + (c.lean - a.lean) * k,
+      speed: Math.hypot(c.x - a.x, c.z - a.z) / Math.max(1e-3, c.t - a.t),
+    };
   }
 
   get proneAmt() { return Math.max(0, Math.min(1, this.crouchAmt - 1)); }
@@ -83,12 +122,29 @@ export class NetSoldier {
       return;
     }
     const px = this.pos.x, pz = this.pos.z;
-    if (this.pos.distanceTo(this.tgt) > 4) this.pos.copy(this.tgt);
-    else this.pos.lerp(this.tgt, 1 - Math.exp(-dt * 14));
+    const sm = this.isRemote ? null : this.sampleAt(this.game.netTime - RENDER_DELAY);
+    if (sm) {
+      // Follow the interpolated point, but never cover more ground in a frame than the
+      // soldier could: a stall followed by a burst would otherwise show as a teleport.
+      const step = Math.hypot(sm.x - this.pos.x, sm.z - this.pos.z, sm.y - this.pos.y);
+      const cap = Math.max(0.5, sm.speed * 2.2) * dt + 0.01;
+      if (step > 4 || step <= cap) this.pos.set(sm.x, sm.y, sm.z);
+      else {
+        const k = cap / step;
+        this.pos.set(this.pos.x + (sm.x - this.pos.x) * k, this.pos.y + (sm.y - this.pos.y) * k, this.pos.z + (sm.z - this.pos.z) * k);
+      }
+      this.yaw = wrap(this.yaw + wrap(sm.yaw - this.yaw) * Math.min(1, dt * 20));
+      this.pitch = sm.pitch;
+      this.crouchAmt += (sm.c - this.crouchAmt) * Math.min(1, dt * 14);
+      this.leanOff += (sm.lean - this.leanOff) * Math.min(1, dt * 14);
+    } else {
+      if (this.pos.distanceTo(this.tgt) > 4) this.pos.copy(this.tgt);
+      else this.pos.lerp(this.tgt, 1 - Math.exp(-dt * 14));
+      this.yaw = wrap(this.yaw + wrap(this.tYaw - this.yaw) * Math.min(1, dt * 16));
+      this.crouchAmt += (this.tCrouch - this.crouchAmt) * Math.min(1, dt * 12);
+      this.leanOff += (this.leanT - this.leanOff) * Math.min(1, dt * 14);
+    }
     this.vel.set((this.pos.x - px) / Math.max(dt, 1e-3), 0, (this.pos.z - pz) / Math.max(dt, 1e-3));
-    this.yaw = wrap(this.yaw + wrap(this.tYaw - this.yaw) * Math.min(1, dt * 16));
-    this.crouchAmt += (this.tCrouch - this.crouchAmt) * Math.min(1, dt * 12);
-    this.leanOff += (this.leanT - this.leanOff) * Math.min(1, dt * 14);
     const sp = Math.hypot(this.vel.x, this.vel.z);
     if (sp > 1.5 && sp < 12 && !this.inVehicle) {
       this.stepAcc = (this.stepAcc || 0) + sp * dt;
@@ -118,9 +174,26 @@ export class Net {
     this.sendT = 0;
     this.myId = 0;
     this.name = 'Player';
+    this.seq = 0;
+    this.ack = 0;   // client: the newest snapshot it has seen, echoed back so the host can rewind
   }
 
   get active() { return !!this.peer; }
+
+  // one monotonic local clock
+  perf() { return performance.now() / 1000; }
+
+  // A client's estimate of the host's match clock. Samples have to be stamped with the
+  // host's time, not with arrival time: packets bunch up after a stall, and two samples
+  // sharing an arrival stamp would make the interpolator snap between them.
+  // The estimate takes the least-delayed packet seen and lets that drift back down.
+  noteHostTime(ht) {
+    const cand = ht - this.perf();
+    if (this.off === undefined || cand > this.off) this.off = cand;
+    else this.off += (cand - this.off) * 0.02;
+  }
+
+  hostNow() { return this.perf() + (this.off || 0); }
 
   host(name) {
     this.isHost = true;
@@ -309,7 +382,8 @@ export class Net {
       case 'hit': {
         if (!s.alive) break;
         const v = g.byId.get(d.id) || g.vehicles.find(x => x.id === d.id);
-        if (v) g.damage(v, Math.max(0, Math.min(250, num(d.d))), s, String(d.w ?? '').slice(0, 20), !!d.h, s.pos);
+        if (!v) break;
+        g.applyClientHit(s, v, Math.max(0, Math.min(250, num(d.d))), String(d.w ?? '').slice(0, 20), !!d.h, this.sentAt(id, d.ack));
         break;
       }
       case 'ob': {
@@ -356,10 +430,17 @@ export class Net {
     }
   }
 
+  // the host match time at which the snapshot a client is acknowledging went out
+  sentAt(id, ack) {
+    const c = this.clients.get(id);
+    if (!c || typeof ack !== 'number') return 0;
+    return c.sent?.get(ack) || 0;
+  }
+
   snapshot() {
     const g = this.game;
     return {
-      t: 'snap', tl: r2(g.timeLeft), sc: g.teamScore, uav: g.uav.map(r2), m: g.mode.netState(),
+      t: 'snap', sq: ++this.seq, ht: r2(g.time), tl: r2(g.timeLeft), sc: g.teamScore, uav: g.uav.map(r2), m: g.mode.netState(),
       s: g.soldiers.map(s => [s.id, r2(s.pos.x), r2(s.pos.y), r2(s.pos.z), r2(s.yaw), r2(s.pitch || 0), r2(s.crouchAmt + (s.isPlayer ? s.proneAmt : 0)),
         s.alive ? 1 : 0, Math.max(0, Math.round(s.health)), s.kills, s.deaths, s.assists, s.score, s.streak, r2(s.leanOff || 0), s.inVehicle ? 1 : 0]),
       v: g.vehicles.filter(v => v.alive || v.persistent).map(v => (v.isProxy ? proxyRow(v) : v.netRow())),
@@ -376,7 +457,11 @@ export class Net {
     const g = this.game;
     if (d.t === 'lobby') this.ui.lobby(d);
     else if (d.t === 'start') { g.startClient(d, this.myId); this.ui.started(); }
-    else if (d.t === 'snap' && g.state === 'playing') g.applySnapshot(d);
+    else if (d.t === 'snap' && g.state === 'playing') {
+      if (typeof d.sq === 'number') this.ack = d.sq;
+      if (typeof d.ht === 'number') this.noteHostTime(d.ht);
+      g.applySnapshot(d, num(d.ht, this.hostNow()));
+    }
     else if (d.t === 'snap' && Array.isArray(d.ev)) { for (const ev of d.ev) if (ev?.k === 'end') g.applyEvent(ev); }
     else if (d.t === 'bye') this.ui.closed('The host ended the session.');
   }
@@ -388,9 +473,19 @@ export class Net {
     this.sendT += dt;
     if (this.sendT < RATE) return;
     this.sendT = 0;
-    if (this.isHost) { if (this.clients.size) this.broadcast(this.snapshot()); else this.game.events.length = 0; return; }
+    if (this.isHost) {
+      if (!this.clients.size) { this.game.events.length = 0; return; }
+      const snap = this.snapshot(), at = this.game.time;
+      for (const c of this.clients.values()) {
+        if (!c.conn.open) continue;
+        (c.sent ||= new Map()).set(snap.sq, at);
+        if (c.sent.size > 60) c.sent.delete(c.sent.keys().next().value);
+        c.conn.send(snap);
+      }
+      return;
+    }
     const g = this.game, pl = g.player;
-    this.send({ t: 'st', p: [r2(pl.pos.x), r2(pl.pos.y), r2(pl.pos.z)], y: r2(pl.yaw), pi: r2(pl.pitch), c: r2(pl.crouchAmt + pl.proneAmt), l: r2(pl.leanOff), iv: pl.inVehicle ? 1 : 0, a: g.arsenal.ads > 0.5 ? 1 : 0 });
+    this.send({ t: 'st', ack: this.ack, p: [r2(pl.pos.x), r2(pl.pos.y), r2(pl.pos.z)], y: r2(pl.yaw), pi: r2(pl.pitch), c: r2(pl.crouchAmt + pl.proneAmt), l: r2(pl.leanOff), iv: pl.inVehicle ? 1 : 0, a: g.arsenal.ads > 0.5 ? 1 : 0 });
     for (const v of g.vehicles) if (v.local && v.alive) this.send({ t: 'vs', r: v.netRow() });
   }
 }

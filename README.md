@@ -57,9 +57,10 @@ Type a callsign, press **Host**, and send the 5-letter room code to your friends
 
 The host's browser runs the match: bots, damage, score and killstreaks. Other players connect to the host directly over WebRTC through [PeerJS](https://peerjs.com), which uses its public server only to introduce the browsers to each other.
 
+- Other players are drawn about 100 ms in the past, interpolated between the two snapshots that bracket that moment rather than chasing the newest one. Samples are stamped with the host's clock, which each client estimates from arrival times, so a stall that delivers three snapshots at once plays them back in order instead of snapping. If the buffer runs dry the soldier carries on at their last known speed for up to 200 ms, and no soldier is ever moved further in one frame than a sprint could carry them.
+- Hits are still claimed by the shooter's browser, but the host now checks each claim instead of taking it. It keeps 600 ms of every soldier's position, rewinds to the moment the claiming client was drawing — the snapshot that client acknowledged, minus the interpolation delay — and drops the claim if the damage is more than that weapon could do at that range, if there was no line of sight to the target's chest or head, if the shooter had not fired, or if the target was already dead. A claim against a target with no history yet is allowed through rather than eating a real hit. This stops damage through walls, from impossible range, and inflated damage numbers; it cannot tell a good aim from an aimbot, so it is a check, not anti-cheat.
 - The host should keep the game tab in front. Browsers slow down background tabs, and a slowed host slows the match for everyone.
 - If the host leaves, the match ends for everyone.
-- Hits are decided by the shooter's browser and trusted by the host. That suits a game among friends; it would not stop a cheater.
 - Some strict school or office networks block WebRTC. PeerJS relays through its own TURN servers when a direct connection fails, but not every network allows that.
 
 ## Controls
@@ -118,7 +119,8 @@ Then open http://localhost:5178. `npm run build` writes a static site to `dist/`
 | `src/spectate.js` | The death camera, the killcam and free spectate |
 | `src/effects.js` | Particles, tracers, impacts, explosions and decals |
 | `src/game.js` | Match rules, combat, scoring, and host and client roles |
-| `src/net.js` | PeerJS rooms, lobby, snapshots and networked soldiers |
+| `src/net.js` | PeerJS rooms, lobby, snapshots, snapshot interpolation and networked soldiers |
+| `src/rewind.js` | The host's position history and the checks it runs on a client's hit claim |
 | `src/audio.js` | Sample playback, loudness matching, the mix, distance falloff, panning and reverb |
 | `src/hud.js` | HUD, minimap and scoreboards |
 | `src/main.js` | Renderer, menus, input and the frame loop |
