@@ -154,7 +154,8 @@ export function createTouch(api) {
     else { press(b.dataset.k); release(b.dataset.k); }
   });
   // the live killstreak / vehicle list doubles as the kit menu: tap an entry to call it in
-  document.getElementById('streaks').addEventListener('click', (e) => {
+  // (on touch-down: the HUD redraws these lists every frame, so a click would never land)
+  document.getElementById('streaks').addEventListener('pointerdown', (e) => {
     const k = e.target.closest('.sk')?.querySelector('kbd')?.textContent.trim();
     if (!k || !api.active()) return;
     const code = /^\d$/.test(k) ? `Digit${k}` : `Key${k.toUpperCase()}`;
@@ -162,7 +163,7 @@ export function createTouch(api) {
     navigator.vibrate?.(12);
   });
   // choose a spawn point by tapping it on the death screen
-  document.getElementById('spawnSel').addEventListener('click', (e) => {
+  document.getElementById('spawnSel').addEventListener('pointerdown', (e) => {
     const d = e.target.closest('[data-d]')?.dataset.d;
     if (d) { press(`Digit${d}`); release(`Digit${d}`); }
   });

@@ -517,3 +517,4 @@ body.touch input.text { font-size: 18px; min-height: 44px; }
   .pbtns button { flex: 1; }
 }
 #touch.kitopen .tb-fire2 { display: none; }
+body.touch #hud.kit { z-index: 5; } /* above the touch layer so its entries can be tapped */
