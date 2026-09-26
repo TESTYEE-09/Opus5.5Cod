@@ -81,7 +81,7 @@ const HELP = {
 };
 // the 5-inch FPV is left out on purpose: armour shrugs its small charge off
 const EXPLOSIVE = new Set(['TOW', 'Konkurs', 'Frag', 'Airstrike', 'RPG-7', 'Stinger', 'Tank', 'Heavy FPV', 'Bomb', 'Flak', 'Jet', 'Barrel', 'Car', 'AGM-65', 'Kh-29', 'Kh-25', 'AIM-9', 'R-73']);
-const AP = { '25mm': 0.35, '30mm': 0.38, 'M2 .50': 0.12, 'KPVT 14.5mm': 0.15, 'Jet Cannon': 0.25, 'GAU-8': 0.75, Chopper: 0.3, 'Tank MG': 0.06 };
+const AP = { 'M82A1': 0.3, '25mm': 0.35, '30mm': 0.38, 'M2 .50': 0.12, 'KPVT 14.5mm': 0.15, 'Jet Cannon': 0.25, 'GAU-8': 0.75, Chopper: 0.3, 'Tank MG': 0.06 };
 export const VEHICLE_WEAPONS = new Set([...EXPLOSIVE, '25mm', '30mm', 'M2 .50', 'KPVT 14.5mm', 'FPV Drone', 'Jet Cannon', 'GAU-8', 'Chopper', 'Tank MG']);
 export function armorMul(spec, weapon) { return EXPLOSIVE.has(weapon) ? 1 : Math.max(spec.armor, AP[weapon] || 0); }
 

@@ -22,6 +22,8 @@ export const GUN_SOUND = {
   burst: ['ar', 1.12], dmr: ['sniper', 1.3], revolver: ['sniper', 1.55], heli: ['lmg', 0.75],
   jetgun: ['lmg', 1.45], flak: ['sniper', 0.8], rpg: ['shotgun', 0.6], stinger: ['shotgun', 0.6],
   spistol: ['pistol', 1], ssmg: ['smg', 1],
+  ak: ['ar', 0.92], scar: ['ar', 0.82], mp5: ['smg', 1.08], pkm: ['lmg', 0.9], svd: ['sniper', 1.15], barrett: ['sniper', 0.7],
+  aa12: ['shotgun', 1.1], deagle: ['pistol', 0.8], '25mm': ['lmg', 0.6], '30mm': ['lmg', 0.55],
 };
 // suppressed guns: a muffled thump instead of the recorded report
 const SUPPRESSED = new Set(['spistol', 'ssmg']);
@@ -238,7 +240,7 @@ export class Sfx {
 
   // stage: out | in | charge | bolt | shell | pump | slide, per weapon family
   reload(model, stage) {
-    const fam = { smg: 'smg', ssmg: 'smg', lmg: 'lmg', pistol: 'pistol', spistol: 'pistol', revolver: 'pistol' }[model] || '';
+    const fam = { smg: 'smg', ssmg: 'smg', mp5: 'smg', lmg: 'lmg', pkm: 'lmg', pistol: 'pistol', spistol: 'pistol', revolver: 'pistol', deagle: 'pistol' }[model] || '';
     let name, rate = 1;
     if (stage === 'out') name = fam ? `${fam}_out` : 'mag_out';
     else if (stage === 'in') name = fam ? `${fam}_in` : 'mag_in';

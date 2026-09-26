@@ -2,7 +2,8 @@ import { track, describe } from './challenges.js';
 import * as THREE from 'three';
 import { raycastWorld, lineOfSight, pointSolid, groundAt, overlaps, spawns, SIZE, GRAVITY, STEP, materialAt, objectAt, objectsNear, breakObject } from './world.js';
 import { Effects } from './effects.js';
-import { Arsenal, CLASSES, falloff, FUSE, WEAPONS } from './weapons.js';
+import { Arsenal, CLASSES, loadoutFor, falloff, FUSE, WEAPONS } from './weapons.js';
+import { profile } from './rank.js';
 import { Player } from './player.js';
 import { Bot, DIFFICULTY } from './bots.js';
 import { Jet } from './streaks.js';
@@ -158,12 +159,12 @@ export class Game {
     this.hud.reset(this);
 
     if (this.role === 'client') {
-      pl.spawn(me, me.yaw, CLASSES[settings.cls]);
+      pl.spawn(me, me.yaw, this.kit(settings.cls));
       for (const n of this.nets) { const r = roster.find(x => x.id === n.id); n.pos.set(r.x, 0, r.z); n.tgt.copy(n.pos); }
       return;
     }
     const sp = this.pickSpawn(pl.team, pl);
-    pl.spawn(sp, sp.yaw, CLASSES[settings.cls]);
+    pl.spawn(sp, sp.yaw, this.kit(settings.cls));
     for (const n of this.nets) { const s = this.pickSpawn(n.team, n); n.place(s.x, 0, s.z, s.yaw); }
     for (const b of this.bots) { const s = this.mode.initialSpot?.(b) || this.pickSpawn(b.team, b); b.spawn(s, s.yaw); }
   }
@@ -177,6 +178,9 @@ export class Game {
     if (msg.m) this.mode.applyNet(msg.m);
     if (Array.isArray(msg.br)) for (const id of msg.br.slice(0, 5000)) breakObject(Number(id));
   }
+
+  // the player's class with their weapon picks, as far as their rank allows
+  kit(cls) { return loadoutFor(cls, this.settings.picks || {}, profile().level); }
 
   rebuild() {
     this.soldiers = [this.player, ...this.nets, ...this.bots];
@@ -1161,7 +1165,7 @@ export class Game {
         if (own) this.audio.beep(); else this.audio.alarm();
         break;
       }
-      case 'spawn': if (mine) { pl.spawn({ x: ev.x, z: ev.z }, ev.yaw, CLASSES[this.pendingCls]); this.hud.hideDeath(); } break;
+      case 'spawn': if (mine) { pl.spawn({ x: ev.x, z: ev.z }, ev.yaw, this.kit(this.pendingCls)); this.hud.hideDeath(); } break;
       case 'drop': if (Array.isArray(ev.p)) this.dropPickup(v3(ev.p), ev.id); break;
       case 'took': this.removePickup(ev.id); break;
       case 'roster': this.syncRoster(ev.r || []); break;
@@ -1253,7 +1257,7 @@ export class Game {
       }
       if (this.authority && this.deadT <= 0) {
         const sp = this.pickSpawn(pl.team, pl);
-        pl.spawn(sp, sp.yaw, CLASSES[this.pendingCls]);
+        pl.spawn(sp, sp.yaw, this.kit(this.pendingCls));
         this.hud.hideDeath();
       }
     }

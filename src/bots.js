@@ -12,10 +12,14 @@ export const DIFFICULTY = {
   veteran: { name: 'Veteran', react: 0.42, err: 1.15, min: 0.22, learn: 1.1, turn: 6.5, dmg: 0.85, head: 0.15 },
 };
 
-const KITS = [['ar', 0.34], ['smg', 0.2], ['burst', 0.12], ['lmg', 0.07], ['shotgun', 0.09], ['dmr', 0.09], ['sniper', 0.09]];
-function pickKit() {
+// each side's weapon mix: US rifles and SCARs, Russian AKs, PKMs and SVDs
+const KITS = [
+  [['ar', 0.26], ['scar', 0.1], ['smg', 0.12], ['mp5', 0.08], ['burst', 0.1], ['lmg', 0.07], ['shotgun', 0.06], ['aa12', 0.03], ['dmr', 0.08], ['sniper', 0.06], ['barrett', 0.04]],
+  [['ak', 0.36], ['smg', 0.12], ['mp5', 0.06], ['burst', 0.06], ['pkm', 0.08], ['lmg', 0.02], ['shotgun', 0.06], ['aa12', 0.03], ['svd', 0.1], ['sniper', 0.07], ['barrett', 0.04]],
+];
+function pickKit(team = 0) {
   let r = Math.random();
-  for (const [k, w] of KITS) if ((r -= w) <= 0) return k;
+  for (const [k, w] of KITS[team] || KITS[0]) if ((r -= w) <= 0) return k;
   return 'ar';
 }
 
@@ -260,7 +264,7 @@ export class Bot {
   }
 
   spawn(p, yaw) {
-    this.kit = pickKit();
+    this.kit = pickKit(this.team);
     this.def = WEAPONS[this.kit];
     this.mag = this.def.mag;
     this.pos.set(p.x, 0, p.z);

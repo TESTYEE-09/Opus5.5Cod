@@ -7,7 +7,7 @@ import { Atmosphere } from './atmosphere.js';
 import { Sfx } from './audio.js';
 import { Hud } from './hud.js';
 import { Game } from './game.js';
-import { CLASSES, CAMO_MATS } from './weapons.js';
+import { CLASSES, CAMO_MATS, OPTIONS, WEAPONS } from './weapons.js';
 import { CAMOS, applyCamo } from './camo.js';
 import { DIFFICULTY } from './bots.js';
 import { Net, cleanName } from './net.js';
@@ -68,7 +68,7 @@ function loadMapById(id) {
 const game = new Game({ renderer, scene, camera, wscene, audio, hud, loadMap: loadMapById });
 
 // ---------- settings ----------
-const defaults = { sens: 1, fov: 80, vol: 0.7, difficulty: 'regular', cls: 'assault', name: '', map: 'crossroads', mode: 'gw', quality: 'high', camo: 'none', fpv: '5', jet: 'attack', ground: 'apc', huntRole: 'hunter', blur: 0.5, scale: 1, dynres: true };
+const defaults = { sens: 1, fov: 80, vol: 0.7, difficulty: 'regular', cls: 'assault', name: '', map: 'crossroads', mode: 'gw', quality: 'high', camo: 'none', picks: {}, fpv: '5', jet: 'attack', ground: 'apc', huntRole: 'hunter', blur: 0.5, scale: 1, dynres: true };
 const matchRules = () => ({ scoreLimit: MODES[settings.mode].scoreLimit, timeLimit: MODES[settings.mode].timeLimit });
 let settings = { ...defaults };
 try { Object.assign(settings, JSON.parse(localStorage.getItem('frontline.settings') || '{}')); } catch { /* storage unavailable */ }
@@ -124,6 +124,12 @@ function renderClassCards() {
   $('camos').innerHTML = CAMOS.map(c => `<button class="camo camo-${c.id}${c.id === settings.camo ? ' on' : ''}${c.rank > pr.level ? ' locked' : ''}" data-camo="${c.id}"${c.rank > pr.level ? ' disabled' : ''}>` +
     `<b>${c.name}</b><span>${c.rank > pr.level ? `Rank ${c.rank}` : c.id === settings.camo ? 'Equipped' : 'Unlocked'}</span></button>`).join('');
   applyCamo(settings.camo, CAMO_MATS);
+  // weapon picks for the selected class: default, then the class's options, then sidearms
+  const cls = CLASSES[settings.cls], pk = settings.picks[settings.cls] ||= {};
+  const btn = (slot, id) => { const w = WEAPONS[id], lock = (w.unlock || 0) > pr.level, on = (pk[slot] || cls[slot]) === id;
+    return `<button class="${on ? 'on' : ''}${lock ? ' locked' : ''}" data-slot="${slot}" data-w="${id}"${lock ? ' disabled' : ''}>${w.name}${lock ? ` · rank ${w.unlock}` : ''}</button>`; };
+  $('picks').innerHTML = [cls.primary, ...(OPTIONS.primary[settings.cls] || [])].map(id => btn('primary', id)).join('') + '<i class="sep"></i>' +
+    [cls.secondary, ...OPTIONS.secondary].map(id => btn('secondary', id)).join('');
   // tech tree: lines of vehicles, the selected one per line, research progress
   for (const l of TREE) settings[l.setting] = validChoice(l, settings[l.setting]);
   $('tree').innerHTML = TREE.map(l => `<div class="tline"><span class="tlabel">${l.line} <kbd>${l.key}</kbd></span>` + l.nodes.map((n, i) => {
@@ -141,6 +147,11 @@ function renderClassCards() {
   $('deploy').textContent = MODES[settings.mode].coop ? 'PLAY SOLO MISSION' : 'PLAY SOLO';
 }
 
+$('picks').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-w]');
+  if (!b || b.disabled) return;
+  (settings.picks[settings.cls] ||= {})[b.dataset.slot] = b.dataset.w; save(); audio.init(); audio.ui(); renderClassCards();
+});
 $('tree').addEventListener('click', (e) => {
   const b = e.target.closest('[data-node]');
   if (!b || b.disabled) return;

@@ -68,12 +68,65 @@ export const WEAPONS = {
     mag: 30, reserve: 150, reload: 1.6, reloadEmpty: 1.95, hip: 2.3, ads: 0.35, move: 1.4, bloom: 0.25, bloomMax: 2,
     adsTime: 0.17, fov: 60, recoil: { v: 0.32, h: 0.28 }, kick: 0.022, speed: 1.05, pref: 12, reloadKind: 'mag', silent: true,
   },
+  // unlockable by rank (unlock), picked per class on the menu
+  ak: {
+    name: 'AK-74M', model: 'ak', unlock: 2, auto: true, rpm: 650, dmg: [31, 22], range: [20, 42], head: 1.5,
+    mag: 30, reserve: 150, reload: 2.0, reloadEmpty: 2.5, hip: 3.4, ads: 0.14, move: 2.7, bloom: 0.38, bloomMax: 2.7,
+    adsTime: 0.24, fov: 52, recoil: { v: 0.58, h: 0.26 }, kick: 0.038, speed: 0.95, pref: 24, reloadKind: 'mag',
+  },
+  scar: {
+    name: 'SCAR-H', model: 'scar', unlock: 8, auto: true, rpm: 600, dmg: [42, 32], range: [28, 60], head: 1.6,
+    mag: 20, reserve: 120, reload: 2.1, reloadEmpty: 2.6, hip: 3.6, ads: 0.1, move: 2.8, bloom: 0.45, bloomMax: 3,
+    adsTime: 0.27, fov: 50, recoil: { v: 0.85, h: 0.3 }, kick: 0.05, speed: 0.92, pref: 30, reloadKind: 'mag',
+  },
+  mp5: {
+    name: 'MP5A3', model: 'mp5', unlock: 4, auto: true, rpm: 800, dmg: [25, 17], range: [12, 28], head: 1.45,
+    mag: 30, reserve: 180, reload: 1.7, reloadEmpty: 2.1, hip: 2.0, ads: 0.3, move: 1.3, bloom: 0.22, bloomMax: 1.8,
+    adsTime: 0.15, fov: 60, recoil: { v: 0.28, h: 0.22 }, kick: 0.02, speed: 1.06, pref: 12, reloadKind: 'mag',
+  },
+  pkm: {
+    name: 'PKM', model: 'pkm', unlock: 12, auto: true, rpm: 700, dmg: [36, 28], range: [32, 65], head: 1.4,
+    mag: 100, reserve: 200, reload: 4.4, reloadEmpty: 4.9, hip: 4.4, ads: 0.22, move: 3.6, bloom: 0.42, bloomMax: 3.6,
+    adsTime: 0.36, fov: 50, recoil: { v: 0.5, h: 0.34 }, kick: 0.045, speed: 0.83, pref: 30, reloadKind: 'belt',
+  },
+  svd: {
+    name: 'SVD', model: 'svd', unlock: 20, auto: false, rpm: 280, dmg: [70, 58], range: [40, 85], head: 1.9,
+    mag: 10, reserve: 50, reload: 2.2, reloadEmpty: 2.7, hip: 5.5, ads: 0.02, move: 3.8, bloom: 0.7, bloomMax: 2.2,
+    adsTime: 0.32, fov: 30, recoil: { v: 1.7, h: 0.35 }, kick: 0.08, speed: 0.92, pref: 40, reloadKind: 'mag', overlay: 'acog',
+  },
+  barrett: {
+    name: 'M82A1', model: 'barrett', unlock: 28, auto: false, rpm: 90, dmg: [160, 140], range: [80, 140], head: 2,
+    mag: 10, reserve: 30, reload: 3.4, reloadEmpty: 3.9, hip: 8, ads: 0, move: 7, bloom: 0, bloomMax: 0,
+    adsTime: 0.45, fov: 16, recoil: { v: 4.2, h: 0.8 }, kick: 0.16, speed: 0.84, pref: 50, scope: true, reloadKind: 'mag',
+  },
+  aa12: {
+    name: 'AA-12', model: 'aa12', unlock: 16, auto: true, rpm: 300, dmg: [16, 5], range: [6, 16], head: 1.3, pellets: 8,
+    mag: 20, reserve: 60, reload: 2.9, reloadEmpty: 3.3, hip: 4.5, ads: 3.2, move: 3, bloom: 0.5, bloomMax: 2,
+    adsTime: 0.24, fov: 62, recoil: { v: 1.5, h: 0.6 }, kick: 0.08, speed: 0.95, pref: 7, reloadKind: 'mag',
+  },
+  deagle: {
+    name: 'Desert Eagle', model: 'deagle', unlock: 6, auto: false, rpm: 200, dmg: [58, 36], range: [14, 30], head: 1.7,
+    mag: 7, reserve: 35, reload: 1.5, reloadEmpty: 1.8, hip: 2.8, ads: 0.5, move: 2, bloom: 0.9, bloomMax: 2.5,
+    adsTime: 0.16, fov: 60, recoil: { v: 2.2, h: 0.5 }, kick: 0.08, speed: 1.08, pref: 12, reloadKind: 'mag',
+  },
   revolver: {
     name: 'R-44', model: 'revolver', auto: false, rpm: 140, dmg: [62, 38], range: [14, 32], head: 1.7,
     mag: 6, reserve: 36, reload: 2.3, reloadEmpty: 2.3, hip: 2.6, ads: 0.3, move: 1.8, bloom: 0.9, bloomMax: 2.5,
     adsTime: 0.18, fov: 58, recoil: { v: 2.6, h: 0.5 }, kick: 0.09, speed: 1.08, pref: 14, reloadKind: 'cyl',
   },
 };
+
+// what each class can pick instead of its default (the default is always allowed)
+export const OPTIONS = {
+  primary: { assault: ['ak', 'scar'], rusher: ['mp5'], support: ['pkm'], marksman: ['barrett'], breacher: ['aa12'], tactician: ['scar'], recon: ['svd'], antitank: ['mp5', 'ak'], operator: [], antiair: ['ak', 'scar'] },
+  secondary: ['deagle'],
+};
+// the class with the player's picks applied (only unlocked picks count)
+export function loadoutFor(key, picks = {}, rank = 1) {
+  const c = CLASSES[key] || CLASSES.assault, p = picks[key] || {};
+  const ok = (id) => WEAPONS[id] && (WEAPONS[id].unlock || 0) <= rank;
+  return { ...c, primary: p.primary && ok(p.primary) ? p.primary : c.primary, secondary: p.secondary && ok(p.secondary) ? p.secondary : c.secondary };
+}
 
 export const CLASSES = {
   assault: { name: 'Assault', desc: 'AR-4 rifle. Good at every range.', primary: 'ar', secondary: 'pistol', frags: 2 },
@@ -503,6 +556,76 @@ const BUILD = {
     return finish(g, { mag, off, slide, muzzleZ: sup ? -0.32 : -0.145, muzzleY: 0.034, sightY: 0.058, sightZ: 0, adsDist: 0.36, hip: new THREE.Vector3(0.11, -0.14, -0.4), flashSize: sup ? 0.04 : 0.12, eject: new THREE.Vector3(0.025, 0.045, -0.02) });
   },
   spistol() { return BUILD.pistol(true); },
+  // AK-74M: plum-black furniture, gas tube over the barrel, curved magazine, slant brake
+  ak() {
+    const g = new THREE.Group();
+    const { charge, mag } = rifleBody(g, M.poly);
+    part(g, cy(0.011, 0.26), M.metal, 0, 0.085, -0.38);
+    part(g, bx(0.05, 0.03, 0.06), M.metal, 0, 0.07, -0.52);
+    part(g, cy(0.017, 0.07), M.metal, 0, 0.035, -0.7);
+    part(g, bx(0.024, 0.04, 0.02), M.metal, 0, 0.07, -0.64);
+    // swap the straight magazine for the curved AK one
+    for (const c of mag.children.slice()) mag.remove(c);
+    for (let i = 0; i < 6; i++) part(mag, bx(0.03, 0.036, 0.074), M.shell, 0, -i * 0.032, i * i * 0.0022 - 0.004, 0.07 * i);
+    holo(g, 0.118, -0.05);
+    const off = arms(g, [0, -0.1, 0.12], [0, -0.01, -0.34]);
+    return finish(g, { mag, charge, off, muzzleZ: -0.75, muzzleY: 0.035, sightY: 0.118, sightZ: -0.05, adsDist: 0.26, hip: new THREE.Vector3(0.14, -0.19, -0.5), eject: new THREE.Vector3(0.04, 0.05, 0) });
+  },
+  // SCAR-H: tan, long upper, 20-round 7.62 magazine
+  scar() {
+    const g = new THREE.Group();
+    const { charge, mag } = rifleBody(g, M.tan);
+    part(g, bx(0.066, 0.02, 0.62), M.tan, 0, 0.085, -0.2);
+    part(g, cy(0.02, 0.07), M.metal, 0, 0.035, -0.73);
+    mag.scale.set(1.15, 0.8, 1.1);
+    reflex(g, 0.13, -0.04, 0.05);
+    const off = arms(g, [0, -0.1, 0.12], [0, -0.01, -0.36]);
+    return finish(g, { mag, charge, off, muzzleZ: -0.77, muzzleY: 0.035, sightY: 0.13, sightZ: -0.04, adsDist: 0.26, hip: new THREE.Vector3(0.14, -0.19, -0.5), eject: new THREE.Vector3(0.04, 0.05, 0) });
+  },
+  mp5() {
+    const o = BUILD.smg();
+    o.root.traverse((m) => { if (m.isMesh && m.material === M.poly) m.material = M.metal; });
+    return o;
+  },
+  pkm() {
+    const o = BUILD.lmg();
+    o.root.traverse((m) => { if (m.isMesh && m.material === M.poly) m.material = M.wood; });
+    return o;
+  },
+  svd() {
+    const o = BUILD.dmr();
+    return o;
+  },
+  // M82: the bolt-action frame in black with a heavy fluted barrel and a big muzzle brake
+  barrett() {
+    const o = BUILD.sniper();
+    o.root.traverse((m) => { if (m.isMesh && m.material === M.tan) m.material = M.metal; });
+    part(o.root, bx(0.06, 0.05, 0.12), M.metal, 0, 0.012, -0.86);
+    part(o.root, cy(0.022, 0.5), M.metal, 0, 0.012, -0.5);
+    return o;
+  },
+  // AA-12: boxy receiver, drum magazine
+  aa12() {
+    const g = new THREE.Group();
+    part(g, bx(0.07, 0.1, 0.46), M.poly, 0, 0.01, -0.06);
+    part(g, bx(0.062, 0.03, 0.4), M.metal, 0, 0.075, -0.1);
+    part(g, cy(0.02, 0.3), M.metal, 0, 0.02, -0.44);
+    part(g, cy(0.03, 0.06), M.metal, 0, 0.02, -0.61);
+    part(g, bx(0.04, 0.11, 0.05), M.poly, 0, -0.09, 0.12, -0.3);
+    part(g, bx(0.06, 0.1, 0.22), M.poly, 0, 0.0, 0.3);
+    const mag = group(g, 0, -0.1, -0.1);
+    part(mag, cy(0.085, 0.07, 18).rotateY(Math.PI / 2), M.poly, 0, -0.05, 0);
+    part(mag, bx(0.04, 0.05, 0.06), M.poly, 0, 0.03, 0);
+    const charge = part(g, bx(0.02, 0.02, 0.03), M.steel, 0.04, 0.05, 0);
+    reflex(g, 0.13, -0.05, 0.05);
+    const off = arms(g, [0, -0.1, 0.12], [0, -0.03, -0.28]);
+    return finish(g, { mag, charge, off, muzzleZ: -0.64, muzzleY: 0.02, sightY: 0.13, sightZ: -0.05, adsDist: 0.26, hip: new THREE.Vector3(0.14, -0.19, -0.5), flashSize: 0.24, eject: new THREE.Vector3(0.04, 0.05, 0) });
+  },
+  deagle() {
+    const o = BUILD.pistol();
+    o.root.traverse((m) => { if (m.isMesh && m.material === M.metal) m.material = M.steel; });
+    return o;
+  },
   ssmg() { return BUILD.smg(true);
   },
   revolver() {

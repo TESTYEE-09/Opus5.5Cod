@@ -312,3 +312,7 @@ label.check { display: flex; align-items: center; gap: 8px; }
 .tnode.locked { opacity: 0.55; cursor: default; }
 .tnode u { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--gold); text-decoration: none; }
 #endXp .rp { color: #9fd0ff; }
+
+.seg.wrap { flex-wrap: wrap; }
+.seg .sep { width: 12px; }
+.seg button.locked { opacity: 0.45; }
