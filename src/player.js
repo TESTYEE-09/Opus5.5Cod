@@ -242,14 +242,18 @@ export class Player {
     if (g.time - this.lastHurt > 4 && this.health < 100) this.health = Math.min(100, this.health + 40 * dt);
   }
 
-  updateCamera(cam, shake) {
+  // shake uses layered sines instead of per-frame random noise: it rolls like a handheld
+  // camera rather than buzzing, which reads as weight instead of jitter
+  updateCamera(cam, shake, t = performance.now() / 1000) {
+    const nx = Math.sin(t * 37.1) * 0.6 + Math.sin(t * 23.7 + 1.3) * 0.4;
+    const ny = Math.sin(t * 31.3 + 2.1) * 0.6 + Math.sin(t * 19.9 + 0.7) * 0.4;
     const tilt = (this.slideT > 0 ? 0.06 : 0) - this.lean * 0.2;
     const lo = this.leanOff;
     cam.position.set(this.pos.x + Math.cos(this.yaw) * lo, this.pos.y + this.eyeHeight - this.landDip * 0.5 - Math.abs(lo) * 0.08, this.pos.z - Math.sin(this.yaw) * lo);
     cam.rotation.set(
-      this.pitch + this.punch + this.scopeSwayY + (Math.random() - 0.5) * shake,
-      this.yaw + this.scopeSwayX + (Math.random() - 0.5) * shake,
-      tilt + (Math.random() - 0.5) * shake * 0.5,
+      this.pitch + this.punch + this.scopeSwayY + nx * shake * 0.5,
+      this.yaw + this.scopeSwayX + ny * shake * 0.5,
+      tilt + (nx - ny) * shake * 0.25,
     );
   }
 }

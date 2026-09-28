@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { SIZE, loadMap, updateWorld, wetFloor, sites } from './world.js';
 import { MAPS, MODES } from './maps.js';
 import { profile } from './rank.js';
-import { Graphics, QUALITY } from './graphics.js';
+import { Graphics, QUALITY, LOOKS } from './graphics.js';
 import { Atmosphere } from './atmosphere.js';
 import { Sfx, VOL_CATS } from './audio.js';
 import { Hud } from './hud.js';
@@ -17,6 +17,7 @@ import { setThermal } from './soldier.js';
 import { loadSceneModel, sceneModel } from './scenes.js';
 import { TREE, NATIONS, RANKS, ICONS, unlocked, researching, progress, validChoice } from './research.js';
 import { isTouch, createTouch } from './touch.js';
+import { Coach } from './coach.js';
 
 const canvas = document.getElementById('game');
 const gfx = new Graphics(canvas);
@@ -70,7 +71,7 @@ function loadMapById(id) {
 const game = new Game({ renderer, scene, camera, wscene, audio, hud, loadMap: loadMapById });
 
 // ---------- settings ----------
-const defaults = { sens: 1, fov: 80, vol: 0.7, difficulty: 'regular', cls: 'assault', name: '', map: 'crossroads', mode: 'gw', quality: 'high', camo: 'none', picks: {}, fpv: '5', jet: 'attack', ground: 'apc', heli: 'heli', huntRole: 'hunter', blur: 0.3, scale: 1, dynres: true, volCats: {} };
+const defaults = { sens: 1, fov: 80, vol: 0.7, difficulty: 'regular', cls: 'assault', name: '', map: 'crossroads', mode: 'gw', quality: 'high', camo: 'none', picks: {}, fpv: '5', jet: 'attack', ground: 'apc', heli: 'heli', huntRole: 'hunter', blur: 0.3, look: 'stylised', scale: 1, dynres: true, volCats: {} };
 const matchRules = () => ({ scoreLimit: MODES[settings.mode].scoreLimit, timeLimit: MODES[settings.mode].timeLimit });
 let settings = { ...defaults };
 try { Object.assign(settings, JSON.parse(localStorage.getItem('frontline.settings') || '{}')); } catch { /* storage unavailable */ }
@@ -99,6 +100,7 @@ $('loading').remove();
 function applyGfx() {
   gfx.blurAmount = settings.blur;
   gfx.dynamic = settings.dynres;
+  gfx.lookKey = LOOKS[settings.look] ? settings.look : 'cinematic';
   if (gfx.renderScale !== settings.scale) { gfx.renderScale = settings.scale; gfx.resize(); }
 }
 applyGfx();
@@ -114,6 +116,8 @@ function renderClassCards() {
     `<button class="card map-${k}${k === settings.map ? ' on' : ''}" data-map="${k}"><b>${m.name}</b><span>${m.desc}</span></button>`).join('');
   $('quality').innerHTML = Object.entries(QUALITY).map(([k, q]) =>
     `<button class="${k === settings.quality ? 'on' : ''}" data-q="${k}">${q.name}</button>`).join('');
+  $('lookSel').innerHTML = Object.entries(LOOKS).map(([k, l]) =>
+    `<button class="${k === settings.look ? 'on' : ''}" data-look="${k}">${l.name}</button>`).join('');
   $('lobbyMaps').innerHTML = Object.entries(MAPS).map(([k, m]) =>
     `<button class="${k === settings.map ? 'on' : ''}" data-map="${k}"${net.active && !net.isHost ? ' disabled' : ''}>${m.name}</button>`).join('');
   const modes = MAPS[settings.map].modes;
@@ -257,6 +261,13 @@ $('quality').addEventListener('click', (e) => {
   renderClassCards();
 });
 
+$('lookSel').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-look]');
+  if (!b) return;
+  settings.look = b.dataset.look; save(); audio.init(); audio.ui();
+  applyGfx(); renderClassCards();
+});
+
 function bindRange(id, key, fmt) {
   const input = $(id), out = $(id + 'Out');
   input.value = settings[key];
@@ -336,17 +347,21 @@ async function ensureScene(id) {
   el.remove();
 }
 
+const coach = new Coach($('coach'), isTouch);
+
 async function deploy() {
   audio.init();
   await ensureScene(settings.map);
   if (net.active) { net.leave(); game.net = null; }
   game.startMatch({ ...settings, ...matchRules(), name: cleanName(settings.name) });
   hideScreens();
+  if (!settings.coached && !MODES[settings.mode].coop) coach.start(); else coach.stop();
   renderClassCards();
   lock();
 }
 
 function toMenu(msg) {
+  coach.stop();
   if (net.active) net.leave();
   game.net = null;
   if (game.state === 'playing') game.state = 'ended';
@@ -569,7 +584,11 @@ function frame(ts) {
   if (game.state === 'playing') {
     hud.showScores = locked && (keys.has('Tab') || touchScores);
     touch?.update(game);
-    if (locked || net.active) game.update(dt, readInput());
+    if (locked || net.active) {
+      const inp = readInput();
+      game.update(dt, inp);
+      if (coach.update(dt, inp)) { settings.coached = true; save(); }
+    }
     else { readInput(); game.effects.update(0); }
   } else if (isTouch && locked) {
     setLocked(false);

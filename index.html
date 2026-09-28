@@ -11,7 +11,7 @@
 <link rel="manifest" href="./manifest.webmanifest">
 <title>Frontline</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/src/style.css">
 </head>
 <body>
@@ -40,6 +40,7 @@
   <div id="popups"></div>
   <div id="toast"></div>
   <div id="hint"></div>
+  <div id="coach"></div>
   <div id="cookbar"><i id="cook"></i></div>
   <div id="target"><i></i><i></i><span>MARK TARGET</span></div>
   <div id="ammo">
@@ -163,6 +164,7 @@
       <div>
         <h3>Graphics</h3>
         <div class="setrow"><span>Quality</span><div id="quality" class="seg"></div></div>
+        <div class="setrow"><span>Look</span><div id="lookSel" class="seg"></div></div>
         <label>Motion blur <input id="blur" type="range" min="0" max="1" step="0.05"><output id="blurOut"></output></label>
         <label>Render scale <input id="scale" type="range" min="0.5" max="1" step="0.05"><output id="scaleOut"></output></label>
         <label class="check"><input id="dynres" type="checkbox"> Dynamic resolution (holds 60 fps)</label>

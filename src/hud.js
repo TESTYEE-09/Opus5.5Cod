@@ -264,6 +264,8 @@ export class Hud {
   }
 
   hitmarker(kill, head) {
+    this.hitEl.className = '';
+    void this.hitEl.offsetWidth; // restart the pop animation on every hit
     this.hitEl.className = 'show' + (kill ? ' kill' : head ? ' head' : '');
     this.hitT = kill ? 0.35 : 0.2;
   }

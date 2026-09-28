@@ -1042,6 +1042,7 @@ export class Arsenal {
     const e = smooth(this.ads), steady = 1 - 0.35 * pl.proneAmt;
     pl.addRecoil(d.recoil.v * (1 - 0.3 * e) * (0.85 + Math.random() * 0.3) * steady, (Math.random() * 2 - 1) * d.recoil.h * steady);
     this.kick = Math.min(this.kick + d.kick, 0.2);
+    g.shake = Math.max(g.shake, d.kick * (0.05 - 0.03 * e));
     this.roll += (Math.random() - 0.5) * d.kick * 2;
     this.bloom = Math.min(this.bloom + d.bloom, d.bloomMax);
     this.flashT = 0.05;

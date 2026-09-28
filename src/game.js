@@ -78,7 +78,7 @@ export class Game {
     this.net = null;
     this.role = 'solo';
     this.state = 'menu';
-    this.time = 0; this.shake = 0; this.flashT = 0;
+    this.time = 0; this.shake = 0; this.flashT = 0; this.fovKick = 0;
     this.settings = { sens: 1, fov: 80, difficulty: 'regular', cls: 'assault', map: 'crossroads', mode: 'gw', scoreLimit: 400, timeLimit: 1200 };
     this.diff = DIFFICULTY.regular;
     this.nadeGeo = new THREE.SphereGeometry(0.06, 10, 8);
@@ -373,6 +373,7 @@ export class Game {
       victim.lastHurt = this.time;
       this.audio.hurt();
       if (fromPos) this.hud.damageFrom(fromPos, this.player);
+      this.shake = Math.max(this.shake, Math.min(0.05, 0.004 * amount));
     } else if (victim.isRemote) {
       victim.lastHurt = this.time;
       if (fromPos) this.emit({ k: 'hurt', to: victim.id, x: r2(fromPos.x), z: r2(fromPos.z) });
@@ -384,7 +385,11 @@ export class Game {
   }
 
   hitFeedback(attacker, kill, head) {
-    if (attacker === this.player) { this.hud.hitmarker(kill, head); this.audio.hit(kill ? 'kill' : head ? 'head' : 'hit'); }
+    if (attacker === this.player) {
+      this.hud.hitmarker(kill, head); this.audio.hit(kill ? 'kill' : head ? 'head' : 'hit');
+      // a kill lands with a small punch-in, so it registers in the body, not just the HUD
+      if (kill) this.fovKick = Math.max(this.fovKick, head ? 2.2 : 1.4);
+    }
     else if (attacker?.isRemote) this.emit({ k: 'hm', to: attacker.id, kill, head });
   }
 
@@ -1459,13 +1464,14 @@ export class Game {
 
     // camera
     this.shake *= Math.exp(-dt * 6);
+    this.fovKick *= Math.exp(-dt * 9);
     const veh = pl.alive ? pl.vehicle : null;
     let fov = this.settings.fov;
     if (veh) {
       fov = veh.view(this.camera, dt);
       this.camera.rotation.x += (Math.random() - 0.5) * this.shake;
       this.camera.rotation.y += (Math.random() - 0.5) * this.shake;
-    } else if (pl.alive) { pl.updateCamera(this.camera, this.shake); fov = ars.fovFor(this.settings.fov); }
+    } else if (pl.alive) { pl.updateCamera(this.camera, this.shake, this.time); fov = ars.fovFor(this.settings.fov) - this.fovKick; }
     else this.deathCam(dt);
     if (Math.abs(this.camera.fov - fov) > 0.01) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
     this.effects.setScale(this.renderer.domElement.height / (2 * Math.tan(this.camera.fov * DEG / 2)));
