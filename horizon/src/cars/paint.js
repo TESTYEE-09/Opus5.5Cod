@@ -11,6 +11,7 @@
 // pass that only draws them, premultiplied so reflections stay bright while the cabin shows
 // through.
 import * as THREE from 'three';
+import { addFog } from '../world/sky.js';
 
 export const LAYERS = {
   paint: 0, trim: 1, carbon: 2, chrome: 3, gloss: 4, dark: 5, paint2: 6, grille: 7,
@@ -226,17 +227,18 @@ export function createBodyMaterials(def, { carbonTex } = {}) {
     uCarbon: { value: carbonTex ?? null },
     uGlassPass: { value: 0 }, uTime: { value: 0 }, uDirt: { value: 0 },
   };
-  const make = (glass) => {
-    const m = new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.4, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.03 });
-    m.defines = { CAR_BODY: '', ...(glass ? { CAR_GLASS: '' } : {}) };
+  const make = (glass, cabin = false) => {
+    const m = new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.4, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.03, side: glass || cabin ? THREE.DoubleSide : THREE.FrontSide });
+    m.defines = { CAR_BODY: '', ...(glass ? { CAR_GLASS: '' } : {}), ...(cabin ? { CAR_CABIN: '' } : {}) };
     if (glass) {
       m.transparent = true; m.depthWrite = false; m.premultipliedAlpha = true;
       m.blending = THREE.CustomBlending; m.blendSrc = THREE.OneFactor; m.blendDst = THREE.OneMinusSrcAlphaFactor;
       m.blendSrcAlpha = THREE.OneFactor; m.blendDstAlpha = THREE.OneMinusSrcAlphaFactor;
     }
-    m.customProgramCacheKey = () => (glass ? 'carglass' : 'carbody');
+    m.customProgramCacheKey = () => (glass ? 'carglass' : cabin ? 'carcabin' : 'carbody');
     m.onBeforeCompile = (sh) => {
-      Object.assign(sh.uniforms, uniforms);
+      addFog(sh);
+    Object.assign(sh.uniforms, uniforms);
       sh.vertexShader = sh.vertexShader
         .replace('#include <common>', `#include <common>
           attribute float matId;
@@ -262,6 +264,9 @@ export function createBodyMaterials(def, { carbonTex } = {}) {
           #else
             if (CL.glass > 0.5) discard;
           #endif
+          #ifdef CAR_CABIN
+            if (!gl_FrontFacing) { CL.alb = vec3(0.025); CL.rough = 0.9; CL.metal = 0.0; CL.cc = 0.0; CL.emis = vec3(0.0); CL.flake = 0.0; }
+          #endif
           diffuseColor.rgb = CL.alb;`)
         .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = CL.rough;')
         .replace('#include <metalnessmap_fragment>', 'float metalnessFactor = CL.metal;')
@@ -285,8 +290,8 @@ export function createBodyMaterials(def, { carbonTex } = {}) {
     };
     return m;
   };
-  const opaque = make(false), glass = make(true);
-  return { opaque, glass, uniforms };
+  const opaque = make(false), glass = make(true), cabin = make(false, true);
+  return { opaque, glass, cabin, uniforms };
 }
 
 // Paint finishes. color is sRGB hex.

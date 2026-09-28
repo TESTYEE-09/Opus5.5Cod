@@ -100,15 +100,20 @@ export class CarVisual {
     setPaint(this.mats.uniforms, o.color ?? P.color ?? 0xb00000, o.finish ?? P.finish ?? 'metallic', o.color2 ?? P.color2 ?? 0x111111);
     const lod = new THREE.LOD();
     const dists = o.lodDistances ?? [0, 30, 90];
-    body.lods.forEach((geo, i) => {
+    const M = body.meshes;
+    for (let i = 0; i < M.body.length; i++) {
       const grp = new THREE.Group();
-      const m = new THREE.Mesh(geo, this.mats.opaque);
-      m.castShadow = true; m.receiveShadow = true;
-      const gl = new THREE.Mesh(geo, this.mats.glass);
-      gl.renderOrder = 2;
-      grp.add(m, gl);
+      const add = (geo, glass, cabin) => {
+        const m = new THREE.Mesh(geo, cabin ? this.mats.cabin : this.mats.opaque);
+        m.castShadow = true; m.receiveShadow = true;
+        grp.add(m);
+        if (glass) { const g = new THREE.Mesh(geo, this.mats.glass); g.renderOrder = 2; grp.add(g); }
+      };
+      add(M.body[i], !M.cabin, false);
+      if (M.cabin) add(M.cabin[i], true, true);
+      if (M.parts) add(M.parts[i], false, false);
       lod.addLevel(grp, dists[i]);
-    });
+    }
     this.lod = lod;
     this.group.add(lod);
     // wheels

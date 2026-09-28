@@ -68,6 +68,8 @@ export class GlbCar {
               this.lamps[k].push(r);
             }
           }
+          const tw = def.tweak?.[name];
+          if (tw) { if (tw.color !== undefined) r.color = new THREE.Color(tw.color); if (tw.metalness !== undefined) r.metalness = tw.metalness; if (tw.roughness !== undefined) r.roughness = tw.roughness; }
           if (r.isMeshStandardMaterial && r.envMapIntensity !== undefined) r.envMapIntensity = 1.0;
         }
         matCache.set(mat, r);

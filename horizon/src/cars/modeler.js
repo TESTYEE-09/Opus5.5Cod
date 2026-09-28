@@ -137,7 +137,7 @@ export function sdPoly(u, v, P, closed = true) {
       if ((c1 && c2 && c3) || (!c1 && !c2 && !c3)) s = -s;
     }
   }
-  return closed ? -s * Math.sqrt(d) : Math.sqrt(d);
+  return closed ? s * Math.sqrt(d) : Math.sqrt(d);
 }
 
 // projection coordinates, gate value and facing for a point/normal (x is |x|)
@@ -233,27 +233,35 @@ function emitGrid(g, sgn, out, mat, flip = false) {
   }
 }
 
-// normals from the grid (per run, so creases stay split)
+// normals from the grid (per run, so creases stay split). Rows where the section has collapsed
+// onto the centreline (nose tip, tail) borrow the next row's normal with the sideways part removed.
 function gridNormals(out) {
   const P = out.pos, N = new Float32Array(P.length);
   for (const r of out.runs) {
     const { base, nR, nc, sgn } = r;
     const at = (i, j) => base + clamp(i, 0, nR - 1) * nc + clamp(j, 0, nc - 1);
+    const d = (a, b) => [P[b * 3] - P[a * 3], P[b * 3 + 1] - P[a * 3 + 1], P[b * 3 + 2] - P[a * 3 + 2]];
+    const collapsed = (i) => { for (let j = 0; j < nc; j++) if (Math.abs(P[at(i, j) * 3]) > 2e-4) return false; return true; };
     for (let i = 0; i < nR; i++) for (let j = 0; j < nc; j++) {
       const v = at(i, j);
-      // along z and along the section; skip degenerate neighbours near the collapsed ends
-      let i0 = i - 1, i1 = i + 1, j0 = j - 1, j1 = j + 1;
-      const d = (a, b) => [P[b * 3] - P[a * 3], P[b * 3 + 1] - P[a * 3 + 1], P[b * 3 + 2] - P[a * 3 + 2]];
-      let du = d(at(i0, j), at(i1, j)), dv = d(at(i, j0), at(i, j1));
-      let tries = 0;
-      while (Math.hypot(...dv) < 1e-6 && tries < 6) { i0--; i1++; dv = d(at(i0, j0), at(i1, j1)); tries++; }
-      tries = 0;
-      while (Math.hypot(...du) < 1e-6 && tries < 6) { j0--; j1++; du = d(at(i - 1, j0), at(i + 1, j1)); tries++; }
-      // outward normal: section runs from floor to top, z runs rear to front
+      const du = d(at(i - 1, j), at(i + 1, j));
+      let dv = d(at(i, j - 1), at(i, j + 1));
+      if (Math.hypot(...dv) < 1e-7) dv = d(at(i + (i < nR / 2 ? 1 : -1), j - 1), at(i + (i < nR / 2 ? 1 : -1), j + 1));
       let nx = dv[1] * du[2] - dv[2] * du[1], ny = dv[2] * du[0] - dv[0] * du[2], nz = dv[0] * du[1] - dv[1] * du[0];
       if (sgn < 0) { nx = -nx; ny = -ny; nz = -nz; }
       const l = Math.hypot(nx, ny, nz) || 1;
       N[v * 3] = nx / l; N[v * 3 + 1] = ny / l; N[v * 3 + 2] = nz / l;
+    }
+    for (const [i, k] of [[0, 1], [nR - 1, nR - 2]]) {
+      if (!collapsed(i)) continue;
+      for (let j = 0; j < nc; j++) {
+        const v = at(i, j), w = at(k, j);
+        let x = 0, y = N[w * 3 + 1], z = N[w * 3 + 2];
+        // push the tip normal further along the car axis
+        z += (i === 0 ? -1 : 1) * 0.6;
+        const l = Math.hypot(x, y, z) || 1;
+        N[v * 3] = x / l; N[v * 3 + 1] = y / l; N[v * 3 + 2] = z / l;
+      }
     }
   }
   return N;

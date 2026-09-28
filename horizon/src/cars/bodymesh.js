@@ -12,7 +12,7 @@ export function loadBody(id, base = '../hz/cars/') {
     const head = new Uint32Array(buf, 0, 2);
     const meta = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 8, head[1])));
     const dataStart = 8 + head[1] + ((4 - (head[1] % 4)) % 4);
-    const lods = meta.lods.map((l) => {
+    const decode = (l) => {
       const vb = new Uint8Array(l.nv * 12);
       MeshoptDecoder.decodeVertexBuffer(vb, l.nv, 12, new Uint8Array(buf, dataStart + l.v[0], l.v[1]));
       const ib = new Uint32Array(l.ni);
@@ -30,8 +30,12 @@ export function loadBody(id, base = '../hz/cars/') {
       g.setIndex(new THREE.BufferAttribute(l.nv < 65536 ? new Uint16Array(ib) : ib, 1));
       g.computeBoundingSphere(); g.computeBoundingBox();
       return g;
-    });
-    return { meta, lods };
+    };
+    // v2: several named mesh groups (body, cabin, parts), each with LODs
+    const meshes = {};
+    if (meta.v === 2) for (const m of meta.meshes) meshes[m.name] = m.lods.map(decode);
+    else meshes.body = meta.lods.map(decode);
+    return { meta, meshes, lods: meshes.body };
   })();
   pending.set(id, p);
   return p;
