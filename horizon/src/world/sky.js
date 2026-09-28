@@ -56,6 +56,7 @@ export function installFog() {
       vec3 fCol = fogColor;
     #endif
     gl_FragColor.rgb = mix(gl_FragColor.rgb, fCol * (gl_FragColor.a), fogFactor);
+    gl_FragColor.rgb = any(isnan(gl_FragColor.rgb)) || any(isinf(gl_FragColor.rgb)) ? fCol : min(gl_FragColor.rgb, vec3(64.0));
   #endif`;
   // Every material gets the shared fog uniforms; custom onBeforeCompile hooks call addFog too.
   const proto = THREE.Material.prototype;
@@ -109,7 +110,8 @@ void main(){
     float fade = smoothstep(0.0, 0.12, h);
     col = mix(col, lit, cov * fade * 0.92);
   }
-  gl_FragColor = vec4(col, 1.0);
+  if (any(isnan(col)) || any(isinf(col))) col = vec3(0.55, 0.68, 0.85);
+  gl_FragColor = vec4(min(col, vec3(64.0)), 1.0);
 }`;
 
 // keyframes over sun elevation (degrees): zenith, horizon, sun colour, sun intensity, ambient

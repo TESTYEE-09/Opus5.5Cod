@@ -46,6 +46,7 @@ const FinalShader = {
         acc += texture2D(tDiffuse, p).rgb; w += 1.0;
       }
       vec3 col = acc / w;
+      if (any(isnan(col)) || any(isinf(col))) col = vec3(0.0);
       // chromatic fringe toward the edges
       if (uFringe > 0.0) {
         vec2 off = toC * uFringe * (1.0 + uSpeed * 2.0) * rd;
@@ -62,7 +63,7 @@ const FinalShader = {
       col *= mix(1.0 - uVignette, 1.0, v);
       col += (hash(uv * 1000.0 + fract(uTime)) - 0.5) * 0.012 * (0.3 + l);
       col = mix(col, vec3(1.0), uFlash);
-      gl_FragColor = vec4(col, 1.0);
+      gl_FragColor = vec4(any(isnan(col)) ? vec3(0.0) : col, 1.0);
     }`,
 };
 
