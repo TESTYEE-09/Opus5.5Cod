@@ -1,4 +1,4 @@
-// Renderer and post-processing: HDR scene with MSAA, bloom, a final pass (camera motion blur,
+// Renderer and post-processing: HDR scene, bloom, a final pass (camera motion blur,
 // radial speed blur, chromatic fringe, vignette, grain, colour grade) and ACES tone mapping.
 // Quality presets and a dynamic resolution scale keep the frame rate up.
 import * as THREE from 'three';
@@ -9,10 +9,15 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
 export const QUALITY = {
+  // NOTE: samples stays 0 on every preset. A multisampled HalfFloat composer target
+  // (samples > 0) needs multisample RGBA16F renderbuffer support; where the driver
+  // lacks it the framebuffer is incomplete and every frame renders black, with no
+  // error in the console. Single-sample HalfFloat is widely renderable and kept for
+  // HDR bloom + grading; pixel density (up to 2x DPR, ultra supersamples) covers AA.
   low: { name: 'Low', scale: 0.7, shadow: 1024, shadowExtent: 60, samples: 0, bloom: false, post: true, lod: 0.6, trees: 0.35 },
-  medium: { name: 'Medium', scale: 0.85, shadow: 2048, shadowExtent: 80, samples: 2, bloom: true, post: true, lod: 0.8, trees: 0.6 },
-  high: { name: 'High', scale: 1, shadow: 2048, shadowExtent: 95, samples: 4, bloom: true, post: true, lod: 1, trees: 0.85 },
-  ultra: { name: 'Ultra', scale: 1.25, shadow: 4096, shadowExtent: 110, samples: 4, bloom: true, post: true, lod: 1.3, trees: 1 },
+  medium: { name: 'Medium', scale: 0.85, shadow: 2048, shadowExtent: 80, samples: 0, bloom: true, post: true, lod: 0.8, trees: 0.6 },
+  high: { name: 'High', scale: 1, shadow: 2048, shadowExtent: 95, samples: 0, bloom: true, post: true, lod: 1, trees: 0.85 },
+  ultra: { name: 'Ultra', scale: 1.25, shadow: 4096, shadowExtent: 110, samples: 0, bloom: true, post: true, lod: 1.3, trees: 1 },
 };
 
 const FinalShader = {
@@ -32,7 +37,10 @@ const FinalShader = {
       // camera rotation blur by reprojection at infinity, plus a radial blur with speed
       vec4 ndc = vec4(uv * 2.0 - 1.0, 1.0, 1.0);
       vec4 prev = uReproj * ndc;
-      vec2 vel = (ndc.xy - prev.xy / prev.w) * 0.5 * uBlur;
+      // prev.w near zero (point at/behind the previous camera plane) would make the
+      // velocity infinite, and Inf * 0 below poisons the taps to NaN -> black pixels
+      float pw = abs(prev.w) > 1e-4 ? prev.w : 1.0;
+      vec2 vel = (ndc.xy - prev.xy / pw) * 0.5 * uBlur;
       vec2 toC = uv - uCenter;
       float rd = length(toC * vec2(uAspect, 1.0));
       vel += toC * uSpeed * smoothstep(0.15, 0.7, rd) * 0.06;
@@ -46,7 +54,10 @@ const FinalShader = {
         acc += texture2D(tDiffuse, p).rgb; w += 1.0;
       }
       vec3 col = acc / w;
-      if (any(isnan(col)) || any(isinf(col))) col = vec3(0.0);
+      vec3 center = texture2D(tDiffuse, uv).rgb;
+      // fall back to the unblurred texel, never to black: a NaN/Inf blur sample used
+      // to paint whole regions of the screen black on some GPUs with no console error
+      if (any(isnan(col)) || any(isinf(col))) col = center;
       // chromatic fringe toward the edges
       if (uFringe > 0.0) {
         vec2 off = toC * uFringe * (1.0 + uSpeed * 2.0) * rd;
@@ -63,7 +74,7 @@ const FinalShader = {
       col *= mix(1.0 - uVignette, 1.0, v);
       col += (hash(uv * 1000.0 + fract(uTime)) - 0.5) * 0.012 * (0.3 + l);
       col = mix(col, vec3(1.0), uFlash);
-      gl_FragColor = vec4(any(isnan(col)) ? vec3(0.0) : col, 1.0);
+      gl_FragColor = vec4(any(isnan(col)) ? center : col, 1.0);
     }`,
 };
 
