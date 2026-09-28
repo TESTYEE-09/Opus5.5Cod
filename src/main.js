@@ -349,8 +349,20 @@ async function ensureScene(id) {
 
 const coach = new Coach($('coach'), isTouch);
 
+// fade to black over a screen change, run it, then fade back in
+const fade = $('fade');
+async function throughBlack(fn) {
+  fade.classList.add('cover');
+  await new Promise(r => setTimeout(r, 280));
+  try { await fn(); } finally { requestAnimationFrame(() => fade.classList.remove('cover')); }
+}
+
 async function deploy() {
   audio.init();
+  await throughBlack(() => deployNow());
+}
+
+async function deployNow() {
   await ensureScene(settings.map);
   if (net.active) { net.leave(); game.net = null; }
   game.startMatch({ ...settings, ...matchRules(), name: cleanName(settings.name) });
@@ -381,6 +393,14 @@ function toMenu(msg) {
 }
 
 $('deploy').addEventListener('click', deploy);
+// a faint tick when the pointer moves onto a menu control
+let lastHover = null;
+document.addEventListener('mouseover', (e) => {
+  const b = e.target.closest?.('.screen button, .screen .card');
+  if (b === lastHover) return;
+  lastHover = b;
+  if (b && !b.disabled && audio.ctx) audio.hover();
+});
 $('again').addEventListener('click', () => { if (net.active && net.isHost) startMp(); else if (!net.active) deploy(); });
 $('toMenu').addEventListener('click', () => toMenu());
 $('resume').addEventListener('click', () => { audio.init(); lock(); });

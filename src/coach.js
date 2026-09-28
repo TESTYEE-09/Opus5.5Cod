@@ -14,7 +14,8 @@ export class Coach {
     this.el = el; this.touch = touch; this.i = -1; this.s = { move: 0, sprint: 0, fire: 0 }; this.hold = 0;
   }
 
-  start() { this.i = 0; this.hold = 0; this.t = 0; this.show(); }
+  // wait for the match intro to clear before the first prompt
+  start(delay = 3.8) { this.i = 0; this.hold = 0; this.t = 0; this.wait = delay; this.el.classList.remove('show'); }
 
   stop() { this.i = -1; this.el.classList.remove('show'); }
 
@@ -27,6 +28,7 @@ export class Coach {
   // returns true once the whole run has finished
   update(dt, inp) {
     if (this.i < 0) return false;
+    if (this.wait > 0) { if ((this.wait -= dt) <= 0) this.show(); return false; }
     const st = STEPS[this.i];
     this.t += dt;
     if (this.hold > 0) {

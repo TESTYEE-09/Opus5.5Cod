@@ -409,6 +409,38 @@ export class Sfx {
     o.onended = () => { try { lfo.stop(); } catch { /* stopped */ } };
   }
 
+  // Soft synthesised interface cues: a note list played as a short arpeggio of sine/triangle
+  // blips through the UI bus. Quiet by design; they confirm, they don't announce.
+  chime(notes, { type = 'triangle', gain = 0.05, dur = 0.18, gap = 0.07, attack = 0.005 } = {}) {
+    if (!this.ctx) return;
+    const ctx = this.ctx, t0 = ctx.currentTime;
+    notes.forEach((f, i) => {
+      const t = t0 + i * gap, o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = type; o.frequency.value = f;
+      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(gain, t + attack);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g).connect(this.bus?.ui || this.uiBus);
+      o.start(t); o.stop(t + dur + 0.05);
+    });
+  }
+
+  hover() { this.chime([1320], { type: 'sine', gain: 0.018, dur: 0.05 }); }
+  tick() { this.chime([880], { type: 'sine', gain: 0.03, dur: 0.06 }); }
+  // match start: a low swell under a rising fifth
+  intro() {
+    if (!this.ctx) return;
+    const ctx = this.ctx, t = ctx.currentTime, o = ctx.createOscillator(), g = ctx.createGain(), f = ctx.createBiquadFilter();
+    o.type = 'sawtooth'; o.frequency.setValueAtTime(55, t); o.frequency.exponentialRampToValueAtTime(82, t + 2.2);
+    f.type = 'lowpass'; f.frequency.setValueAtTime(120, t); f.frequency.exponentialRampToValueAtTime(900, t + 1.8);
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.08, t + 1.2); g.gain.exponentialRampToValueAtTime(0.0001, t + 3);
+    o.connect(f).connect(g).connect(this.bus?.ui || this.uiBus);
+    o.start(t); o.stop(t + 3.1);
+    this.chime([220, 330, 440], { gain: 0.035, dur: 1.2, gap: 0.22 });
+  }
+  victory() { this.chime([392, 494, 587, 784], { gain: 0.05, dur: 0.9, gap: 0.12 }); }
+  defeat() { this.chime([392, 349, 294, 220], { type: 'sine', gain: 0.05, dur: 1.1, gap: 0.2 }); }
+  promote() { this.chime([523, 659, 784, 1047, 1319], { gain: 0.045, dur: 0.6, gap: 0.08 }); }
+
   // lock-on and warning beeps
   tone(freq, dur = 0.07, gain = 0.08) {
     if (!this.ctx) return;

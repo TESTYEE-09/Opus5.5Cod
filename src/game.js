@@ -1471,7 +1471,12 @@ export class Game {
       fov = veh.view(this.camera, dt);
       this.camera.rotation.x += (Math.random() - 0.5) * this.shake;
       this.camera.rotation.y += (Math.random() - 0.5) * this.shake;
-    } else if (pl.alive) { pl.updateCamera(this.camera, this.shake, this.time); fov = ars.fovFor(this.settings.fov) - this.fovKick; }
+    } else if (pl.alive) {
+      pl.updateCamera(this.camera, this.shake, this.time);
+      // sprinting widens the view a touch, so speed reads in the periphery
+      this.sprintFov = (this.sprintFov || 0) + ((pl.sprinting ? 1 : 0) - (this.sprintFov || 0)) * Math.min(1, dt * 5);
+      fov = ars.fovFor(this.settings.fov) + this.sprintFov * 6 - this.fovKick;
+    }
     else this.deathCam(dt);
     if (Math.abs(this.camera.fov - fov) > 0.01) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
     this.effects.setScale(this.renderer.domElement.height / (2 * Math.tan(this.camera.fov * DEG / 2)));

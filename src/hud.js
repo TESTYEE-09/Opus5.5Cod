@@ -7,10 +7,16 @@ import { addXP } from './rank.js';
 import { finishMatch, describe } from './challenges.js';
 import { CAMOS } from './camo.js';
 import { addResearch } from './research.js';
+import { MODES } from './maps.js';
 
 const $ = (id) => document.getElementById(id);
 const DEG = Math.PI / 180;
 const _pv = new THREE.Vector3();
+// write innerHTML only when it changed: rebuilding every frame restarts CSS animations
+// and costs a layout for nothing
+const setHtml = (el, html) => { if (el._html !== html) { el._html = html; el.innerHTML = html; } };
+// numbers count up on the end screen; anything else (K/D, time) is shown as is
+const statCells = (rows) => rows.map(([k, v], i) => `<div style="--i:${i}"><span>${k}</span>${Number.isInteger(v) ? `<b data-v="${v}">0</b>` : `<b>${v}</b>`}</div>`).join('');
 const esc = (s) => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
 export class Hud {
@@ -109,12 +115,15 @@ export class Hud {
         if (!p) continue;
         const col = f.owner < 0 ? '#e8e8e8' : f.owner === pl.team ? '#6fb0ff' : '#ff5a4a';
         const r = Math.max(9, 15 - d / 60);
-        ctx.globalAlpha = 0.9;
+        // markers under the crosshair fade back so they never cover what you're aiming at
+        const cd = Math.hypot(p[0] - W / 2, p[1] - H / 2) / Math.min(W, H);
+        const near = Math.min(1, Math.max(0, (cd - 0.03) / 0.09));
+        ctx.globalAlpha = 0.25 + 0.65 * near;
         ctx.fillStyle = 'rgba(10,12,14,0.55)'; ctx.beginPath(); ctx.arc(p[0], p[1], r + 2, 0, 7); ctx.fill();
         ctx.strokeStyle = col; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(p[0], p[1], r, 0, 7); ctx.stroke();
         if (f.contest) { ctx.strokeStyle = '#ffd24a'; ctx.beginPath(); ctx.arc(p[0], p[1], r + 4, 0, 7); ctx.stroke(); }
         ctx.fillStyle = col; ctx.font = `700 ${Math.round(r * 1.2)}px Rajdhani, sans-serif`; ctx.fillText(f.id, p[0], p[1] + 1);
-        ctx.font = '600 12px Rajdhani, sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.8)'; ctx.fillText(`${d}m`, p[0], p[1] + r + 11);
+        if (near > 0.5) { ctx.font = '600 12px Rajdhani, sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.8)'; ctx.fillText(`${d}m`, p[0], p[1] + r + 11); }
         ctx.globalAlpha = 1;
       }
       return;
@@ -248,7 +257,7 @@ export class Hud {
     }
   }
 
-  reset() {
+  reset(game) {
     this.root.classList.remove('hidden');
     this.bigOn = false; this.big.classList.add('hidden'); this.modeT = 0;
     $('killfeed').innerHTML = '';
@@ -261,6 +270,32 @@ export class Hud {
     this.hideDeath();
     $('end').classList.add('hidden');
     $('banner').className = '';
+    this.magPulse = 0; this.lastMag = -1; this.deadMax = 0;
+    this.intro(game);
+  }
+
+  // Match intro: letterbox bars slide in over the spawn, with the mode, map, sides and goal
+  intro(game) {
+    const el = $('intro'), pl = game.player, st = game.settings || {}, md = MODES[st.mode] || {};
+    if (!el || !pl) return;
+    const lim = st.scoreLimit;
+    const goal = {
+      tdm: `First team to ${lim} kills wins`,
+      gw: `Capture and hold the flags &middot; first to ${lim}`,
+      hunt: pl.team === 1 ? 'Stay hidden. Survive seven minutes' : 'Find the hider with your drones',
+      uc: 'Infiltrate. Stay unseen. Finish the mission',
+    }[st.mode] || '';
+    const side = (t) => `<span class="side ${t === pl.team ? 'ally' : 'enemy'}"><i class="flag f${t}"></i>${esc(TEAM_NAMES[t])}</span>`;
+    el.innerHTML = `<div class="lb top"></div><div class="lb bot"></div><div class="icard">
+      <div class="mode">${esc((md.name || '').toUpperCase())}</div>
+      <div class="map">${esc((game.mapDef?.name || '').toUpperCase())}</div>
+      <div class="vs">${side(pl.team)}<em>VS</em>${side(1 - pl.team)}</div>
+      <div class="goal">${goal}</div></div>`;
+    el.className = '';
+    void el.offsetWidth;
+    el.className = 'show';
+    this.introT = 4.2;
+    this.audio.intro?.();
   }
 
   hitmarker(kill, head) {
@@ -335,29 +370,68 @@ export class Hud {
     if (uc) {
       const m = game.mode, t = Math.round(game.time);
       $('endScore').innerHTML = `<span class="ally">${m.done.filter(Boolean).length}</span> / ${m.done.length} objectives`;
-      $('endStats').innerHTML = [['Score', pl.score], ['Kills', pl.kills], ['Deaths', pl.deaths], ['Time', `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`], ['Alarms raised', m.alarms], ['Best streak', pl.bestStreak]]
-        .map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('');
+      $('endStats').innerHTML = statCells([['Score', pl.score], ['Kills', pl.kills], ['Deaths', pl.deaths], ['Time', `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`], ['Alarms raised', m.alarms], ['Best streak', pl.bestStreak]]);
     } else {
       $('endScore').innerHTML = `<span class="ally">${a}</span> &ndash; <span class="enemy">${e}</span>`;
-      $('endStats').innerHTML = [['Score', pl.score], ['Kills', pl.kills], ['Deaths', pl.deaths], ['K/D', kd], ['Assists', pl.assists], ['Best streak', pl.bestStreak]]
-        .map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('');
+      $('endStats').innerHTML = statCells([['Score', pl.score], ['Kills', pl.kills], ['Deaths', pl.deaths], ['K/D', kd], ['Assists', pl.assists], ['Best streak', pl.bestStreak]]);
     }
     const day = finishMatch({ win, score: pl.score });
     const xp = addXP((pl.score + (win ? (uc ? 3000 : 1000) : 250)) * day.mult + day.challengeXp);
     const bonus = [day.mult > 1 ? `&times;${day.mult.toFixed(1)} (first match today${day.streak > 1 ? `, ${day.streak}-day streak` : ''})` : '',
       ...day.earned.map(c => `${esc(describe(c))} +${c.xp.toLocaleString()}`)].filter(Boolean);
-    $('endXp').innerHTML = `+${xp.gained.toLocaleString()} XP &middot; Rank ${xp.after.level} ${esc(xp.after.title)}` +
+    const unlocked = addResearch(xp.gained);
+    const chips = [`<span class="chip rp">+${xp.gained.toLocaleString()} RP</span>`,
+      ...unlocked.map(n => `<span class="chip new">${esc(n.names[0])} / ${esc(n.names[1])} unlocked</span>`),
+      ...CAMOS.filter(c => c.rank > xp.before.level && c.rank <= xp.after.level).map(c => `<span class="chip new">${esc(c.name)} camo unlocked</span>`)];
+    $('endXp').innerHTML = `<div class="xphead"><b>+${xp.gained.toLocaleString()} XP</b> &middot; Rank ${xp.after.level} ${esc(xp.after.title)}` +
+      (xp.promoted ? ` <b class="promo rankup">PROMOTED</b>` : '') + '</div>' +
+      (xp.after.next ? `<span class="xpbar"><i id="xpFill" style="width:${xp.before.next ? Math.round(xp.before.cur / xp.before.next * 100) : 0}%"></i></span>` : '') +
       (bonus.length ? `<small class="bonus">${bonus.join(' &middot; ')}</small>` : '') +
-      (xp.promoted ? ` <b class="promo">PROMOTED</b>` : '') +
-      (() => { const u = addResearch(xp.gained); return ` <span class="rp">+${xp.gained.toLocaleString()} RP</span>` + u.map(n => ` <b class="promo">${esc(n.names[0].toUpperCase())} / ${esc(n.names[1].toUpperCase())} UNLOCKED</b>`).join(''); })() +
-      CAMOS.filter(c => c.rank > xp.before.level && c.rank <= xp.after.level).map(c => ` <b class="promo">${c.name.toUpperCase()} CAMO UNLOCKED</b>`).join('') +
-      (xp.after.next ? `<span class="xpbar"><i style="width:${Math.round(xp.after.cur / xp.after.next * 100)}%"></i></span>` : '');
+      `<div class="chips">${chips.join('')}</div>`;
     $('endBoard').innerHTML = this.boardHtml(game);
+    $('endXp').classList.remove('promoted');
+    el.dataset.result = win ? 'win' : (uc || a < e) ? 'lose' : 'draw';
+    this.revealEnd(xp, win);
     $('again').classList.toggle('hidden', game.role === 'client');
     $('endNote').textContent = game.role === 'client' ? 'Waiting for the host to start the next match.' : game.role === 'host' ? 'Play again restarts the match for everyone in the lobby.' : '';
     this.root.classList.add('hidden');
     $('scoreboard').classList.add('hidden');
     this.hideDeath();
+  }
+
+  // End screen choreography: the title lands, stats count up one after another, then the
+  // XP bar fills (rolling over through a promotion), with a quiet sound for each beat
+  revealEnd(xp, win) {
+    const token = this.endToken = (this.endToken || 0) + 1;
+    const alive = () => this.endToken === token && !$('end').classList.contains('hidden');
+    const later = (ms, fn) => setTimeout(() => { if (alive()) fn(); }, ms);
+    const cells = [...$('endStats').querySelectorAll('b[data-v]')];
+    (win ? this.audio.victory : this.audio.defeat)?.call(this.audio);
+    cells.forEach((b, i) => later(500 + i * 140, () => {
+      const target = +b.dataset.v, t0 = performance.now(), dur = 520;
+      this.audio.tick?.();
+      const step = () => {
+        if (!alive()) return;
+        const k = Math.min(1, (performance.now() - t0) / dur);
+        b.textContent = Math.round(target * (1 - (1 - k) ** 3)).toLocaleString();
+        if (k < 1) requestAnimationFrame(step);
+      };
+      step();
+    }));
+    const fill = $('xpFill');
+    if (!fill) return;
+    const at = 600 + cells.length * 140 + 350;
+    const pct = xp.after.next ? xp.after.cur / xp.after.next * 100 : 100;
+    if (xp.promoted) {
+      later(at, () => { fill.style.width = '100%'; });
+      later(at + 900, () => {
+        this.audio.promote?.();
+        $('endXp').classList.add('promoted');
+        fill.style.transition = 'none'; fill.style.width = '0%';
+        void fill.offsetWidth;
+        fill.style.transition = ''; fill.style.width = `${pct}%`;
+      });
+    } else later(at, () => { fill.style.width = `${pct}%`; });
   }
 
   boardHtml(game) {
@@ -383,8 +457,13 @@ export class Hud {
     if (pl.alive) {
       const w = ars.w, d = w.def;
       $('wname').textContent = d.name + (d.auto || d.action || d.launcher ? '' : d.burst ? ' · BURST' : ' · SEMI');
-      $('mag').textContent = w.mag;
-      $('mag').className = w.mag <= Math.ceil(d.mag * 0.25) ? 'low' : '';
+      if (w.mag !== this.lastMag) { if (w.mag < this.lastMag) this.magPulse = 1; this.lastMag = w.mag; $('mag').textContent = w.mag; }
+      this.magPulse *= Math.exp(-dt * 14);
+      $('mag').style.transform = `scale(${1 + this.magPulse * 0.1})`;
+      $('mag').className = w.mag === 0 ? 'low empty' : w.mag <= Math.ceil(d.mag * 0.25) ? 'low' : '';
+      const rl = ars.reload;
+      $('reloadBar').style.width = rl && rl.dur ? `${Math.min(100, rl.t / rl.dur * 100)}%` : '0%';
+      $('reloadBar').parentElement.classList.toggle('show', !!(rl && rl.dur));
       $('reserve').textContent = w.reserve;
       $('nades').innerHTML = '<i></i>'.repeat(ars.frags);
       let hint = '';
@@ -469,7 +548,7 @@ export class Hud {
 
     // killstreaks and vehicle call-ins
     const next = STREAKS.find(s => s.kills > pl.streak);
-    $('streaks').innerHTML = STREAKS.map(s => {
+    setHtml($('streaks'), STREAKS.map(s => {
       const have = pl.rewards.filter(r => r === s.id).length;
       const cls = have ? 'ready' : pl.streak >= s.kills ? 'done' : '';
       return `<div class="sk ${cls}"><kbd>${s.key}</kbd><span>${s.name}</span><em>${have ? (have > 1 ? `x${have}` : 'READY') : s.kills}</em></div>`;
@@ -477,9 +556,14 @@ export class Hud {
       CALLS.map(c => {
         const cd = pl.vcool?.[c.id] || 0;
         return `<div class="sk call ${cd > 0 ? '' : 'ready'}"><kbd>${c.key}</kbd><span>${c.id === 'drone' ? (game.player.fpv === 'drone10' ? '10" FPV' : '5" FPV') : c.id === 'recon' ? c.name : c.id === 'tank' ? vehicleName(game.settings.ground || 'apc', game.player.team) : c.id === 'jet' ? vehicleName(game.player.jetKind || 'attacker', game.player.team) : c.id === 'heli' ? vehicleName('gunship', game.player.team) : vehicleName(c.id, game.player.team)}</span><em>${cd > 0 ? `${Math.ceil(cd)}s` : 'READY'}</em></div>`;
-      }).join('');
+      }).join(''));
 
-    if (!pl.alive) $('respawnIn').textContent = `Respawning in ${Math.max(0, game.deadT).toFixed(1)}`;
+    if (!pl.alive) {
+      const left = Math.max(0, game.deadT);
+      if (left > this.deadMax) this.deadMax = left;
+      $('respawnIn').innerHTML = `Respawning in <b>${left.toFixed(1)}</b><span class="rbar"><i style="width:${this.deadMax ? (1 - left / this.deadMax) * 100 : 0}%"></i></span>`;
+    } else this.deadMax = 0;
+    if (this.introT > 0 && (this.introT -= dt) <= 0) $('intro').className = 'out';
 
     $('uavTag').className = game.uav[pl.team] > 0 ? 'show ally' : game.uav[1 - pl.team] > 0 ? 'show enemy' : '';
     $('uavTag').textContent = game.uav[pl.team] > 0 ? 'UAV' : 'ENEMY UAV';
