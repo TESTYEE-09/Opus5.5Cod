@@ -12,7 +12,7 @@ export class Input {
     this.last = 'keyboard';
     addEventListener('keydown', (e) => {
       if (e.repeat) return;
-      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Tab'].includes(e.code)) e.preventDefault();
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Tab', 'Backspace'].includes(e.code) && !/INPUT|SELECT/.test(e.target?.tagName ?? '')) e.preventDefault();
       this.keys.add(e.code); this.pressed.add(e.code); this.last = 'keyboard';
     });
     addEventListener('keyup', (e) => this.keys.delete(e.code));
@@ -21,6 +21,9 @@ export class Input {
 
   // one-shot presses since the last frame (keyboard codes or pad buttons as 'pad:N')
   took(code) { return this.pressed.has(code); }
+
+  // gamepad button held (standard mapping index)
+  pressedPad(i) { return !!this.padPrev[i]; }
 
   update(dt) {
     const k = this.keys, s = this.state;
@@ -43,6 +46,7 @@ export class Input {
         analog = true;
       }
       p.buttons.forEach((btn, i) => { if (btn.pressed && !this.padPrev[i]) this.pressed.add(`pad:${i}`); this.padPrev[i] = btn.pressed; });
+      this.padLookBack = !!p.buttons[11]?.pressed;
     }
     const T = this.touch;
     if (T.active) { thr = Math.max(thr, T.throttle); brk = Math.max(brk, T.brake); st = st || T.steer; hb = Math.max(hb, T.handbrake); analog = T.analog; }

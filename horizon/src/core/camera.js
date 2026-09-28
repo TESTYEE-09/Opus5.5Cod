@@ -69,13 +69,14 @@ export class CarCamera {
       if (this.view === 'cockpit') fov = 70;
     }
     // shake with speed and bumps
-    this.shake = Math.max(this.shake * Math.exp(-dt * 5), Math.min(1, veh.lastImpact * 0.08));
+    this.shake = Math.max(this.shake * Math.exp(-dt * 5), Math.min(1, veh.lastImpact * 0.08) * (this.shakeScale ?? 1));
     veh.lastImpact *= Math.exp(-dt * 10);
-    const sh = Math.max(0, speed - 45) * 0.0012 + this.shake * 0.05;
+    const sh = (Math.max(0, speed - 45) * 0.0012 + this.shake * 0.05) * (this.shakeScale ?? 1);
     if (sh > 0) {
       const t = performance.now() / 1000;
       this.cam.rotateX(Math.sin(t * 37) * sh * 0.3); this.cam.rotateY(Math.sin(t * 29 + 1) * sh * 0.3);
     }
+    fov += this.fovOffset ?? 0;
     this.fov += (fov - this.fov) * Math.min(1, dt * 2.5);
     if (Math.abs(this.cam.fov - this.fov) > 0.01) { this.cam.fov = this.fov; this.cam.updateProjectionMatrix(); }
   }

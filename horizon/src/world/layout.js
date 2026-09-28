@@ -74,7 +74,7 @@ export const ROADS = [
     ],
   },
   {
-    id: 'circuit', type: 'circuit', name: 'Horizon Circuit', loop: true, pts: [
+    id: 'circuit', type: 'circuit', name: 'Sunrise Circuit', loop: true, pts: [
       [520, -1000], [900, -960], [1300, -950], [1560, -980], [1650, -1060], [1600, -1150], [1450, -1170],
       [1380, -1250], [1440, -1360], [1580, -1440], [1560, -1540], [1380, -1560], [1180, -1470], [1040, -1330],
       [880, -1360], [720, -1480], [560, -1440], [470, -1300], [500, -1160],
@@ -88,8 +88,9 @@ export const ROADS = [
 
 // Minato street grid (flat, 8 m), linked to the festival road and the coast road.
 const gx = [700, 880, 1060, 1240, 1420, 1600], gz = [40, 220, 400, 580, 760, 920];
-for (const x of gx) ROADS.push({ id: `c-ns${x}`, type: 'street', name: `${x / 20 | 0}-chome Dori`, pts: gz.map((z) => [x, z]) });
-for (const z of gz) ROADS.push({ id: `c-ew${z}`, type: 'street', name: 'Minato Avenue', pts: gx.map((x) => [x, z]) });
+const NS = ['Chuo-dori', 'Showa-dori', 'Ginza-dori', 'Harumi-dori', 'Sotobori-dori', 'Meiji-dori'], EW = ['Yasukuni-dori', 'Aoyama-dori', 'Roppongi-dori', 'Omotesando', 'Koen-dori', 'Hibiya-dori'];
+gx.forEach((x, i) => ROADS.push({ id: `c-ns${x}`, type: 'street', name: NS[i % NS.length], pts: gz.map((z) => [x, z]) }));
+gz.forEach((z, i) => ROADS.push({ id: `c-ew${z}`, type: 'street', name: EW[i % EW.length], pts: gx.map((x) => [x, z]) }));
 ROADS.push({ id: 'citylink', type: 'highway', name: 'Harbour Road', pts: [[700, 920], [480, 1000], [200, 1060], [-10, 1080], [-130, 1060]] });
 ROADS.push({ id: 'citysouth', type: 'street', name: 'Pier Street', pts: [[1240, 920], [1240, coastZ(1240) - 140 - 25 * Math.sin(1240 / 300)]] });
 ROADS.push({ id: 'citywest', type: 'highway', name: 'Canal Road', pts: [[160, 80], [420, 60], [700, 40]] });

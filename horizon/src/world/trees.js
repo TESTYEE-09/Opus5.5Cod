@@ -204,16 +204,16 @@ export class Forest {
       const lm = new THREE.Mesh(s.geo.leaves, new THREE.MeshStandardMaterial({ map: s.leafMat.map, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.9 }));
       const wm = new THREE.Mesh(s.geo.wood, new THREE.MeshStandardMaterial({ color: 0x4a3a2e, roughness: 1 }));
       scene.add(lm, wm);
-      renderer.setViewport(i * cell, 0, cell, cell);
-      renderer.setScissor(i * cell, 0, cell, cell); renderer.setScissorTest(true);
+      // render-target viewports are in real pixels (the renderer's own are scaled by pixel ratio)
+      rt.viewport.set(i * cell, 0, cell, cell); rt.scissor.set(i * cell, 0, cell, cell); rt.scissorTest = true;
+      renderer.setRenderTarget(rt);
       renderer.render(scene, cam);
       scene.remove(lm, wm);
     });
-    renderer.setScissorTest(false);
+    rt.viewport.set(0, 0, rt.width, rt.height); rt.scissorTest = false;
     renderer.setRenderTarget(prevTarget);
     renderer.setClearColor(prevClear, prevAlpha);
     renderer.toneMapping = prevTone;
-    renderer.setViewport(0, 0, renderer.domElement.width, renderer.domElement.height);
     // one instanced quad per tree
     const n = this.list.length;
     const quad = new THREE.PlaneGeometry(1, 1); quad.translate(0, 0.5, 0);
@@ -269,7 +269,8 @@ export class Forest {
       this.impostorMat.uniforms.fogColor.value.copy(f.color);
       this.impostorMat.uniforms.fogDensity.value = f.density;
       const L = this.impostorMat.uniforms.uLight.value;
-      L.setRGB(0.25, 0.27, 0.3).addScaledVector(sunLight.color, sunLight.intensity * 0.18);
+      const k = sunLight.intensity * 0.18, c = sunLight.color;
+      L.setRGB(0.25 + c.r * k, 0.27 + c.g * k, 0.3 + c.b * k);
     }
     if (Math.hypot(cam.x - this.lastX, cam.z - this.lastZ) < 24) return;
     this.lastX = cam.x; this.lastZ = cam.z;

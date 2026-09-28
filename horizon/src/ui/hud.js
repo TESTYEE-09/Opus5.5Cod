@@ -18,6 +18,9 @@ export class Hud {
       <div class="hud-road" id="hudRoad"></div>
       <canvas class="hud-tacho" id="hudTacho" width="520" height="520"></canvas>
       <div class="hud-center" id="hudCenter"></div>
+      <div class="hud-prompt hidden" id="hudPrompt"></div>
+      <div class="hud-stunt hidden" id="hudStunt"><b id="stName"></b><span id="stVal"></span></div>
+      <div class="hud-radio" id="hudRadio"></div>
     `;
     this.tacho = root.querySelector('#hudTacho').getContext('2d');
     this.mapCtx = root.querySelector('#hudMap').getContext('2d');
@@ -40,8 +43,16 @@ export class Hud {
       const o = (j * S + i) * 4;
       const x = -HALF + (i / S) * SIZE, z = -HALF + (j / S) * SIZE;
       const lake = Math.hypot(x - PLACES.lake.x, z - PLACES.lake.z) < PLACES.lake.r && h < PLACES.lake.water;
-      if (h < 0 || lake) { img.data[o] = 18; img.data[o + 1] = 40; img.data[o + 2] = 62; }
-      else { const k = clamp(0.55 + h / 500, 0.5, 1); img.data[o] = 34 * k; img.data[o + 1] = 44 * k; img.data[o + 2] = 40 * k; }
+      if (h < 0 || lake) { img.data[o] = 22; img.data[o + 1] = 52; img.data[o + 2] = 84; }
+      else {
+        // hillshade from the north-west plus a little elevation tint
+        const ii = Math.round((i * (N - 1)) / S), jj = Math.round((j * (N - 1)) / S);
+        const hx = W.H[jj * N + Math.min(N - 1, ii + 1)] - W.H[jj * N + Math.max(0, ii - 1)];
+        const hz = W.H[Math.min(N - 1, jj + 1) * N + ii] - W.H[Math.max(0, jj - 1) * N + ii];
+        const sh = clamp(1 - (hx + hz) * 0.035, 0.55, 1.45);
+        const k = clamp(0.8 + h / 600, 0.8, 1.3) * sh;
+        img.data[o] = 44 * k; img.data[o + 1] = 60 * k; img.data[o + 2] = 54 * k;
+      }
       img.data[o + 3] = 255;
     }
     g.putImageData(img, 0, 0);
@@ -80,6 +91,32 @@ export class Hud {
   }
 
   center(html) { this.$('hudCenter').innerHTML = html ?? ''; }
+
+  // "press to start" card near an event
+  prompt(html, onTap) {
+    const el = this.$('hudPrompt');
+    el.classList.toggle('hidden', !html);
+    el.innerHTML = html ?? '';
+    el.onclick = onTap ?? null;
+  }
+
+  race(pos, of, lap, time) {
+    this.$('rPos').innerHTML = `${pos}<small>/${of}</small>`;
+    this.$('rLap').textContent = lap;
+    this.$('rTime').textContent = time;
+  }
+
+  stunt(name, val) {
+    const el = this.$('hudStunt');
+    el.classList.toggle('hidden', !name);
+    if (name) { this.$('stName').textContent = name; this.$('stVal').textContent = val; }
+  }
+
+  radio(name, song) {
+    const el = this.$('hudRadio');
+    el.innerHTML = name ? `<b>${name}</b><span>${song ?? ''}</span>` : '';
+    el.classList.remove('show'); void el.offsetWidth; if (name) el.classList.add('show');
+  }
 
   update(dt, s) {
     this.drawTacho(s);

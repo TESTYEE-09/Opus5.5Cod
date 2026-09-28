@@ -34,7 +34,8 @@ export class GlbCar {
 
   async load() {
     const def = this.def, o = this.opts;
-    const [gltf, meta] = await loadModel(def.model);
+    // opponents and traffic use the lighter LOD model
+    const [gltf, meta] = await loadModel(o.lod ? `${def.model}_lod` : def.model);
     this.meta = meta;
     const src = gltf.scene.clone(true);
     const m = def.materials ?? {};

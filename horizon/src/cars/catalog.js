@@ -5,6 +5,14 @@
 // real rpm to bank rpm, chosen so the firing frequency matches (a V10 on the V12 bank plays at
 // 5/6 of its rpm, a V10 on a V8 bank at 5/4).
 import c8z06 from './defs/c8z06.js';
+import c6zr1 from './defs/c6zr1.js';
+import c5z06 from './defs/c5z06.js';
+import zr1x from './defs/zr1x.js';
+import zr1 from './defs/zr1.js';
+import eray from './defs/eray.js';
+import nsx from './defs/nsx.js';
+import nsxr from './defs/nsxr.js';
+import vipergts from './defs/vipergts.js';
 
 // A plausible full-load torque curve from peak torque and peak power.
 export function torqueCurve({ nm, nmRpm, hp, hpRpm, idle = 900, redline, flat = 0 }) {
@@ -25,11 +33,10 @@ export const CLASSES = ['D', 'C', 'B', 'A', 'S1', 'S2', 'X'];
 export function perfIndex(c) {
   const P = c.phys;
   const pw = (c.hp * hpToW) / P.mass; // W/kg
-  const grip = P.grip ?? 1.1;
-  const aero = ((P.aero?.clF ?? 0) + (P.aero?.clR ?? 0)) * 0.6;
-  const drive = P.drive === 'AWD' ? 1.06 : 1;
-  const raw = Math.pow(pw, 0.62) * 70 * Math.pow(grip, 1.3) * drive + aero * 40;
-  return Math.max(100, Math.min(999, Math.round(raw * 1.0)));
+  const aero = (P.aero?.clF ?? 0) + (P.aero?.clR ?? 0);
+  // log fit through reference cars: Wrangler ~560, C7 ~770, Z06 ~860, LaFerrari ~950
+  const raw = -600 + 250 * Math.log(pw) + ((P.grip ?? 1.1) - 1.1) * 150 + aero * 8 + (P.drive === 'AWD' ? 15 : 0);
+  return Math.max(100, Math.min(999, Math.round(raw)));
 }
 export function classOf(pi) {
   return pi <= 500 ? 'D' : pi <= 600 ? 'C' : pi <= 700 ? 'B' : pi <= 800 ? 'A' : pi <= 900 ? 'S1' : pi <= 998 ? 'S2' : 'X';
@@ -48,6 +55,100 @@ export const CARS = [
       gears: [2.91, 1.76, 1.22, 0.96, 0.78, 0.65, 0.55, 0.46], final: 5.56, reverse: 2.9, shift: 0.09, lsd: 0.5,
       brake: { torque: 5200, bias: 0.6 }, aero: { cd: 0.39, area: 2.05, clF: 0.55, clR: 0.95 },
       susp: { freqF: 2.3, freqR: 2.5, damp: 0.34, arbF: 0.6, arbR: 0.4, rest: 0.2, travel: 0.09, droop: 0.07 },
+    }),
+  },
+  {
+    id: 'zr1x', make: 'Chevrolet', model: 'Corvette ZR1X', year: 2026, country: 'USA', price: 207400, rarity: 'Forza Edition', group: 'Corvette',
+    hp: 1250, def: zr1x, desc: 'The most powerful Corvette ever: the ZR1\'s twin-turbo LT7 plus an electric front axle. 1,250 hp, all-wheel drive, under two seconds to 60 and over 230 mph.',
+    engine: '5.5L twin-turbo LT7 V8 + front e-motor', sound: { bank: 'v8f', ratio: 1.0, turbo: 1.1 },
+    phys: std({
+      mass: 1790, cgH: 0.43, wf: 0.42, drive: 'RWD', grip: 1.3,
+      engine: { idle: 1000, redline: 7500, limiter: 7550, inertia: 0.17, revRate: 13000, launch: 3600, turbo: 1, boostRpm: 2600, curve: torqueCurve({ nm: 1123, nmRpm: 6000, hp: 1064, hpRpm: 7000, idle: 1000, redline: 7500 }) },
+      emotor: { axle: 'front', torque: 2600, vBase: 18, vMax: 70 },
+      gears: [2.91, 1.76, 1.22, 0.96, 0.78, 0.65, 0.55, 0.46], final: 5.0, reverse: 2.9, shift: 0.07, lsd: 0.55,
+      brake: { torque: 6400, bias: 0.6 }, aero: { cd: 0.42, area: 2.05, clF: 0.8, clR: 1.3 },
+      susp: { freqF: 2.4, freqR: 2.6, damp: 0.35, arbF: 0.62, arbR: 0.42, rest: 0.2, travel: 0.09, droop: 0.07 },
+    }),
+  },
+  {
+    id: 'zr1', make: 'Chevrolet', model: 'Corvette ZR1', year: 2025, country: 'USA', price: 175000, rarity: 'Legendary', group: 'Corvette',
+    hp: 1064, def: zr1, desc: 'A 5.5-litre twin-turbo flat-plane V8 making 1,064 hp, a tunnel through the hood and a 233 mph top speed.',
+    engine: '5.5L twin-turbo LT7 V8', sound: { bank: 'v8f', ratio: 1.0, turbo: 1.1 },
+    phys: std({
+      mass: 1670, cgH: 0.43, wf: 0.4, drive: 'RWD', grip: 1.27,
+      engine: { idle: 1000, redline: 7500, limiter: 7550, inertia: 0.17, revRate: 13000, launch: 3200, turbo: 1, boostRpm: 2600, curve: torqueCurve({ nm: 1123, nmRpm: 6000, hp: 1064, hpRpm: 7000, idle: 1000, redline: 7500 }) },
+      gears: [2.91, 1.76, 1.22, 0.96, 0.78, 0.65, 0.55, 0.46], final: 5.0, reverse: 2.9, shift: 0.07, lsd: 0.55,
+      brake: { torque: 6200, bias: 0.6 }, aero: { cd: 0.4, area: 2.05, clF: 0.7, clR: 1.1 },
+      susp: { freqF: 2.4, freqR: 2.6, damp: 0.35, arbF: 0.62, arbR: 0.42, rest: 0.2, travel: 0.09, droop: 0.07 },
+    }),
+  },
+  {
+    id: 'eray', make: 'Chevrolet', model: 'Corvette E-Ray', year: 2024, country: 'USA', price: 104900, rarity: 'Epic', group: 'Corvette',
+    hp: 655, def: eray, desc: 'The first all-wheel-drive Corvette: a 6.2-litre LT2 behind you and an electric motor driving the front wheels.',
+    engine: '6.2L LT2 V8 + front e-motor', sound: { bank: 'b-v8', ratio: 1.0 },
+    phys: std({
+      mass: 1717, cgH: 0.44, wf: 0.42, drive: 'RWD', grip: 1.15,
+      engine: { idle: 800, redline: 6600, limiter: 6650, inertia: 0.19, revRate: 11000, curve: torqueCurve({ nm: 637, nmRpm: 5150, hp: 495, hpRpm: 6450, idle: 800, redline: 6600 }) },
+      emotor: { axle: 'front', torque: 2200, vBase: 18, vMax: 67 },
+      gears: [2.91, 1.76, 1.22, 0.96, 0.78, 0.65, 0.55, 0.46], final: 5.17, reverse: 2.9, shift: 0.1, lsd: 0.45,
+      brake: { torque: 5000, bias: 0.6 }, aero: { cd: 0.33, area: 2.05, clF: 0.2, clR: 0.3 },
+    }),
+  },
+  {
+    id: 'c5z06', make: 'Chevrolet', model: 'Corvette Z06', year: 2002, country: 'USA', price: 42000, rarity: 'Rare', group: 'Corvette',
+    hp: 405, def: c5z06, desc: 'The C5 Z06 fixed-roof coupe: a hand-built 5.7-litre LS6, titanium exhaust and the lightest, stiffest Corvette of its day.',
+    engine: '5.7L LS6 V8', sound: { bank: 'b-v8', ratio: 1.0 },
+    phys: std({
+      mass: 1414, cgH: 0.46, wf: 0.51, drive: 'RWD', grip: 1.08,
+      engine: { idle: 750, redline: 6500, limiter: 6600, inertia: 0.2, revRate: 10500, curve: torqueCurve({ nm: 542, nmRpm: 4800, hp: 405, hpRpm: 6000, idle: 750, redline: 6500 }) },
+      gears: [2.97, 2.07, 1.43, 1.0, 0.84, 0.56], final: 3.42, reverse: 3.28, shift: 0.22, lsd: 0.4,
+      brake: { torque: 4200, bias: 0.62 }, aero: { cd: 0.31, area: 1.95, clF: 0.05, clR: 0.1 },
+    }),
+  },
+  {
+    id: 'nsx', make: 'Honda', model: 'NSX', year: 1991, country: 'Japan', price: 120000, rarity: 'Legendary', group: 'JDM',
+    hp: 270, def: nsx, desc: 'The everyday supercar, tuned with Ayrton Senna: an all-aluminium monocoque, a titanium-rod VTEC V6 to 8,000 rpm and a canopy inspired by a fighter jet.',
+    engine: '3.0L C30A VTEC V6', sound: { bank: 'su-oe', ratio: 1.0 },
+    phys: std({
+      mass: 1365, cgH: 0.44, wf: 0.42, drive: 'RWD', grip: 1.05,
+      engine: { idle: 800, redline: 8000, limiter: 8100, inertia: 0.14, revRate: 13500, curve: torqueCurve({ nm: 284, nmRpm: 5400, hp: 270, hpRpm: 7100, idle: 800, redline: 8000 }) },
+      gears: [3.07, 1.96, 1.43, 1.13, 0.91], final: 4.06, reverse: 3.0, shift: 0.18, lsd: 0.35,
+      brake: { torque: 3600, bias: 0.62 }, aero: { cd: 0.32, area: 1.8, clF: 0.05, clR: 0.12 },
+      susp: { freqF: 1.9, freqR: 2.1, damp: 0.32, arbF: 0.5, arbR: 0.3, rest: 0.22, travel: 0.1, droop: 0.08 },
+    }),
+  },
+  {
+    id: 'nsxr', make: 'Honda', model: 'NSX-R', year: 1992, country: 'Japan', price: 250000, rarity: 'Legendary', group: 'JDM',
+    hp: 280, def: nsxr, desc: 'Type R: 120 kg lighter, carbon Recaros, a blueprinted engine and a stiffer chassis honed at Suzuka. Championship White, of course.',
+    engine: '3.0L C30A VTEC V6 (blueprinted)', sound: { bank: 'su-oe', ratio: 1.0 },
+    phys: std({
+      mass: 1230, cgH: 0.43, wf: 0.42, drive: 'RWD', grip: 1.1,
+      engine: { idle: 900, redline: 8000, limiter: 8100, inertia: 0.12, revRate: 15000, curve: torqueCurve({ nm: 294, nmRpm: 5400, hp: 280, hpRpm: 7300, idle: 900, redline: 8000 }) },
+      gears: [3.07, 2.05, 1.52, 1.19, 0.97], final: 4.24, reverse: 3.0, shift: 0.15, lsd: 0.5,
+      brake: { torque: 3700, bias: 0.62 }, aero: { cd: 0.32, area: 1.8, clF: 0.08, clR: 0.15 },
+      susp: { freqF: 2.2, freqR: 2.4, damp: 0.34, arbF: 0.6, arbR: 0.35, rest: 0.2, travel: 0.09, droop: 0.07 },
+    }),
+  },
+  {
+    id: 'vipergts', make: 'Dodge', model: 'Viper GTS', year: 1996, country: 'USA', price: 95000, rarity: 'Legendary', group: 'Muscle',
+    hp: 450, def: vipergts, desc: 'An 8.0-litre V10, no traction control, no ABS and no apologies. Viper Blue with Stone White stripes.',
+    engine: '8.0L V10', sound: { bank: 'b-v8', ratio: 1.25 },
+    phys: std({
+      mass: 1535, cgH: 0.45, wf: 0.5, drive: 'RWD', grip: 1.08,
+      engine: { idle: 700, redline: 6000, limiter: 6100, inertia: 0.28, revRate: 8000, curve: torqueCurve({ nm: 664, nmRpm: 3700, hp: 450, hpRpm: 5200, idle: 700, redline: 6000, flat: 600 }) },
+      gears: [2.66, 1.78, 1.3, 1.0, 0.74, 0.5], final: 3.07, reverse: 2.9, shift: 0.25, lsd: 0.45,
+      brake: { torque: 4400, bias: 0.64 }, aero: { cd: 0.35, area: 2.0, clF: 0.02, clR: 0.06 },
+    }),
+  },
+  {
+    id: 'c6zr1', make: 'Chevrolet', model: 'Corvette ZR1', year: 2009, country: 'USA', price: 105000, rarity: 'Epic', group: 'Corvette',
+    hp: 638, def: c6zr1, desc: 'The "Blue Devil": a supercharged 6.2-litre LS9, carbon fibre everywhere, and a little window in the hood so you can admire the blower.',
+    engine: '6.2L supercharged LS9 V8', sound: { bank: 'b-v8', ratio: 1.0, whine: 1 },
+    phys: std({
+      mass: 1506, cgH: 0.45, wf: 0.52, drive: 'RWD', grip: 1.2,
+      engine: { idle: 750, redline: 6600, limiter: 6700, inertia: 0.2, revRate: 11000, launch: 2800, curve: torqueCurve({ nm: 819, nmRpm: 3800, hp: 638, hpRpm: 6500, idle: 750, redline: 6600 }) },
+      gears: [2.29, 1.61, 1.21, 1.0, 0.81, 0.67], final: 3.42, reverse: 2.9, shift: 0.2, lsd: 0.45,
+      brake: { torque: 5200, bias: 0.62 }, aero: { cd: 0.36, area: 2.0, clF: 0.18, clR: 0.3 },
     }),
   },
   {
@@ -168,5 +269,34 @@ export const CARS = [
   },
 ];
 
-for (const c of CARS) { c.pi = perfIndex(c); c.cls = classOf(c.pi); c.name = `${c.year} ${c.make} ${c.model}`; }
+// Solve each car's drag so its drag-limited top speed matches the published figure.
+function calibrate(c) {
+  const P = c.phys;
+  if (!c.vmax || !P.aero) return;
+  const v = c.vmax / 3.6;
+  const power = c.hp * hpToW * 0.86;
+  const roll = (P.roll ?? 0.012) * P.mass * 9.81 + 0.012 * 0.5 * 1.2 * ((P.aero.clF ?? 0) + (P.aero.clR ?? 0)) * v * v;
+  const cda = (2 * (power / v - roll)) / (1.2 * v * v);
+  P.aero.cd = Math.max(0.2, cda / P.aero.area);
+}
+const VMAX = { zr1x: 375, zr1: 375, eray: 294, c5z06: 275, nsx: 270, nsxr: 275, vipergts: 298, c6zr1: 330, c8z06: 312, c7: 290, gts992: 309, f458: 320, laferrari: 350, huracangt3: 285, urus: 305, jeep: 175, mp45: 330, supragt300: 290 };
+for (const c of CARS) {
+  c.vmax ??= VMAX[c.id];
+  calibrate(c);
+  c.pi = perfIndex(c); c.cls = classOf(c.pi); c.name = `${c.year} ${c.make} ${c.model}`;
+}
 export const carById = (id) => CARS.find((c) => c.id === id);
+
+// FH-style 0-10 stat bars for the Autoshow and garage
+export function ratings(c) {
+  const P = c.phys, pw = (c.hp * hpToW) / P.mass;
+  const aero = (P.aero?.clF ?? 0) + (P.aero?.clR ?? 0);
+  const r = (v) => Math.max(1, Math.min(10, Math.round(v * 10) / 10));
+  const speed = r(((c.vmax ?? 250) - 140) / 22);
+  const accel = r((Math.log(pw) - 3.9) * 3.2);
+  const launch = r(accel * 0.85 + (P.drive === 'AWD' ? 1.6 : P.drive === 'FWD' ? 0.3 : 0.6) + (P.emotor ? 0.8 : 0));
+  const handling = r(((P.grip ?? 1.1) - 0.9) * 13 + aero * 0.8 - (P.mass - 1400) / 700 + (P.cgH < 0.45 ? 0.6 : 0));
+  const braking = r(((P.brake?.torque ?? 4000) / P.mass) * 1.1 + ((P.grip ?? 1.1) - 1) * 6 + aero * 0.5);
+  const offroad = r((P.offroad ? 7.5 : 2.5) + (P.susp?.travel ?? 0.1) * 12 + (P.drive === 'AWD' ? 1 : 0) - aero);
+  return { speed, handling, accel, launch, braking, offroad };
+}

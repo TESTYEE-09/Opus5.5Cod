@@ -54,7 +54,7 @@ function buildCabin(def) {
   console_.position.set(0, hip + 0.02, seatZ + 0.35);
   g.add(console_);
   // steering wheel (left-hand drive unless the car says otherwise)
-  const sx = (I.rhd ? 1 : -1) * seatX;
+  const sx = (I.rhd ? -1 : 1) * seatX;
   const wheel = new THREE.Group();
   const rim = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.018, 8, 32), imat('wheel', 0x0c0c0c, 0.5));
   const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.05, 16), imat('wheel', 0x0c0c0c, 0.5));

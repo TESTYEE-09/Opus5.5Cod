@@ -35,6 +35,13 @@ export class Audio {
     this.noise = this.makeNoise(2);
   }
 
+  // menus and results duck everything but the UI
+  duckAll(k) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    for (const b of ['engine', 'sfx']) this.bus[b].gain.setTargetAtTime(this.volumes[b] * k, t, 0.15);
+  }
+
   applyVolumes() {
     if (!this.ctx) return;
     this.master.gain.value = this.volumes.master;
@@ -107,7 +114,7 @@ export class CarSound {
       this.pan = ctx.createPanner(); this.pan.panningModel = 'HRTF'; this.pan.distanceModel = 'inverse'; this.pan.refDistance = 6; this.pan.rolloffFactor = 1.3; this.pan.maxDistance = 400;
       this.out.connect(this.pan); this.pan.connect(a.bus.engine);
     }
-    const files = await Promise.all(bank.map(([rpm]) => a.load(`../hz/sfx/eng/${S.bank in a.manifest ? S.bank : 'b-v8'}-${rpm / 1000}.mp3`)));
+    const files = await Promise.all(bank.map(([rpm]) => a.load(`../hz/sfx/eng/${S.bank in a.manifest ? S.bank : 'b-v8'}-${Math.floor(rpm / 1000)}.mp3`)));
     this.layers = [];
     const use = this.player ? bank.map((_, i) => i) : bank.map((_, i) => i);
     for (const i of use) {
@@ -235,6 +242,13 @@ export class CarSound {
       this.roadF.frequency.setTargetAtTime(200 + sp * 12, t, 0.1);
       // shifts and bumps
       if (veh.gear !== this.prevGear && veh.gear > 0 && this.prevGear > 0) this.a.oneShot(`shift${1 + ((Math.random() * 3) | 0)}`, { gain: 0.35, rate: 0.9 + Math.random() * 0.2 });
+      // crashes: heavier samples for bigger hits, a scrape for glancing ones
+      for (const e of veh.events) {
+        if (e.type !== 'hit') continue;
+        if (e.speed > 6) this.a.oneShot(`crash${1 + ((Math.random() * 12) | 0)}`, { gain: clamp(e.speed / 18, 0.35, 1.1), rate: 0.9 + Math.random() * 0.2 });
+        else if (e.speed > 2.5) this.a.oneShot(`bump${1 + ((Math.random() * 4) | 0)}`, { gain: clamp(e.speed / 6, 0.3, 0.9) });
+        else if (sp > 6) this.a.oneShot('scrape', { gain: 0.45, rate: 0.9 + Math.random() * 0.2 });
+      }
       for (const w of veh.wheels) {
         const dc = w.comp - (w.lastComp ?? w.comp);
         if (dc > 0.02 && sp > 5) this.a.oneShot(`bump${1 + ((Math.random() * 4) | 0)}`, { gain: clamp(dc * 12, 0.15, 0.9) });

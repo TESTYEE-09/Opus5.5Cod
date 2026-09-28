@@ -138,7 +138,11 @@ export class Vehicle {
     const h = dt / steps;
     this.events.length = 0;
     this.controls(dt);
-    for (let i = 0; i < steps; i++) this.step(h);
+    for (let i = 0; i < steps; i++) {
+      this.step(h);
+      // static collisions at ~120 Hz so thin guardrails cannot be tunnelled through
+      if (this.onSubstep && ((i & 3) === 3 || i === steps - 1)) this.onSubstep(this);
+    }
     // derived values for HUD, audio and skills
     const fwd = this.axes[2];
     this.speed = this.vel.length();
@@ -162,7 +166,10 @@ export class Vehicle {
     } else this.reverseTimer = 0;
     // steering: limit lock with speed, rate-limit, add counter-steer
     const sp = Math.abs(v);
-    const lock = (P.steer ?? 0.62) * (A.steer > 0 ? 1 / (1 + sp / 28) + 0.08 : 1);
+    // steering assist: at speed, limit lock to about what the front tyres can use
+    const full = P.steer ?? 0.62;
+    const useful = (this.spec.dims.wb * 12) / (sp * sp + 1) + (P.anglePeak ?? 0.14) * 1.45;
+    const lock = A.steer > 0 ? Math.min(full, Math.max(0.16, useful)) : full * (1 / (1 + sp / 40) + 0.1);
     let target = inp.steer * lock;
     if (A.counter > 0 && sp > 4) {
       const lat = this.vel.dot(this.axes[0]);
@@ -281,7 +288,7 @@ export class Vehicle {
     if (A.tcs) {
       let slip = 0;
       for (const i of driven) slip = Math.max(slip, this.wheels[i].slipRatio);
-      tcCut = clamp(1 - (slip - 0.12) * 6, 0.1, 1);
+      tcCut = clamp(1 - (slip - 0.14) * 6, 0.1, 1);
     }
     if (A.stm && Math.abs(this.driftAngle) > 0.35 && vFwd > 8) tcCut *= clamp(1 - (Math.abs(this.driftAngle) - 0.35) * 2, 0.3, 1);
     let thr = throttle * tcCut;
@@ -311,7 +318,8 @@ export class Vehicle {
       eng.rpm += clamp(target - eng.rpm, -revRate * dt, revRate * dt);
       if (shifting) eng.rpm += (wheelRpm * Math.abs(this.ratio(this.nextGear) / (ratio || 1)) - eng.rpm) * Math.min(1, dt * 18);
       this.clutch = this.gear === 0 || shifting ? 0 : clamp(wheelRpm / engage, 0, 1);
-      if (this.gear !== 0 && !shifting) driveTorque = Math.max(0, thr * tGen) * ratio * (P.eff ?? 0.9) * clamp(0.35 + this.clutch, 0, 1);
+      // a slipping clutch still passes the engine's torque (launch control style)
+      if (this.gear !== 0 && !shifting) driveTorque = Math.max(0, thr * tGen) * ratio * (P.eff ?? 0.9);
     }
     eng.rpm = clamp(eng.rpm, idle * 0.8, limiter + 50);
     eng.torque = tEng;
@@ -398,7 +406,7 @@ export class Vehicle {
       const sx = kappa / kPeak;
       const s = Math.hypot(sx, sy);
       const F = Fmax * tyreCurve(s, P.slide ?? 0.78);
-      let Fx = s > 1e-6 ? (F * sx) / s : 0;
+      let Fx = s > 1e-6 ? (F * sx) / s * (P.gripLong ?? 1.12) : 0;
       let Fy = s > 1e-6 ? (-F * sy) / s : 0;
       // rolling resistance and surface drag (grass, gravel)
       Fx -= Math.sign(vx) * w.Fz * ((P.roll ?? 0.012) + (w.surface >= 2 ? 0.03 : 0));
